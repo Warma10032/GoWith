@@ -1,0 +1,385 @@
+openapi: 3.1.0
+info:
+  title: GoWith API
+  version: 0.1.0
+  description: MVP REST API for Bilibili shop discovery, admin review, publishing, and recommendation logging.
+servers:
+  - url: http://localhost:4000
+paths:
+  /health:
+    get:
+      summary: API health check
+      responses:
+        "200":
+          description: Service is healthy.
+  /api/auth/login:
+    post:
+      summary: Login with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login succeeded and an HTTP-only session cookie was set.
+  /api/auth/logout:
+    post:
+      summary: Revoke current session
+      responses:
+        "200":
+          description: Session revoked.
+  /api/auth/me:
+    get:
+      summary: Get current user
+      responses:
+        "200":
+          description: Current user or null.
+  /api/admin/dashboard:
+    get:
+      summary: Get admin workbench counters
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Dashboard counters.
+  /api/admin/bilibili-auth:
+    post:
+      summary: Store encrypted Bilibili cookie
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label, cookie]
+              properties:
+                label:
+                  type: string
+                cookie:
+                  type: string
+                csrf_token:
+                  type: string
+      responses:
+        "200":
+          description: Cookie account saved.
+  /api/admin/creators:
+    get:
+      summary: List managed creators
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Creator list.
+    post:
+      summary: Create or update a creator
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCreatorRequest"
+      responses:
+        "200":
+          description: Creator upserted.
+  /api/admin/creators/{id}/sync:
+    post:
+      summary: Enqueue creator video sync
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: Pipeline job enqueued.
+  /api/admin/videos:
+    get:
+      summary: List admin video tasks
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Video list.
+  /api/admin/videos/{id}:
+    get:
+      summary: Get video detail, transcript segments, candidates, and review tasks
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: Video detail.
+  /api/admin/videos/{id}/retry-asr:
+    post:
+      summary: Retry ASR for a video
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: ASR job enqueued.
+  /api/admin/videos/{id}/retry-ai:
+    post:
+      summary: Retry AI classification and extraction for a video
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: AI job enqueued.
+  /api/admin/videos/{id}/mark-non-shop:
+    post:
+      summary: Mark video as non shop visit
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: Video updated.
+  /api/admin/shop-candidates:
+    get:
+      summary: List shop candidates
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Candidate list.
+  /api/admin/shop-candidates/{id}:
+    get:
+      summary: Get candidate detail with evidence and POI candidates
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: Candidate detail.
+    patch:
+      summary: Update candidate fields
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: Candidate updated.
+  /api/admin/shop-candidates/{id}/search-poi:
+    post:
+      summary: Enqueue POI search for a candidate
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: POI match job enqueued.
+  /api/admin/shop-candidates/{id}/select-poi:
+    post:
+      summary: Select POI for a candidate
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: Candidate matched.
+  /api/admin/shop-candidates/{id}/reject:
+    post:
+      summary: Reject a shop candidate
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: Candidate rejected.
+  /api/admin/shops:
+    get:
+      summary: List shops
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Shop list.
+  /api/admin/shops/{id}:
+    patch:
+      summary: Update shop fields
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: Shop updated.
+  /api/admin/shops/{id}/publish:
+    post:
+      summary: Publish shop and create immutable snapshot
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: Shop published.
+  /api/admin/shops/merge:
+    post:
+      summary: Merge shops placeholder
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Merge placeholder acknowledged.
+  /api/shops/recommended:
+    get:
+      summary: Get rule-based recommended shops
+      responses:
+        "200":
+          description: Recommendation request and ranked shops.
+  /api/shops/map:
+    get:
+      summary: Get published shops in a map viewport
+      parameters:
+        - name: min_lng
+          in: query
+          schema: { type: number }
+        - name: min_lat
+          in: query
+          schema: { type: number }
+        - name: max_lng
+          in: query
+          schema: { type: number }
+        - name: max_lat
+          in: query
+          schema: { type: number }
+      responses:
+        "200":
+          description: Published shop pins.
+  /api/shops/{id}:
+    get:
+      summary: Get public shop detail
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: Published shop detail.
+  /api/creators:
+    get:
+      summary: List public creators
+      responses:
+        "200":
+          description: Active creator list.
+  /api/creators/{id}:
+    get:
+      summary: Get creator and published shops
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: Creator detail.
+  /api/users/events:
+    post:
+      summary: Write user behavior event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserEventRequest"
+      responses:
+        "200":
+          description: Event stored.
+  /api/users/favorites:
+    post:
+      summary: Favorite, want-to-go, or visited action
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FavoriteRequest"
+      responses:
+        "200":
+          description: Favorite action stored.
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: gowith_session
+  parameters:
+    UuidId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+    CreateCreatorRequest:
+      type: object
+      required: [bilibili_uid]
+      properties:
+        bilibili_uid:
+          type: string
+        name:
+          type: string
+    UserEventRequest:
+      type: object
+      required: [event_name, surface]
+      properties:
+        event_name:
+          type: string
+        surface:
+          type: string
+        shop_id:
+          type: string
+          format: uuid
+        creator_id:
+          type: string
+          format: uuid
+        video_id:
+          type: string
+          format: uuid
+        recommendation_request_id:
+          type: string
+          format: uuid
+        recommendation_item_id:
+          type: string
+          format: uuid
+        anonymous_id:
+          type: string
+        event_payload:
+          type: object
+    FavoriteRequest:
+      type: object
+      required: [shop_id, action_type]
+      properties:
+        shop_id:
+          type: string
+          format: uuid
+        action_type:
+          type: string
+          enum: [favorite, want_to_go, visited]
+        note:
+          type: string
