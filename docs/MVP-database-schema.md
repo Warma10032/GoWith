@@ -33,7 +33,7 @@
 数据库：PostgreSQL 16+  
 扩展：PostGIS、pgcrypto、pg_trgm；向量检索可后续加 pgvector。
 
-推荐扩展：
+推荐扩展（已在 `db/migrations/001_extensions_and_base.sql` 中 `CREATE EXTENSION IF NOT EXISTS`）：
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS postgis;
@@ -47,13 +47,33 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `id` | uuid | 主键，默认 `gen_random_uuid()` |
-| `created_at` | timestamptz | 创建时间 |
-| `updated_at` | timestamptz | 更新时间 |
+| `created_at` | timestamptz | 创建时间，默认 `now()` |
+| `updated_at` | timestamptz | 更新时间，由 `set_updated_at()` 触发器自动维护（见下） |
 | `deleted_at` | timestamptz/null | 软删除，可选 |
 | `status` | text | 状态枚举，业务层校验 |
 | `metadata` | jsonb | 低频扩展字段 |
 
 MVP 建议用 `text + CHECK` 或业务层枚举，而不是大量 PostgreSQL enum。原因是 AI 状态、风险标记、审核状态还会快速迭代。
+
+### 2.1 `set_updated_at()` 触发器函数
+
+`db/migrations/001_extensions_and_base.sql` 定义了一个全局 `set_updated_at()` 函数：
+
+```sql
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS trigger AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+下列表在各自 migration 内 `DROP TRIGGER IF EXISTS ... ; CREATE TRIGGER ... BEFORE UPDATE ... EXECUTE FUNCTION set_updated_at();` 挂上触发器：`users`、`bilibili_auth_accounts`、`creators`、`videos`、`jobs`、`video_text_assets`、`shop_candidates`、`pois`、`shops`、`shop_insights`、`review_tasks`、`user_favorites`。
+
+没有触发器的表（写入一次性，不应自动更新时间戳）：`auth_sessions`（不更新）、`raw_ingest_payloads`（不更新）、`video_text_segments`（append-only）、`video_comments`（append-only）、`ai_runs`（append-only）、`video_classifications`、`comment_signal_extractions`、`ai_video_analyses`、`evidence`（append-only）、`shop_aliases`、`shop_video_mentions`、`published_shop_snapshots`、`creator_follows`、`recommendation_requests`、`recommendation_items`、`user_events`、`poi_match_attempts`、`poi_match_candidates`。
+
+修改任何带触发器的表时要意识到 `updated_at` 会被自动覆写。
 
 ## 3. 分层总览
 
@@ -1246,4 +1266,46 @@ LIMIT 20;
 - 第二个 migration 加 AI 与候选店铺表。
 - 第三个 migration 加 POI/shops/review。
 - 第四个 migration 加推荐日志。
+
+实际落地：
+
+- 迁移执行器：`scripts/migrate.ts` 按文件名顺序应用，建立 `schema_migrations(id, applied_at)` 表幂等追踪；每次启动 `pnpm db:migrate` 即可。
+- 数据库 schema 是 ground truth；`packages/db/src/schema.ts`（Kysely 类型镜像）必须与之一致，详见 §19.5。
+
+## 19.5 `pois.geom` / `shops.geom` 与坐标列
+
+实际 migration 把 `geom` 实现为 **GENERATED ALWAYS AS STORED**，从 `lng` / `lat` 自动计算，禁止手动写入：
+
+```sql
+geom geometry(Point, 4326) GENERATED ALWAYS AS (
+  ST_SetSRID(ST_MakePoint(lng::double precision, lat::double precision), 4326)
+) STORED
+```
+
+应用层（`apps/api/src/routes/public.ts` 的 `/api/shops/map`）用 `geom && ST_MakeEnvelope(...)` 做视窗查询，必须保证前端传入的视窗坐标与 `coord_type` 同坐标系（默认 GCJ-02）。
+
+`packages/db/src/schema.ts` 当前**未暴露** `geom` 字段（类型镜像只有 `lng`/`lat`/`coord_type`）。若在 TS 侧需要用 `geom`，先在 `schema.ts` 加 `geom` 字段（`Generated<...>`），再从 Kysely 拼 SQL（不要尝试插入）。
+
+## 20. `packages/db/src/schema.ts` 与 SQL 的已知 drift
+
+`packages/db/src/schema.ts` 是 Kysely 类型镜像，部分表的列定义与 SQL 不一致。**M1 之前必须修复**，否则后续在 TS 侧写 review / shop-insights / shop-mentions 业务时会 runtime 报错。
+
+| 表 | TS 类型（`packages/db/src/schema.ts`） | SQL 实际（`db/migrations/003_*`） | 差异 | 影响 |
+| --- | --- | --- | --- | --- |
+| `shop_video_mentions` | `mention_type: "primary" \| "secondary" \| "comparison"`、无 `sentiment`/`summary`/`time_start_sec`/`time_end_sec`、无 `shop_candidate_id` | `mention_type text NOT NULL DEFAULT 'main'`、`sentiment text NOT NULL DEFAULT 'unknown'`、`summary text`、`time_start_sec numeric(10,3)`、`time_end_sec numeric(10,3)`、`shop_candidate_id uuid REFERENCES shop_candidates(id)` | 枚举值不同；缺字段；多 FK | 写 mention 时 Kysely 会因列不存在 / 类型不匹配报错 |
+| `shop_insights` | `insight_type`、`payload jsonb`、`source_video_ids`、`source_comment_ids` | `dimension`、`sentiment`、`summary`、`confidence`、`source_type`、`source_ids`、`evidence_ids`、`model_version`、`status` | 字段命名 / 含义完全不同 | 完全不能用现有 TS 类型写 insight |
+| `review_events` | `task_id`、`actor_id`、`note` | `review_task_id`、`reviewer_id`、`reason` | 字段命名不同 | 写 audit 日志时会因列名错报错 |
+| `shop_aliases` | 无 `confidence` | 有 `confidence numeric(4,3)` | 缺字段 | 影响搜索相似度权重（如后续用到） |
+| `shops` | 无 `geom` | `geom GENERATED ALWAYS AS STORED` | 缺字段（不需要写，但需要声明） | 不影响写入，但 TS 拼 SQL `ST_*` 表达式时类型推断不到 |
+| `pois` | 无 `geom` | 同上 | 同上 | 同上 |
+
+修复流程：
+
+1. `git diff packages/db/src/schema.ts db/migrations/` 列差异。
+2. **SQL 是 ground truth**：先把 TS 类型对齐 SQL 的列名、类型、`null` 性、`Generated` 标记。
+3. 若 TS 设计更合理（如 `review_events.actor_id` 比 `reviewer_id` 通用），写新 migration `db/migrations/005_review_events_rename.sql` 改 SQL，**不要**回填已部署数据库的列名。
+4. 同步更新本文件 §3 ER 图与对应章节。
+5. CI 加静态检查（`grep -E "review_events\.\(task_id\|actor_id\|note\)" packages/` 应为空）。
+
+修复顺序建议：先 `review_events`（最常用），再 `shop_video_mentions`（review 流程依赖），最后 `shop_insights`（暂未用）、`shop_aliases`（次要）。
 
