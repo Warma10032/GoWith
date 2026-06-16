@@ -1,0 +1,33 @@
+{
+  "name": "gowith",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "dev": "concurrently -n web,api,worker,ai -c blue,green,yellow,magenta \"pnpm --filter @gowith/web dev\" \"pnpm --filter @gowith/api dev\" \"pnpm --filter @gowith/worker dev\" \"pnpm dev:ai\"",
+    "dev:web": "pnpm --filter @gowith/web dev",
+    "dev:api": "pnpm --filter @gowith/api dev",
+    "dev:worker": "pnpm --filter @gowith/worker dev",
+    "dev:ai": "uv run --project apps/ai-worker --link-mode=copy uvicorn app.main:app --app-dir apps/ai-worker --host 0.0.0.0 --port 8000 --reload",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:seed": "tsx scripts/seed-admin.ts",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "test:py": "uv run --project apps/ai-worker --link-mode=copy pytest apps/ai-worker",
+    "test:e2e": "playwright test",
+    "lint:py": "uv run --project apps/ai-worker --link-mode=copy ruff check apps/ai-worker",
+    "typecheck:py": "uv run --project apps/ai-worker --link-mode=copy mypy apps/ai-worker/app",
+    "format": "prettier --check .",
+    "format:write": "prettier --write ."
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1",
+    "@types/node": "^22.10.2",
+    "concurrently": "^9.1.0",
+    "prettier": "^3.4.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
