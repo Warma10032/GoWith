@@ -1,14 +1,52 @@
+import { readFile } from "node:fs/promises";
 import type {
   CommentSignalExtraction,
   VideoClassificationResult,
   VideoStructuredAnalysis,
 } from "@gowith/shared";
+import { env } from "../env";
 
 interface VideoInput {
   id: string;
   bvid: string;
   creator_id: string;
   title: string;
+}
+
+export interface AsrTranscriptSegment {
+  segment_id?: string | null;
+  start_sec: number;
+  end_sec: number;
+  text: string;
+  confidence?: number | null;
+}
+
+export interface AsrResponse {
+  source: "asr";
+  language: string;
+  model_provider: string;
+  model_name: string;
+  content_text: string;
+  segments: AsrTranscriptSegment[];
+}
+
+export async function transcribeAudioFile(input: {
+  filePath: string;
+  fileName: string;
+  mimeType: string;
+}): Promise<AsrResponse> {
+  const bytes = await readFile(input.filePath);
+  const formData = new FormData();
+  formData.append("file", new Blob([bytes], { type: input.mimeType }), input.fileName);
+  const response = await fetch(`${env.aiWorkerUrl}/asr/transcribe`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    const message = await response.text().catch(() => "");
+    throw new Error(`ASR request failed: ${response.status} ${message}`.trim());
+  }
+  return (await response.json()) as AsrResponse;
 }
 
 export async function classifyVideo(video: VideoInput): Promise<VideoClassificationResult> {
@@ -163,4 +201,3 @@ export async function structureVideo(video: VideoInput): Promise<VideoStructured
     ],
   };
 }
-

@@ -1,6 +1,5 @@
 import { Queue, type ConnectionOptions } from "bullmq";
-
-const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
+import { env } from "./env";
 
 function redisConnectionOptions(value: string): ConnectionOptions {
   const url = new URL(value);
@@ -14,5 +13,5 @@ function redisConnectionOptions(value: string): ConnectionOptions {
   };
 }
 
-export const connection = redisConnectionOptions(redisUrl);
+export const connection = redisConnectionOptions(env.redisUrl);
 export const pipelineQueue = new Queue("gowith-pipeline", { connection });

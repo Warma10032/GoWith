@@ -7,15 +7,18 @@ import {
   videoClassificationResultSchema,
   videoStructuredAnalysisSchema,
 } from "@gowith/shared";
-import { fetchCreatorVideos } from "../adapters/bilibili";
-import { classifyVideo, extractCommentSignals, structureVideo } from "../adapters/ai";
+import { fetchCreatorVideos, fetchVideoAudioForAsr, type TranscriptSegment } from "../adapters/bilibili";
+import { classifyVideo, extractCommentSignals, structureVideo, transcribeAudioFile } from "../adapters/ai";
 import { searchAmapPoi } from "../adapters/poi";
+import { env } from "../env";
 import { pipelineQueue } from "../queue";
 
 export async function handlePipelineJob(db: Kysely<DB>, job: Job) {
   switch (job.name) {
     case "sync_creator_videos":
       return syncCreatorVideos(db, job);
+    case "run_asr":
+      return runAsrJob(db, job);
     case "classify_video":
       return classifyVideoJob(db, job);
     case "extract_comment_signals":
@@ -31,7 +34,7 @@ export async function handlePipelineJob(db: Kysely<DB>, job: Job) {
 
 async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
   const { entityId, bilibili_uid } = job.data as { entityId: string; bilibili_uid: string };
-  const payload = await fetchCreatorVideos(bilibili_uid);
+  const payload = await fetchCreatorVideos(db, bilibili_uid);
 
   await db
     .updateTable("creators")
@@ -40,6 +43,7 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
       avatar_url: payload.avatar_url,
       bio: payload.bio,
       follower_count: payload.follower_count,
+      raw_payload_id: payload.raw_payload_id,
       last_synced_at: new Date(),
       updated_at: new Date(),
     })
@@ -53,8 +57,8 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
         id: crypto.randomUUID(),
         creator_id: entityId,
         bvid: video.bvid,
-        aid: null,
-        cid: null,
+        aid: video.aid,
+        cid: video.cid,
         title: video.title,
         description: video.description,
         cover_url: video.cover_url,
@@ -69,7 +73,7 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
         content_type: null,
         classification_confidence: null,
         risk_flags: [],
-        raw_payload_id: null,
+        raw_payload_id: video.raw_payload_id,
         last_synced_at: new Date(),
         created_at: new Date(),
         updated_at: new Date(),
@@ -79,8 +83,16 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
           title: video.title,
           description: video.description,
           cover_url: video.cover_url,
+          aid: video.aid,
+          cid: video.cid,
+          source_url: video.source_url,
+          duration_sec: video.duration_sec,
+          published_at: new Date(video.published_at),
+          tags: video.tags,
+          category: video.category,
           stats: video.stats,
           workflow_status: "metadata_synced",
+          raw_payload_id: video.raw_payload_id,
           last_synced_at: new Date(),
           updated_at: new Date(),
         }),
@@ -88,48 +100,17 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
       .returningAll()
       .executeTakeFirstOrThrow();
 
-    const text = video.transcript.map((segment) => segment.text).join("\n");
-    const hash = crypto.createHash("sha256").update(text).digest("hex");
-    const [asset] = await db
-      .insertInto("video_text_assets")
-      .values({
-        id: crypto.randomUUID(),
-        video_id: row.id,
+    if (video.transcript.length > 0) {
+      await saveTextAsset(db, {
+        videoId: row.id,
         source: "subtitle",
-        language: "zh-CN",
-        content_text: text,
-        content_sha256: hash,
+        language: video.transcript_language ?? "zh-CN",
         segments: video.transcript,
-        model_provider: null,
-        model_name: null,
-        status: "ready",
-        error_message: null,
-        object_key: null,
-        created_at: new Date(),
-        updated_at: new Date(),
-      })
-      .onConflict((oc) => oc.columns(["video_id", "source", "content_sha256"]).doNothing())
-      .returningAll()
-      .execute();
-
-    const assetId = asset?.id;
-    if (assetId) {
-      for (const [index, segment] of video.transcript.entries()) {
-        await db
-          .insertInto("video_text_segments")
-          .values({
-            id: crypto.randomUUID(),
-            asset_id: assetId,
-            video_id: row.id,
-            segment_index: index,
-            start_sec: segment.start_sec,
-            end_sec: segment.end_sec,
-            text: segment.text,
-            confidence: 0.99,
-            created_at: new Date(),
-          })
-          .execute();
-      }
+        contentText: null,
+        modelProvider: null,
+        modelName: null,
+      });
+      await db.updateTable("videos").set({ workflow_status: "subtitle_ready", updated_at: new Date() }).where("id", "=", row.id).execute();
     }
 
     for (const comment of video.comments) {
@@ -142,24 +123,129 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
           parent_comment_id: null,
           content: comment.content,
           content_sha256: crypto.createHash("sha256").update(comment.content).digest("hex"),
-          user_hash: null,
+          user_hash: comment.user_hash,
           like_count: comment.like_count,
-          reply_count: null,
-          published_at: new Date(),
+          reply_count: comment.reply_count,
+          published_at: comment.published_at ? new Date(comment.published_at) : null,
           sample_type: comment.sample_type,
           contains_location_signal: /哪|路|地址|附近|搬|闭/.test(comment.content),
           contains_shop_signal: /店|面|餐|咖啡|火锅|牛肉/.test(comment.content),
-          raw_payload_id: null,
+          raw_payload_id: comment.raw_payload_id,
           created_at: new Date(),
         })
         .onConflict((oc) => oc.column("platform_comment_id").doNothing())
         .execute();
     }
 
-    await pipelineQueue.add("classify_video", { entityType: "video", entityId: row.id }, { attempts: 3 });
+    if (video.transcript.length > 0 || !video.needs_asr || !env.bilibiliAsrEnabled) {
+      await pipelineQueue.add("classify_video", { entityType: "video", entityId: row.id }, { attempts: 3 });
+    } else {
+      await pipelineQueue.add("run_asr", { entityType: "video", entityId: row.id }, { attempts: 3 });
+    }
   }
 
   return { videos: payload.videos.length };
+}
+
+async function saveTextAsset(
+  db: Kysely<DB>,
+  input: {
+    videoId: string;
+    source: "subtitle" | "asr";
+    language: string | null;
+    segments: Array<TranscriptSegment & { confidence?: number | null }>;
+    contentText: string | null;
+    modelProvider: string | null;
+    modelName: string | null;
+  },
+) {
+  const text = input.contentText ?? input.segments.map((segment) => segment.text).join("\n");
+  if (!text.trim()) return null;
+  const hash = crypto.createHash("sha256").update(text).digest("hex");
+  const [asset] = await db
+    .insertInto("video_text_assets")
+    .values({
+      id: crypto.randomUUID(),
+      video_id: input.videoId,
+      source: input.source,
+      language: input.language,
+      content_text: text,
+      content_sha256: hash,
+      segments: input.segments,
+      model_provider: input.modelProvider,
+      model_name: input.modelName,
+      status: "ready",
+      error_message: null,
+      object_key: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .onConflict((oc) => oc.columns(["video_id", "source", "content_sha256"]).doNothing())
+    .returningAll()
+    .execute();
+
+  const assetId = asset?.id;
+  if (!assetId) return null;
+  for (const [index, segment] of input.segments.entries()) {
+    await db
+      .insertInto("video_text_segments")
+      .values({
+        id: crypto.randomUUID(),
+        asset_id: assetId,
+        video_id: input.videoId,
+        segment_index: index,
+        start_sec: segment.start_sec,
+        end_sec: segment.end_sec,
+        text: segment.text,
+        confidence: segment.confidence ?? (input.source === "subtitle" ? 0.99 : null),
+        created_at: new Date(),
+      })
+      .execute();
+  }
+  return asset;
+}
+
+async function runAsrJob(db: Kysely<DB>, job: Job) {
+  const { entityId } = job.data as { entityId: string };
+  const video = await db.selectFrom("videos").selectAll().where("id", "=", entityId).executeTakeFirstOrThrow();
+  const audio = await fetchVideoAudioForAsr(db, { bvid: video.bvid, cid: video.cid });
+  try {
+    const result = await transcribeAudioFile(audio);
+    await saveTextAsset(db, {
+      videoId: video.id,
+      source: "asr",
+      language: result.language,
+      segments: result.segments.map((segment) => ({
+        start_sec: segment.start_sec,
+        end_sec: segment.end_sec,
+        text: segment.text,
+        confidence: segment.confidence,
+      })),
+      contentText: result.content_text,
+      modelProvider: result.model_provider,
+      modelName: result.model_name,
+    });
+    await db
+      .updateTable("videos")
+      .set({ workflow_status: "asr_ready", updated_at: new Date() })
+      .where("id", "=", video.id)
+      .execute();
+    await pipelineQueue.add("classify_video", { entityType: "video", entityId: video.id }, { attempts: 3 });
+    return result;
+  } catch (error) {
+    await db
+      .updateTable("videos")
+      .set({
+        workflow_status: "text_unavailable",
+        risk_flags: [...video.risk_flags, "subtitle_missing", "asr_low_quality"],
+        updated_at: new Date(),
+      })
+      .where("id", "=", video.id)
+      .execute();
+    throw error;
+  } finally {
+    await audio.cleanup();
+  }
 }
 
 async function classifyVideoJob(db: Kysely<DB>, job: Job) {
