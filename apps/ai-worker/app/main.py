@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, UploadFile
+import asyncio
+import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Any, TypedDict
+
+import httpx
+from fastapi import FastAPI, HTTPException, UploadFile
 
 from .schemas import (
     AsrResponse,
@@ -11,6 +18,15 @@ from .schemas import (
 
 app = FastAPI(title="GoWith AI Worker", version="0.1.0")
 
+GROQ_TRANSCRIPTIONS_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
+
+
+class GroqSegment(TypedDict):
+    start_sec: float
+    end_sec: float
+    text: str
+    confidence: float | None
+
 
 @app.get("/health")
 async def health() -> dict[str, str | bool]:
@@ -19,7 +35,11 @@ async def health() -> dict[str, str | bool]:
 
 @app.post("/asr/transcribe", response_model=AsrResponse)
 async def transcribe_audio(file: UploadFile | None = None) -> AsrResponse:
-    # MVP skeleton: real Groq upload is intentionally isolated behind this endpoint later.
+    if _is_live_mode():
+        if file is None:
+            raise HTTPException(status_code=400, detail="audio_file_required")
+        return await _transcribe_with_groq(file)
+
     filename = file.filename if file else "mock-audio"
     text = f"{filename} 转写结果：这家店牛肉面分量足，高峰期排队。"
     return AsrResponse(
@@ -30,6 +50,164 @@ async def transcribe_audio(file: UploadFile | None = None) -> AsrResponse:
             TranscriptSegment(start_sec=8.5, end_sec=15, text="高峰期排队会比较久。", confidence=0.88),
         ],
     )
+
+def _is_live_mode() -> bool:
+    return os.getenv("EXTERNAL_MODE", "mock") in {"real", "live"}
+
+
+def _groq_model() -> str:
+    return os.getenv("GROQ_ASR_MODEL", "whisper-large-v3-turbo")
+
+
+def _groq_max_bytes() -> int:
+    mb = int(os.getenv("GROQ_ASR_MAX_MB", "25"))
+    return mb * 1024 * 1024
+
+
+def _chunk_seconds() -> int:
+    return int(os.getenv("ASR_CHUNK_SECONDS", "600"))
+
+
+async def _run_ffmpeg(args: list[str]) -> None:
+    process = await asyncio.create_subprocess_exec(
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await process.communicate()
+    if process.returncode != 0:
+        message = stderr.decode("utf-8", errors="ignore")[:1000]
+        raise HTTPException(status_code=500, detail=f"ffmpeg_failed: {message}")
+
+
+async def _prepare_audio_chunks(source: Path, workdir: Path) -> list[Path]:
+    normalized = workdir / "normalized.flac"
+    await _run_ffmpeg(["-y", "-i", str(source), "-ac", "1", "-ar", "16000", "-c:a", "flac", str(normalized)])
+    if normalized.stat().st_size <= _groq_max_bytes():
+        return [normalized]
+
+    pattern = workdir / "chunk_%03d.flac"
+    await _run_ffmpeg(
+        [
+            "-y",
+            "-i",
+            str(source),
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-f",
+            "segment",
+            "-segment_time",
+            str(_chunk_seconds()),
+            "-c:a",
+            "flac",
+            str(pattern),
+        ],
+    )
+    chunks = sorted(workdir.glob("chunk_*.flac"))
+    if not chunks:
+        raise HTTPException(status_code=500, detail="asr_chunking_failed")
+    oversized = [chunk.name for chunk in chunks if chunk.stat().st_size > _groq_max_bytes()]
+    if oversized:
+        raise HTTPException(status_code=413, detail=f"asr_chunk_too_large: {', '.join(oversized[:3])}")
+    return chunks
+
+
+async def _transcribe_with_groq(file: UploadFile) -> AsrResponse:
+    api_key = os.getenv("GROQ_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="groq_api_key_missing")
+
+    suffix = Path(file.filename or "audio.m4s").suffix or ".m4s"
+    with TemporaryDirectory(prefix="gowith-asr-") as temp_dir_name:
+        temp_dir = Path(temp_dir_name)
+        source = temp_dir / f"source{suffix}"
+        source.write_bytes(await file.read())
+        chunks = await _prepare_audio_chunks(source, temp_dir)
+        text_parts: list[str] = []
+        segments: list[TranscriptSegment] = []
+        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0, connect=30.0)) as client:
+            for index, chunk in enumerate(chunks):
+                result = await _groq_transcribe_chunk(client, api_key, chunk)
+                chunk_text = str(result.get("text") or "").strip()
+                if chunk_text:
+                    text_parts.append(chunk_text)
+                offset = index * _chunk_seconds() if len(chunks) > 1 else 0
+                for raw_segment in _extract_groq_segments(result):
+                    segments.append(
+                        TranscriptSegment(
+                            start_sec=raw_segment["start_sec"] + offset,
+                            end_sec=raw_segment["end_sec"] + offset,
+                            text=raw_segment["text"],
+                            confidence=raw_segment["confidence"],
+                        )
+                    )
+
+        return AsrResponse(
+            source="asr",
+            language="zh-CN",
+            model_provider="groq",
+            model_name=_groq_model(),
+            content_text="\n".join(text_parts),
+            segments=segments,
+        )
+
+
+async def _groq_transcribe_chunk(client: httpx.AsyncClient, api_key: str, chunk: Path) -> dict[str, Any]:
+    with chunk.open("rb") as audio:
+        response = await client.post(
+            GROQ_TRANSCRIPTIONS_URL,
+            headers={"Authorization": f"Bearer {api_key}"},
+            data={
+                "model": _groq_model(),
+                "response_format": "verbose_json",
+                "timestamp_granularities[]": "segment",
+            },
+            files={"file": (chunk.name, audio, "audio/flac")},
+        )
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"groq_asr_failed: {response.text[:1000]}")
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail="groq_asr_invalid_response")
+    return payload
+
+
+def _extract_groq_segments(payload: dict[str, Any]) -> list[GroqSegment]:
+    raw_segments = payload.get("segments")
+    if not isinstance(raw_segments, list):
+        text = str(payload.get("text") or "").strip()
+        return [GroqSegment(start_sec=0.0, end_sec=0.0, text=text, confidence=None)] if text else []
+
+    segments: list[GroqSegment] = []
+    for item in raw_segments:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        start = _float_value(item.get("start"))
+        end = _float_value(item.get("end"))
+        start_sec = start if start is not None else 0.0
+        end_sec = end if end is not None else start_sec
+        segments.append(GroqSegment(start_sec=start_sec, end_sec=end_sec, text=text, confidence=_float_value(item.get("avg_logprob"))))
+    return segments
+
+
+def _float_value(value: object) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
 
 
 @app.post("/ai/classify-video", response_model=VideoClassificationResponse)
