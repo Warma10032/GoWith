@@ -103,9 +103,11 @@ services:
         condition: service_started
 
   ai-worker:
-    image: python:3.11-slim
+    build:
+      context: .
+      dockerfile: apps/ai-worker/Dockerfile
     working_dir: /workspace/apps/ai-worker
-    command: sh -c "pip install uv && uv sync --extra dev --frozen --link-mode=copy && uv run --link-mode=copy uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    command: sh -c "uv sync --extra dev --frozen --link-mode=copy && uv run --link-mode=copy uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     ports:
       - "8000:8000"
     env_file:
