@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { CheckCircle2, ExternalLink, RefreshCw, Send } from "lucide-react";
+import { CheckCircle2, ExternalLink, LoaderCircle, RefreshCw, Send } from "lucide-react";
 import { AdminShell, adminFetch } from "./admin-shell";
 
 type ShopDetail = {
@@ -154,6 +154,12 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
       title={shop.display_name}
       description={`状态：${shop.status} · ${shop.city ?? "?"} / ${shop.district ?? "?"}${shop.business_area ? " / " + shop.business_area : ""}`}
     >
+      {busy ? (
+        <div className="mb-3 flex items-center gap-2 rounded-lg border border-[#f0c674] bg-[#fff5e1] px-3 py-2 text-sm text-[#7a4f00]">
+          <LoaderCircle size={14} className="animate-spin" />
+          正在执行：{busy}（其它操作按钮已禁用）
+        </div>
+      ) : null}
       <section className="grid gap-3 md:grid-cols-3">
         <SummaryCard label="AI 评分" value={qualityScore !== null ? (qualityScore * 100).toFixed(0) : "—"} hint="shop_confidence" />
         <SummaryCard label="覆盖博主" value={creatorCount !== null ? String(creatorCount) : "—"} hint="creator_count" />
@@ -326,7 +332,7 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
             className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-sm font-semibold text-white"
             disabled={!!busy}
           >
-            <CheckCircle2 size={14} />
+            {busy === "通过审核" ? <LoaderCircle size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
             通过审核
           </button>
         ) : null}
@@ -340,7 +346,7 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
             className="inline-flex items-center gap-2 rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white"
             disabled={!!busy}
           >
-            <Send size={14} />
+            {busy === "发布" ? <LoaderCircle size={14} className="animate-spin" /> : <Send size={14} />}
             发布
           </button>
         ) : null}

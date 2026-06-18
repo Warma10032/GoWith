@@ -206,6 +206,12 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
 
   return (
     <AdminShell title="视频处理控制台" description="手动启动处理，查看 ASR/AI/POI 阶段的持久化事件流。">
+      {busy ? (
+        <div className="mb-3 flex items-center gap-2 rounded-lg border border-[#f0c674] bg-[#fff5e1] px-3 py-2 text-sm text-[#7a4f00]">
+          <LoaderCircle size={14} className="animate-spin" />
+          正在执行：{busy}（其它操作按钮已禁用）
+        </div>
+      ) : null}
       {!detail ? (
         <div className="grid min-h-80 place-items-center rounded-lg border border-line bg-white">
           <LoaderCircle className="animate-spin text-brand" />
@@ -235,15 +241,15 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
                       开始处理
                     </button>
                     <button onClick={() => void run("重跑 ASR", () => adminFetch<{ run_id: string }>(`/api/admin/videos/${videoId}/retry-asr`, { method: "POST" }))} className="inline-flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm font-medium" disabled={!!busy}>
-                      <RefreshCw size={16} />
+                      {busy === "重跑 ASR" ? <LoaderCircle size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                       重跑 ASR
                     </button>
                     <button onClick={() => void run("重跑 AI", () => adminFetch<{ run_id: string }>(`/api/admin/videos/${videoId}/retry-ai`, { method: "POST" }))} className="inline-flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm font-medium" disabled={!!busy}>
-                      <Bot size={16} />
+                      {busy === "重跑 AI" ? <LoaderCircle size={16} className="animate-spin" /> : <Bot size={16} />}
                       重跑 AI
                     </button>
                     <button onClick={() => void run("标记非探店", () => adminFetch(`/api/admin/videos/${videoId}/mark-non-shop`, { method: "POST" }))} className="inline-flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm font-medium" disabled={!!busy}>
-                      <ShieldOff size={16} />
+                      {busy === "标记非探店" ? <LoaderCircle size={16} className="animate-spin" /> : <ShieldOff size={16} />}
                       标记非探店
                     </button>
                     <a href={detail.video.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm font-medium">
@@ -353,7 +359,7 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
                           await adminFetch(`/api/admin/shop-candidates/${candidate.id}/reject`, { method: "POST" });
                         })
                       }
-                      busy={!!busy}
+                      busyLabel={busy}
                     />
                   ) : null}
                 </div>
@@ -404,7 +410,7 @@ function CandidatePanel({
   onSelectPoi,
   onPromote,
   onReject,
-  busy,
+  busyLabel,
 }: {
   candidateId: string;
   detail: CandidateDetail | null;
@@ -414,7 +420,7 @@ function CandidatePanel({
   onSelectPoi: (poiId: string) => void;
   onPromote: () => void;
   onReject: () => void;
-  busy: boolean;
+  busyLabel: string | null;
 }) {
   if (error) {
     return <p className="mt-2 text-xs text-[#9a341f]">{error}</p>;
@@ -424,6 +430,7 @@ function CandidatePanel({
   }
   const c = detail.candidate;
   const canPromote = c.status === "poi_matched" && Boolean(c.selected_poi_id);
+  const isBusy = busyLabel !== null;
   return (
     <div className="mt-3 space-y-3 border-t border-line pt-3">
       <div className="grid grid-cols-2 gap-2 text-xs">
@@ -435,22 +442,25 @@ function CandidatePanel({
         <Field label="置信度" value={`name ${fmtPct(c.name_confidence)} · loc ${fmtPct(c.location_confidence)} · sum ${fmtPct(c.summary_confidence)}`} />
       </div>
       <div className="flex flex-wrap gap-2">
-        <button onClick={onEdit} className="rounded-md border border-line px-2 py-1 text-xs font-medium" disabled={busy}>编辑</button>
-        <button onClick={onSearchPoi} className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-xs font-medium" disabled={busy}>
-          <MapPin size={12} />
+        <button onClick={onEdit} className="rounded-md border border-line px-2 py-1 text-xs font-medium" disabled={isBusy}>
+          {busyLabel === "更新候选" ? <LoaderCircle size={12} className="mr-1 inline animate-spin" /> : null}
+          编辑
+        </button>
+        <button onClick={onSearchPoi} className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-xs font-medium" disabled={isBusy}>
+          {busyLabel === "搜索 POI" ? <LoaderCircle size={12} className="animate-spin" /> : <MapPin size={12} />}
           搜索 POI
         </button>
         <button
           onClick={onPromote}
           className="inline-flex items-center gap-1 rounded-md bg-ink px-2 py-1 text-xs font-semibold text-white"
-          disabled={busy || !canPromote}
+          disabled={isBusy || !canPromote}
           title={canPromote ? "晋升为店铺（需先在 /admin/shops 通过审核 + 发布）" : "需先选 POI 并匹配成功"}
         >
-          <ArrowUpRight size={12} />
+          {busyLabel === "晋升" ? <LoaderCircle size={12} className="animate-spin" /> : <ArrowUpRight size={12} />}
           晋升
         </button>
-        <button onClick={onReject} className="inline-flex items-center gap-1 rounded-md border border-[#f2c7bd] px-2 py-1 text-xs font-semibold text-[#9a341f]" disabled={busy}>
-          <CircleAlert size={12} />
+        <button onClick={onReject} className="inline-flex items-center gap-1 rounded-md border border-[#f2c7bd] px-2 py-1 text-xs font-semibold text-[#9a341f]" disabled={isBusy}>
+          {busyLabel === "驳回" ? <LoaderCircle size={12} className="animate-spin" /> : <CircleAlert size={12} />}
           驳回
         </button>
       </div>
@@ -483,8 +493,9 @@ function CandidatePanel({
                     <button
                       onClick={() => onSelectPoi(poi.poi_id)}
                       className="rounded-md border border-line px-2 py-0.5 text-xs font-medium"
-                      disabled={busy || poi.match_status === "selected"}
+                      disabled={isBusy || poi.match_status === "selected"}
                     >
+                      {busyLabel === "选 POI" ? <LoaderCircle size={12} className="mr-1 inline animate-spin" /> : null}
                       选用
                     </button>
                   </div>
