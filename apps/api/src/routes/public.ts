@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { FastifyPluginAsync } from "fastify";
 import { sql } from "kysely";
+import { z } from "zod";
 import { createUserEventSchema, favoriteRequestSchema } from "@gowith/shared";
 import { HttpError } from "../lib/http";
 import { getUserFromRequest, requireUser } from "../services/auth";
@@ -68,8 +69,9 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get("/creators/:id", async (request) => {
-    const params = { id: (request.params as { id: string }).id };
-    const creator = await app.db.selectFrom("creators").selectAll().where("id", "=", params.id).executeTakeFirst();
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) throw new HttpError(400, "invalid_creator_id", "Creator id must be a uuid");
+    const creator = await app.db.selectFrom("creators").selectAll().where("id", "=", params.data.id).executeTakeFirst();
     if (!creator) throw new HttpError(404, "creator_not_found", "Creator not found");
     // Sort shops by the latest video that mentioned them. DISTINCT ON
     // collapses the inner-join fan-out (one shop can have many mentions)
@@ -92,7 +94,7 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
         "videos.bvid as latest_video_bvid",
         "videos.source_url as latest_video_source_url",
       ])
-      .where("shop_video_mentions.creator_id", "=", params.id)
+      .where("shop_video_mentions.creator_id", "=", params.data.id)
       .where("shops.status", "=", "published")
       .distinctOn("shops.id")
       .orderBy("shops.id")
@@ -225,8 +227,9 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get("/shops/:id", async (request) => {
-    const params = { id: (request.params as { id: string }).id };
-    const shop = await app.db.selectFrom("shops").selectAll().where("id", "=", params.id).where("status", "=", "published").executeTakeFirst();
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) throw new HttpError(400, "invalid_shop_id", "Shop id must be a uuid");
+    const shop = await app.db.selectFrom("shops").selectAll().where("id", "=", params.data.id).where("status", "=", "published").executeTakeFirst();
     if (!shop) throw new HttpError(404, "shop_not_found", "Shop not found");
     const [mentions, evidence] = await Promise.all([
       app.db
@@ -234,9 +237,9 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
         .innerJoin("videos", "videos.id", "shop_video_mentions.video_id")
         .innerJoin("creators", "creators.id", "shop_video_mentions.creator_id")
         .select(["videos.id as video_id", "videos.title", "videos.source_url", "videos.bvid", "videos.cover_url", "creators.name as creator_name"])
-        .where("shop_video_mentions.shop_id", "=", params.id)
+        .where("shop_video_mentions.shop_id", "=", params.data.id)
         .execute(),
-      app.db.selectFrom("evidence").select(["source", "text_excerpt", "start_sec", "end_sec", "confidence"]).where("shop_id", "=", params.id).limit(20).execute(),
+      app.db.selectFrom("evidence").select(["source", "text_excerpt", "start_sec", "end_sec", "confidence"]).where("shop_id", "=", params.data.id).limit(20).execute(),
     ]);
     return { shop, mentions, evidence };
   });
