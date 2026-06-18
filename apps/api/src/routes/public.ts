@@ -71,16 +71,48 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
     const params = { id: (request.params as { id: string }).id };
     const creator = await app.db.selectFrom("creators").selectAll().where("id", "=", params.id).executeTakeFirst();
     if (!creator) throw new HttpError(404, "creator_not_found", "Creator not found");
+    // Sort shops by the latest video that mentioned them. DISTINCT ON
+    // collapses the inner-join fan-out (one shop can have many mentions)
+    // and keeps only the most recent mention per shop, which is what
+    // the public creator page renders as the sort key.
     const shops = await app.db
       .selectFrom("shops")
       .innerJoin("shop_video_mentions", "shop_video_mentions.shop_id", "shops.id")
-      .select(["shops.id", "shops.display_name", "shops.city", "shops.district", "shops.card_payload", "shops.status"])
+      .innerJoin("videos", "videos.id", "shop_video_mentions.video_id")
+      .select([
+        "shops.id",
+        "shops.display_name",
+        "shops.city",
+        "shops.district",
+        "shops.card_payload",
+        "shops.status",
+        "videos.published_at as latest_video_published_at",
+        "videos.id as latest_video_id",
+        "videos.title as latest_video_title",
+        "videos.bvid as latest_video_bvid",
+        "videos.source_url as latest_video_source_url",
+      ])
       .where("shop_video_mentions.creator_id", "=", params.id)
       .where("shops.status", "=", "published")
+      .distinctOn("shops.id")
+      .orderBy("shops.id")
+      .orderBy("videos.published_at", "desc")
       .limit(100)
       .execute();
     const videosByShop = await getSourceVideosByShopIds(app, shops.map((shop) => shop.id));
-    return { creator, shops: attachSourceVideos(shops, videosByShop) };
+    return {
+      creator,
+      shops: attachSourceVideos(shops, videosByShop).map((shop) => ({
+        ...shop,
+        latest_video: {
+          id: shop.latest_video_id,
+          title: shop.latest_video_title,
+          bvid: shop.latest_video_bvid,
+          source_url: shop.latest_video_source_url,
+          published_at: shop.latest_video_published_at,
+        },
+      })),
+    };
   });
 
   app.get("/shops/recommended", async (request) => {
