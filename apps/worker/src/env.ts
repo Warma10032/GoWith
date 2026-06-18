@@ -19,6 +19,7 @@ export const env = {
   externalMode,
   isExternalLive: externalMode === "real" || externalMode === "live",
   aiWorkerUrl: process.env.AI_WORKER_URL ?? "http://localhost:8000",
+  amapWebServiceKey: process.env.AMAP_WEB_SERVICE_KEY ?? "",
   bilibiliRequestIntervalMs: numberFromEnv("BILIBILI_REQUEST_INTERVAL_MS", 1200),
   bilibiliCommentsLimitPerVideo: numberFromEnv("BILIBILI_COMMENTS_LIMIT_PER_VIDEO", 80),
   bilibiliMaxVideosPerCreator: numberFromEnv("BILIBILI_MAX_VIDEOS_PER_CREATOR", 0),

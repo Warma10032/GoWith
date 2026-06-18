@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type { Job } from "bullmq";
 import type { Kysely } from "kysely";
-import type { DB } from "@gowith/db";
+import type { DB, Json } from "@gowith/db";
 import {
   commentSignalExtractionSchema,
   videoClassificationResultSchema,
@@ -36,6 +36,8 @@ export async function handlePipelineJob(db: Kysely<DB>, job: Job) {
       return syncCreatorProfile(db, job);
     case "sync_creator_videos":
       return syncCreatorVideos(db, job);
+    case "process_video":
+      return processVideoJob(db, job);
     case "run_asr":
       return runAsrJob(db, job);
     case "classify_video":
@@ -49,6 +51,117 @@ export async function handlePipelineJob(db: Kysely<DB>, job: Job) {
     default:
       return { skipped: true, job: job.name };
   }
+}
+
+function runIdFromJob(job: Job): string | null {
+  return typeof job.data?.run_id === "string" ? job.data.run_id : null;
+}
+
+function dbJobIdFromJob(job: Job): string | null {
+  return typeof job.data?.db_job_id === "string" ? job.data.db_job_id : null;
+}
+
+async function emitPipelineEvent(
+  db: Kysely<DB>,
+  job: Job,
+  input: {
+    stage?: string;
+    eventType: "queued" | "started" | "progress" | "ai_request_prepared" | "ai_response_validated" | "saved" | "skipped" | "failed" | "completed";
+    level?: "info" | "success" | "warning" | "error";
+    title: string;
+    message?: string | null;
+    progressPercent?: number | null;
+    detail?: Record<string, unknown>;
+    aiRunId?: string | null;
+    entityType?: string;
+    entityId?: string;
+  },
+) {
+  const runId = runIdFromJob(job);
+  if (!runId) return;
+  const entityType = input.entityType ?? (typeof job.data?.entityType === "string" ? job.data.entityType : "unknown");
+  const entityId = input.entityId ?? (typeof job.data?.entityId === "string" ? job.data.entityId : crypto.randomUUID());
+  await db
+    .insertInto("pipeline_events")
+    .values({
+      run_id: runId,
+      job_id: dbJobIdFromJob(job),
+      entity_type: entityType,
+      entity_id: entityId,
+      stage: input.stage ?? job.name,
+      event_type: input.eventType,
+      level: input.level ?? "info",
+      title: input.title,
+      message: input.message ?? null,
+      progress_percent: input.progressPercent ?? null,
+      detail_json: (input.detail ?? {}) as Json,
+      ai_run_id: input.aiRunId ?? null,
+      created_at: new Date(),
+    })
+    .execute();
+}
+
+async function enqueueWorkerPipelineJob(
+  db: Kysely<DB>,
+  jobName: string,
+  entityType: string,
+  entityId: string,
+  payload: Record<string, unknown>,
+) {
+  const runId = typeof payload.run_id === "string" ? payload.run_id : null;
+  const [dbJob] = await db
+    .insertInto("jobs")
+    .values({
+      job_type: jobName,
+      entity_type: entityType,
+      entity_id: entityId,
+      run_id: runId,
+      payload: payload as Json,
+      status: "queued",
+      priority: 0,
+      attempts: 0,
+      max_attempts: 3,
+      scheduled_at: new Date(),
+      started_at: null,
+      finished_at: null,
+      error_code: null,
+      error_message: null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    })
+    .returning(["id"])
+    .execute();
+  if (runId && dbJob?.id) {
+    await db
+      .insertInto("pipeline_events")
+      .values({
+        run_id: runId,
+        job_id: dbJob.id,
+        entity_type: entityType,
+        entity_id: entityId,
+        stage: jobName,
+        event_type: "queued",
+        level: "info",
+        title: `任务已入队：${jobName}`,
+        message: null,
+        progress_percent: null,
+        detail_json: payload as Json,
+        ai_run_id: null,
+        created_at: new Date(),
+      })
+      .execute();
+  }
+  await pipelineQueue.add(jobName, { entityType, entityId, db_job_id: dbJob?.id, ...payload }, { attempts: 3, backoff: { type: "exponential", delay: 1000 } });
+}
+
+async function finishRunIfTerminal(db: Kysely<DB>, job: Job, summary: Record<string, unknown>) {
+  const runId = runIdFromJob(job);
+  if (!runId) return;
+  await db
+    .updateTable("pipeline_runs")
+    .set({ status: "success", finished_at: new Date(), summary_json: summary as Json })
+    .where("id", "=", runId)
+    .execute();
 }
 
 async function syncCreatorProfile(db: Kysely<DB>, job: Job) {
@@ -80,6 +193,12 @@ async function syncCreatorProfile(db: Kysely<DB>, job: Job) {
 
 async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
   const { entityId, bilibili_uid } = job.data as { entityId: string; bilibili_uid: string };
+  await emitPipelineEvent(db, job, {
+    eventType: "progress",
+    title: "开始同步博主视频基础信息",
+    detail: { bilibili_uid },
+    progressPercent: 5,
+  });
   const payload = await fetchCreatorVideos(db, bilibili_uid);
 
   await db
@@ -183,14 +302,74 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
         .execute();
     }
 
-    if (video.transcript.length > 0 || !video.needs_asr || !env.bilibiliAsrEnabled) {
-      await pipelineQueue.add("classify_video", { entityType: "video", entityId: row.id }, { attempts: 3 });
-    } else {
-      await pipelineQueue.add("run_asr", { entityType: "video", entityId: row.id }, { attempts: 3 });
-    }
+    await emitPipelineEvent(db, job, {
+      eventType: "saved",
+      title: "视频基础信息已保存",
+      message: video.title,
+      entityType: "video",
+      entityId: row.id,
+      detail: {
+        bvid: video.bvid,
+        has_subtitle: video.transcript.length > 0,
+        comment_count: video.comments.length,
+      },
+    });
   }
 
+  await emitPipelineEvent(db, job, {
+    eventType: "completed",
+    level: "success",
+    title: "博主视频同步完成",
+    message: `已同步 ${payload.videos.length} 个视频，AI 处理需在视频页手动启动。`,
+    progressPercent: 100,
+    detail: { video_count: payload.videos.length },
+  });
+  await finishRunIfTerminal(db, job, { video_count: payload.videos.length });
   return { videos: payload.videos.length };
+}
+
+async function processVideoJob(db: Kysely<DB>, job: Job) {
+  const { entityId } = job.data as { entityId: string };
+  const video = await db.selectFrom("videos").selectAll().where("id", "=", entityId).executeTakeFirstOrThrow();
+  const textAsset = await db
+    .selectFrom("video_text_assets")
+    .select(["id", "source"])
+    .where("video_id", "=", entityId)
+    .where("status", "=", "ready")
+    .orderBy("created_at", "desc")
+    .executeTakeFirst();
+  await emitPipelineEvent(db, job, {
+    eventType: "progress",
+    title: "视频处理入口检查完成",
+    message: textAsset ? `已有 ${textAsset.source} 文本，准备进入 AI 分析。` : "未发现可用字幕或 ASR，准备转写音频。",
+    progressPercent: 10,
+    detail: {
+      bvid: video.bvid,
+      workflow_status: video.workflow_status,
+      has_text_asset: Boolean(textAsset),
+      text_source: textAsset?.source ?? null,
+    },
+  });
+
+  if (textAsset) {
+    await enqueueWorkerPipelineJob(db, "classify_video", "video", entityId, { run_id: runIdFromJob(job) });
+  } else if (env.bilibiliAsrEnabled) {
+    await enqueueWorkerPipelineJob(db, "run_asr", "video", entityId, { run_id: runIdFromJob(job) });
+  } else {
+    await db
+      .updateTable("videos")
+      .set({ workflow_status: "text_unavailable", updated_at: new Date() })
+      .where("id", "=", entityId)
+      .execute();
+    await emitPipelineEvent(db, job, {
+      eventType: "failed",
+      level: "warning",
+      title: "无法开始 AI 处理",
+      message: "没有可用文本且 ASR 未开启。",
+      progressPercent: 100,
+    });
+  }
+  return { next: textAsset ? "classify_video" : "run_asr" };
 }
 
 async function saveTextAsset(
@@ -453,6 +632,13 @@ function aiRunValues(
 async function runAsrJob(db: Kysely<DB>, job: Job) {
   const { entityId } = job.data as { entityId: string };
   const video = await db.selectFrom("videos").selectAll().where("id", "=", entityId).executeTakeFirstOrThrow();
+  await emitPipelineEvent(db, job, {
+    eventType: "progress",
+    title: "准备进行 ASR 转写",
+    message: video.title,
+    progressPercent: 20,
+    detail: { bvid: video.bvid, cid: video.cid },
+  });
   const audio = await fetchVideoAudioForAsr(db, { bvid: video.bvid, cid: video.cid });
   try {
     const result = await transcribeAudioFile(audio);
@@ -475,7 +661,19 @@ async function runAsrJob(db: Kysely<DB>, job: Job) {
       .set({ workflow_status: "asr_ready", updated_at: new Date() })
       .where("id", "=", video.id)
       .execute();
-    await pipelineQueue.add("classify_video", { entityType: "video", entityId: video.id }, { attempts: 3 });
+    await emitPipelineEvent(db, job, {
+      eventType: "saved",
+      level: "success",
+      title: "ASR 文本已保存",
+      progressPercent: 35,
+      detail: {
+        segment_count: result.segments.length,
+        language: result.language,
+        model_provider: result.model_provider,
+        model_name: result.model_name,
+      },
+    });
+    await enqueueWorkerPipelineJob(db, "classify_video", "video", video.id, { run_id: runIdFromJob(job) });
     return result;
   } catch (error) {
     await db
@@ -497,6 +695,17 @@ async function classifyVideoJob(db: Kysely<DB>, job: Job) {
   const { entityId } = job.data as { entityId: string };
   const video = await db.selectFrom("videos").selectAll().where("id", "=", entityId).executeTakeFirstOrThrow();
   const analysisInput = await buildAnalysisInput(db, video);
+  await emitPipelineEvent(db, job, {
+    eventType: "ai_request_prepared",
+    title: "AI 分类请求已准备",
+    progressPercent: 45,
+    detail: {
+      title: video.title,
+      transcript_segments: analysisInput.request.transcript_segments.length,
+      comment_samples: analysisInput.request.comment_samples.length,
+      evidence_count: analysisInput.evidenceIds.size,
+    },
+  });
   const envelope = await classifyVideo(analysisInput.request);
   const result = videoClassificationResultSchema.parse(envelope.output);
   result.evidence_ids = validEvidenceIds(result.evidence_ids, analysisInput.evidenceIds);
@@ -513,6 +722,23 @@ async function classifyVideoJob(db: Kysely<DB>, job: Job) {
     )
     .returningAll()
     .executeTakeFirstOrThrow();
+  await emitPipelineEvent(db, job, {
+    eventType: "ai_response_validated",
+    level: "success",
+    title: "AI 分类结果已校验",
+    progressPercent: 55,
+    detail: {
+      provider: envelope.provider,
+      model: envelope.model,
+      prompt_version: envelope.prompt_version,
+      is_shop_visit: result.is_shop_visit,
+      content_type: result.content_type,
+      confidence: result.confidence,
+      risk_flags: result.risk_flags,
+      usage: envelope.usage,
+    },
+    aiRunId: aiRun.id,
+  });
   await db
     .insertInto("video_classifications")
     .values({
@@ -543,7 +769,18 @@ async function classifyVideoJob(db: Kysely<DB>, job: Job) {
     .execute();
 
   if (result.is_shop_visit) {
-    await pipelineQueue.add("extract_comment_signals", { entityType: "video", entityId: video.id }, { attempts: 3 });
+    await enqueueWorkerPipelineJob(db, "extract_comment_signals", "video", video.id, { run_id: runIdFromJob(job) });
+  } else {
+    await emitPipelineEvent(db, job, {
+      eventType: "completed",
+      level: "success",
+      title: "视频被标记为非探店",
+      message: "处理链已结束。",
+      progressPercent: 100,
+      detail: { content_type: result.content_type, confidence: result.confidence },
+      aiRunId: aiRun.id,
+    });
+    await finishRunIfTerminal(db, job, { is_shop_visit: false, content_type: result.content_type, confidence: result.confidence });
   }
   return result;
 }
@@ -558,6 +795,16 @@ async function commentSignalsJob(db: Kysely<DB>, job: Job) {
     .orderBy("created_at", "desc")
     .executeTakeFirst();
   const analysisInput = await buildAnalysisInput(db, video, { previousStageOutputs: { classification } });
+  await emitPipelineEvent(db, job, {
+    eventType: "ai_request_prepared",
+    title: "评论线索分析请求已准备",
+    progressPercent: 62,
+    detail: {
+      transcript_segments: analysisInput.request.transcript_segments.length,
+      comment_samples: analysisInput.request.comment_samples.length,
+      evidence_count: analysisInput.evidenceIds.size,
+    },
+  });
   const envelope = await extractCommentSignals(analysisInput.request);
   const result = commentSignalExtractionSchema.parse(envelope.output);
   for (const mention of result.shop_name_mentions) mention.evidence_ids = validEvidenceIds(mention.evidence_ids, analysisInput.evidenceIds);
@@ -579,6 +826,22 @@ async function commentSignalsJob(db: Kysely<DB>, job: Job) {
     )
     .returningAll()
     .executeTakeFirstOrThrow();
+  await emitPipelineEvent(db, job, {
+    eventType: "ai_response_validated",
+    level: "success",
+    title: "评论线索结果已校验",
+    progressPercent: 70,
+    detail: {
+      provider: envelope.provider,
+      model: envelope.model,
+      prompt_version: envelope.prompt_version,
+      shop_name_mentions: result.shop_name_mentions.length,
+      address_mentions: result.address_mentions.length,
+      risk_flags: result.risk_flags,
+      usage: envelope.usage,
+    },
+    aiRunId: aiRun.id,
+  });
   await db
     .insertInto("comment_signal_extractions")
     .values({
@@ -594,7 +857,7 @@ async function commentSignalsJob(db: Kysely<DB>, job: Job) {
       created_at: new Date(),
     })
     .execute();
-  await pipelineQueue.add("structure_video", { entityType: "video", entityId }, { attempts: 3 });
+  await enqueueWorkerPipelineJob(db, "structure_video", "video", entityId, { run_id: runIdFromJob(job) });
   return result;
 }
 
@@ -616,6 +879,17 @@ async function structureVideoJob(db: Kysely<DB>, job: Job) {
   const analysisInput = await buildAnalysisInput(db, video, {
     commentSignals: commentSignals ?? undefined,
     previousStageOutputs: { classification, commentSignals },
+  });
+  await emitPipelineEvent(db, job, {
+    eventType: "ai_request_prepared",
+    title: "结构化分析请求已准备",
+    progressPercent: 78,
+    detail: {
+      transcript_segments: analysisInput.request.transcript_segments.length,
+      comment_samples: analysisInput.request.comment_samples.length,
+      evidence_count: analysisInput.evidenceIds.size,
+      has_comment_signals: Boolean(commentSignals),
+    },
   });
   const envelope = await structureVideo(analysisInput.request);
   const result = videoStructuredAnalysisSchema.parse(envelope.output);
@@ -641,6 +915,22 @@ async function structureVideoJob(db: Kysely<DB>, job: Job) {
     )
     .returningAll()
     .executeTakeFirstOrThrow();
+  await emitPipelineEvent(db, job, {
+    eventType: "ai_response_validated",
+    level: "success",
+    title: "结构化分析结果已校验",
+    progressPercent: 86,
+    detail: {
+      provider: envelope.provider,
+      model: envelope.model,
+      prompt_version: envelope.prompt_version,
+      shop_candidate_count: result.shop_candidates.length,
+      analysis_confidence: result.video.analysis_confidence,
+      risk_flags: result.video.risk_flags,
+      usage: envelope.usage,
+    },
+    aiRunId: aiRun.id,
+  });
   const analysis = await db
     .insertInto("ai_video_analyses")
     .values({
@@ -720,51 +1010,34 @@ async function structureVideoJob(db: Kysely<DB>, job: Job) {
       })
       .execute();
 
-    await pipelineQueue.add("match_poi", { entityType: "shop_candidate", entityId: row.id }, { attempts: 3 });
+    await enqueueWorkerPipelineJob(db, "match_poi", "shop_candidate", row.id, { run_id: runIdFromJob(job) });
   }
 
   await db.updateTable("videos").set({ workflow_status: "ai_structured", updated_at: new Date() }).where("id", "=", video.id).execute();
+  await emitPipelineEvent(db, job, {
+    eventType: "saved",
+    level: "success",
+    title: "视频结构化结果已保存",
+    progressPercent: result.shop_candidates.length ? 90 : 100,
+    detail: { shop_candidate_count: result.shop_candidates.length, ai_video_analysis_id: analysis.id },
+    aiRunId: aiRun.id,
+  });
+  if (!result.shop_candidates.length) {
+    await finishRunIfTerminal(db, job, { shop_candidate_count: 0, analysis_id: analysis.id });
+  }
   return result;
 }
 
 async function matchPoiJob(db: Kysely<DB>, job: Job) {
-  const { entityId } = job.data as { entityId: string };
-  const result = await searchAmapPoi(entityId);
+  const { entityId, keywords, region, types } = job.data as { entityId: string; keywords?: string; region?: string; types?: string };
+  await emitPipelineEvent(db, job, {
+    eventType: "progress",
+    title: "开始匹配高德 POI",
+    progressPercent: 92,
+    detail: { keywords: keywords ?? null, region: region ?? null, types: types ?? null },
+  });
+  const result = await searchAmapPoi(db, entityId, { keywords, region, types });
   const selected = result.selected_poi;
-  if (!selected) return result;
-
-  const poi = await db
-    .insertInto("pois")
-    .values({
-      id: crypto.randomUUID(),
-      provider: "amap",
-      provider_poi_id: selected.provider_poi_id,
-      name: selected.name,
-      address: selected.address ?? null,
-      province: selected.province ?? null,
-      city: selected.city ?? null,
-      district: selected.district ?? null,
-      business_area: selected.business_area ?? null,
-      category: selected.category ?? null,
-      category_code: null,
-      lng: selected.location.lng,
-      lat: selected.location.lat,
-      coord_type: selected.location.coord_type,
-      phone: null,
-      business_hours: null,
-      raw_payload_id: null,
-      created_at: new Date(),
-      updated_at: new Date(),
-    })
-    .onConflict((oc) =>
-      oc.columns(["provider", "provider_poi_id"]).doUpdateSet({
-        name: selected.name,
-        address: selected.address ?? null,
-        updated_at: new Date(),
-      }),
-    )
-    .returningAll()
-    .executeTakeFirstOrThrow();
 
   const attempt = await db
     .insertInto("poi_match_attempts")
@@ -772,40 +1045,114 @@ async function matchPoiJob(db: Kysely<DB>, job: Job) {
       id: crypto.randomUUID(),
       shop_candidate_id: entityId,
       provider: "amap",
-      query_strategy: "city_name_keyword",
-      query_payload: { mock: true },
-      status: "success",
-      raw_payload_id: null,
+      query_strategy: result.query_payload.forced_review ? "low_confidence_keyword" : "city_name_keyword",
+      query_payload: result.query_payload as Json,
+      status: result.match_status === "no_candidate" ? "no_candidate" : "success",
+      raw_payload_id: result.raw_payload_id,
       error_message: null,
       created_at: new Date(),
     })
     .returningAll()
     .executeTakeFirstOrThrow();
 
-  await db
-    .insertInto("poi_match_candidates")
-    .values({
-      id: crypto.randomUUID(),
-      attempt_id: attempt.id,
-      shop_candidate_id: entityId,
-      poi_id: poi.id,
-      rank: 1,
-      match_features: result.candidates[0]?.match_features ?? {},
-      match_score: result.match_score,
-      match_status: result.match_score >= 0.9 && !result.risk_flags.length ? "selected" : "candidate",
-      created_at: new Date(),
-    })
-    .execute();
+  let selectedPoiId: string | null = null;
+  for (const [index, candidate] of result.candidates.entries()) {
+    const poi = await db
+      .insertInto("pois")
+      .values({
+        id: crypto.randomUUID(),
+        provider: "amap",
+        provider_poi_id: candidate.provider_poi_id,
+        name: candidate.name,
+        address: candidate.address ?? null,
+        province: candidate.province ?? null,
+        city: candidate.city ?? null,
+        district: candidate.district ?? null,
+        business_area: candidate.business_area ?? null,
+        category: candidate.category ?? null,
+        category_code: candidate.category_code ?? null,
+        lng: candidate.location.lng,
+        lat: candidate.location.lat,
+        coord_type: candidate.location.coord_type,
+        phone: null,
+        business_hours: null,
+        raw_payload_id: result.raw_payload_id,
+        created_at: new Date(),
+        updated_at: new Date(),
+      })
+      .onConflict((oc) =>
+        oc.columns(["provider", "provider_poi_id"]).doUpdateSet({
+          name: candidate.name,
+          address: candidate.address ?? null,
+          province: candidate.province ?? null,
+          city: candidate.city ?? null,
+          district: candidate.district ?? null,
+          business_area: candidate.business_area ?? null,
+          category: candidate.category ?? null,
+          category_code: candidate.category_code ?? null,
+          raw_payload_id: result.raw_payload_id,
+          updated_at: new Date(),
+        }),
+      )
+      .returningAll()
+      .executeTakeFirstOrThrow();
+
+    const isSelected = Boolean(selected && candidate.provider_poi_id === selected.provider_poi_id && result.match_status === "auto_matched");
+    if (isSelected) selectedPoiId = poi.id;
+    await db
+      .insertInto("poi_match_candidates")
+      .values({
+        id: crypto.randomUUID(),
+        attempt_id: attempt.id,
+        shop_candidate_id: entityId,
+        poi_id: poi.id,
+        rank: index + 1,
+        match_features: candidate.match_features as Json,
+        match_score: candidate.match_score,
+        match_status: isSelected ? "selected" : "candidate",
+        created_at: new Date(),
+      })
+      .execute();
+  }
+
+  const nextStatus =
+    result.match_status === "auto_matched"
+      ? "poi_matched"
+      : result.match_status === "low_confidence"
+        ? "poi_match_low_confidence"
+        : result.match_status === "no_candidate"
+          ? "extracted"
+          : "poi_match_need_review";
 
   await db
     .updateTable("shop_candidates")
     .set({
-      selected_poi_id: result.match_score >= 0.9 && !result.risk_flags.length ? poi.id : null,
-      status: result.match_score >= 0.9 && !result.risk_flags.length ? "poi_matched" : "poi_match_need_review",
+      selected_poi_id: selectedPoiId,
+      status: nextStatus,
       updated_at: new Date(),
     })
     .where("id", "=", entityId)
     .execute();
 
+  await emitPipelineEvent(db, job, {
+    eventType: "completed",
+    level: result.match_status === "auto_matched" ? "success" : result.match_status === "no_candidate" || result.match_status === "low_confidence" ? "warning" : "info",
+    title: "POI 匹配完成",
+    message: `匹配状态：${result.match_status}`,
+    progressPercent: 100,
+    detail: {
+      candidate_count: result.candidates.length,
+      match_score: result.match_score,
+      match_status: result.match_status,
+      risk_flags: result.risk_flags,
+      next_status: nextStatus,
+    },
+  });
+  await finishRunIfTerminal(db, job, {
+    last_stage: "match_poi",
+    match_status: result.match_status,
+    match_score: result.match_score,
+    poi_candidate_count: result.candidates.length,
+  });
   return result;
 }
