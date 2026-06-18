@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode, useEffect, useState } from "react";
-import { Activity, Bot, Database, Film, KeyRound, LoaderCircle, PlayCircle, Store, UserRound, Workflow } from "lucide-react";
+import { Activity, Bot, Database, Film, KeyRound, LoaderCircle, Store, UserRound, Workflow } from "lucide-react";
 import { apiBaseUrl } from "@/lib/api";
 
 type Counts = {
@@ -21,10 +21,9 @@ const navItems = [
   { href: "/admin", label: "数据总览", icon: Database },
   { href: "/admin/creators", label: "博主", icon: UserRound },
   { href: "/admin/videos", label: "视频", icon: Film },
+  { href: "/admin/shops", label: "店铺", icon: Store },
   { href: "/admin/runs", label: "处理任务", icon: Workflow },
   { href: "/admin/ai-runs", label: "AI 运行", icon: Bot },
-  { href: "/admin#shop-candidates", label: "候选店铺", icon: PlayCircle },
-  { href: "/admin#shops", label: "店铺", icon: Store },
   { href: "/admin#cookies", label: "Cookie 池", icon: KeyRound },
 ];
 

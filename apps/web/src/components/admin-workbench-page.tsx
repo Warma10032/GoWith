@@ -4,19 +4,15 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
-  ArrowUpRight,
-  CircleAlert,
   Database,
   ExternalLink,
   KeyRound,
   LoaderCircle,
-  MapPin,
   Play,
   Plus,
   RefreshCw,
   Search,
   Send,
-  Store,
   Workflow,
 } from "lucide-react";
 import { AdminShell, adminFetch } from "./admin-shell";
@@ -78,11 +74,8 @@ export function AdminWorkbenchPage() {
   const [cookieValue, setCookieValue] = useState("");
   const [creatorQuery, setCreatorQuery] = useState("");
   const [videoQuery, setVideoQuery] = useState("");
-  const [candidateQuery, setCandidateQuery] = useState("");
   const [creators, setCreators] = useState<Creator[]>([]);
   const [videos, setVideos] = useState<VideoRow[]>([]);
-  const [candidates, setCandidates] = useState<CandidateRow[]>([]);
-  const [shops, setShops] = useState<ShopRow[]>([]);
   const [accounts, setAccounts] = useState<BilibiliAuthAccount[]>([]);
   const [runs, setRuns] = useState<PipelineRun[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -110,22 +103,14 @@ export function AdminWorkbenchPage() {
   }
 
   async function loadData() {
-    const [creatorPayload, videoPayload, candidatePayload, shopPayload, authPayload, runPayload] = await Promise.all([
+    const [creatorPayload, videoPayload, authPayload, runPayload] = await Promise.all([
       adminFetch<{ creators: Creator[] }>(`/api/admin/creators?limit=12${creatorQuery.trim() ? `&q=${encodeURIComponent(creatorQuery.trim())}` : ""}`),
       adminFetch<{ videos: VideoRow[] }>(`/api/admin/videos?limit=12${videoQuery.trim() ? `&q=${encodeURIComponent(videoQuery.trim())}` : ""}`),
-      adminFetch<{ candidates: CandidateRow[] }>("/api/admin/shop-candidates?limit=12"),
-      adminFetch<{ shops: ShopRow[] }>("/api/admin/shops?limit=12"),
       adminFetch<{ accounts: BilibiliAuthAccount[] }>("/api/admin/bilibili-auth"),
       adminFetch<{ runs: PipelineRun[] }>("/api/admin/pipeline-runs?limit=8"),
     ]);
     setCreators(creatorPayload.creators);
     setVideos(videoPayload.videos);
-    setCandidates(
-      candidateQuery.trim()
-        ? candidatePayload.candidates.filter((item) => `${item.candidate_name ?? ""}${item.city ?? ""}${item.district ?? ""}${item.video_title}`.includes(candidateQuery.trim()))
-        : candidatePayload.candidates,
-    );
-    setShops(shopPayload.shops);
     setAccounts(authPayload.accounts);
     setRuns(runPayload.runs);
   }
@@ -175,31 +160,10 @@ export function AdminWorkbenchPage() {
     });
   }
 
-  async function editCandidate(candidate: CandidateRow) {
-    const candidateName = window.prompt("候选店名", candidate.candidate_name ?? "");
-    if (candidateName === null) return;
-    const addressHint = window.prompt("地址线索", candidate.address_hint ?? "");
-    if (addressHint === null) return;
-    await run("更新候选", async () => {
-      await adminFetch(`/api/admin/shop-candidates/${candidate.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          candidate_name: candidateName.trim() || null,
-          address_hint: addressHint.trim() || null,
-        }),
-      });
-    });
-  }
-
-  async function editShop(shop: ShopRow) {
-    const displayName = window.prompt("店铺展示名", shop.display_name);
-    if (displayName === null || !displayName.trim()) return;
-    await run("更新店铺", async () => {
-      await adminFetch(`/api/admin/shops/${shop.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ display_name: displayName.trim() }),
-      });
-    });
+  async function editCandidate(_candidate: CandidateRow) {
+    // Candidate edits now live in /admin/videos/[id] (per admin refactor).
+    // This stub remains so the function reference still compiles if a future
+    // panel resurrects the prompt flow.
   }
 
   if (loading) {
@@ -351,77 +315,6 @@ export function AdminWorkbenchPage() {
                 </div>,
               ])}
               empty="暂无视频"
-            />
-          </DataSection>
-
-          <DataSection
-            title="候选店铺审核"
-            searchValue={candidateQuery}
-            onSearchChange={setCandidateQuery}
-            onSearch={() => void run("搜索候选", loadData)}
-            action={<Link href="/admin#shops" className="rounded-md border border-[#d7dde5] px-3 py-2 text-xs font-semibold">店铺发布区</Link>}
-          >
-            <OpsTable
-              columns={["候选", "来源", "位置", "动作"]}
-              rows={candidates.map((candidate) => [
-                <div key="candidate">
-                  <div className="font-semibold">{candidate.candidate_name ?? "店名待确认"}</div>
-                  <div className="text-xs text-[#6b7785]">{candidate.status} · {candidate.risk_flags.join(", ") || "no_risk"}</div>
-                </div>,
-                <a key="source" href={candidate.video_source_url} target="_blank" rel="noreferrer" className="line-clamp-1 text-brand">{candidate.creator_name} / {candidate.video_bvid}</a>,
-                [candidate.city, candidate.district, candidate.address_hint].filter(Boolean).join(" · ") || "待补全",
-                <div key="actions" className="flex flex-wrap gap-2">
-                  <button onClick={() => void editCandidate(candidate)} className="op-btn" disabled={!!busy}>
-                    编辑
-                  </button>
-                  <button onClick={() => void run("搜索 POI", async () => adminFetch(`/api/admin/shop-candidates/${candidate.id}/search-poi`, { method: "POST" }))} className="op-btn" disabled={!!busy}>
-                    <MapPin size={13} />
-                    POI
-                  </button>
-                  <button
-                    onClick={() => void run("晋升为店铺", async () => adminFetch(`/api/admin/shop-candidates/${candidate.id}/promote`, { method: "POST" }))}
-                    className="op-btn"
-                    disabled={!!busy || candidate.status !== "poi_matched"}
-                    title={candidate.status !== "poi_matched" ? "需要先选择 POI 并匹配成功" : "晋升为店铺"}
-                  >
-                    <ArrowUpRight size={13} />
-                    晋升
-                  </button>
-                  <button onClick={() => void run("驳回候选", async () => adminFetch(`/api/admin/shop-candidates/${candidate.id}/reject`, { method: "POST" }))} className="op-btn danger" disabled={!!busy}>
-                    <CircleAlert size={13} />
-                    驳回
-                  </button>
-                </div>,
-              ])}
-              empty="暂无候选"
-            />
-          </DataSection>
-
-          <DataSection title="店铺发布" action={<Link href="/admin#shops" className="rounded-md border border-[#d7dde5] px-3 py-2 text-xs font-semibold">刷新查看</Link>}>
-            <OpsTable
-              columns={["店铺", "位置", "状态", "动作"]}
-              rows={shops.map((shop) => [
-                <span key="name" className="font-semibold">{shop.display_name}</span>,
-                [shop.city, shop.district].filter(Boolean).join(" · ") || "待确认",
-                shop.status,
-                <div key="actions" className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => void run("发布店铺", async () => adminFetch(`/api/admin/shops/${shop.id}/publish`, { method: "POST" }))}
-                    className="op-btn"
-                    disabled={!!busy || shop.status === "published"}
-                  >
-                    <Send size={13} />
-                    发布
-                  </button>
-                  <button onClick={() => void editShop(shop)} className="op-btn" disabled={!!busy}>
-                    改名
-                  </button>
-                  <button onClick={() => void run("隐藏店铺", async () => adminFetch(`/api/admin/shops/${shop.id}`, { method: "PATCH", body: JSON.stringify({ status: "hidden" }) }))} className="op-btn danger" disabled={!!busy || shop.status === "hidden"}>
-                    隐藏
-                  </button>
-                </div>,
-              ])}
-              empty="暂无正式店铺"
             />
           </DataSection>
         </div>
