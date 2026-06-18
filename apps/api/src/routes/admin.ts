@@ -684,9 +684,92 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get("/shops", async (request) => {
-    const query = paginationSchema.parse(request.query);
-    const shops = await app.db.selectFrom("shops").selectAll().orderBy("created_at", "desc").limit(query.limit).offset(query.offset).execute();
+    const query = paginationSchema.extend({
+      status: z.string().trim().optional(),
+    }).parse(request.query);
+    let qb = app.db.selectFrom("shops").selectAll();
+    if (query.status) qb = qb.where("status", "=", query.status);
+    const shops = await qb.orderBy("created_at", "desc").limit(query.limit).offset(query.offset).execute();
     return { shops };
+  });
+
+  app.get("/shops/:id", async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const shop = await app.db
+      .selectFrom("shops")
+      .selectAll()
+      .where("id", "=", params.id)
+      .executeTakeFirst();
+    if (!shop) throw new HttpError(404, "shop_not_found", "Shop not found");
+    const mentions = await app.db
+      .selectFrom("shop_video_mentions")
+      .selectAll()
+      .where("shop_id", "=", params.id)
+      .orderBy("created_at", "desc")
+      .execute();
+    const videos = mentions.length
+      ? await app.db
+          .selectFrom("videos")
+          .select(["id", "bvid", "title", "cover_url", "source_url", "published_at", "creator_id"])
+          .where(
+            "id",
+            "in",
+            mentions.map((m) => m.video_id),
+          )
+          .execute()
+      : [];
+    const creators = videos.length
+      ? await app.db
+          .selectFrom("creators")
+          .select(["id", "bilibili_uid", "name", "avatar_url"])
+          .where(
+            "id",
+            "in",
+            videos.map((v) => v.creator_id),
+          )
+          .execute()
+      : [];
+    return {
+      shop,
+      mentions,
+      videos,
+      creators,
+    };
+  });
+
+  app.post("/shops/:id/approve", async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const admin = await requireAdmin(app.db, request);
+    const result = await app.db.transaction().execute(async (trx) => {
+      const shop = await trx.selectFrom("shops").selectAll().where("id", "=", params.id).executeTakeFirst();
+      if (!shop) throw new HttpError(404, "shop_not_found", "Shop not found");
+      if (shop.status !== "draft") {
+        throw new HttpError(409, "shop_not_ready_for_approve", `Shop is in status='${shop.status}'; expected 'draft'`);
+      }
+      const updated = await trx
+        .updateTable("shops")
+        .set({ status: "approved", last_reviewed_at: new Date(), updated_at: new Date() })
+        .where("id", "=", params.id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      await trx
+        .insertInto("review_events")
+        .values({
+          id: crypto.randomUUID(),
+          review_task_id: null,
+          entity_type: "shop",
+          entity_id: params.id,
+          action: "approve",
+          before_json: { status: shop.status },
+          after_json: { status: "approved" },
+          reason: "Admin approved shop for publication",
+          reviewer_id: admin.id,
+          created_at: new Date(),
+        })
+        .execute();
+      return updated;
+    });
+    return { shop: result };
   });
 
   app.patch("/shops/:id", async (request) => {
@@ -709,6 +792,10 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     const result = await app.db.transaction().execute(async (trx) => {
       const shop = await trx.selectFrom("shops").selectAll().where("id", "=", params.id).executeTakeFirst();
       if (!shop) throw new HttpError(404, "shop_not_found", "Shop not found");
+      // Per AGENTS.md §3.5: publish must follow an explicit approve step.
+      if (shop.status !== "approved") {
+        throw new HttpError(409, "shop_not_approved", `Shop is in status='${shop.status}'; call /approve before /publish`);
+      }
       const current = await trx
         .selectFrom("published_shop_snapshots")
         .select((eb) => eb.fn.max<number>("version").as("version"))
