@@ -10,6 +10,7 @@ export type JobName =
   | "fetch_video_metadata"
   | "fetch_subtitle"
   | "fetch_comments"
+  | "process_video"
   | "run_asr"
   | "classify_video"
   | "extract_shop_candidates"
@@ -41,12 +42,14 @@ export async function enqueuePipelineJob(
   entityId: string,
   payload: Record<string, unknown> = {},
 ) {
-  await db
+  const runId = typeof payload.run_id === "string" ? payload.run_id : null;
+  const job = await db
     .insertInto("jobs")
     .values({
       job_type: jobName,
       entity_type: entityType,
       entity_id: entityId,
+      run_id: runId,
       payload: payload as Json,
       status: "queued",
       priority: 0,
@@ -60,7 +63,34 @@ export async function enqueuePipelineJob(
       created_at: new Date(),
       updated_at: new Date(),
     })
+    .returning(["id"])
     .execute();
 
-  return pipelineQueue.add(jobName, { entityType, entityId, ...payload }, { attempts: 3, backoff: { type: "exponential", delay: 1000 } });
+  const dbJobId = job[0]?.id;
+  if (runId && dbJobId) {
+    await db
+      .insertInto("pipeline_events")
+      .values({
+        run_id: runId,
+        job_id: dbJobId,
+        entity_type: entityType,
+        entity_id: entityId,
+        stage: jobName,
+        event_type: "queued",
+        level: "info",
+        title: `任务已入队：${jobName}`,
+        message: null,
+        progress_percent: 0,
+        detail_json: { job_type: jobName, payload } as unknown as Json,
+        ai_run_id: null,
+        created_at: new Date(),
+      })
+      .execute();
+  }
+
+  return pipelineQueue.add(
+    jobName,
+    { entityType, entityId, db_job_id: dbJobId, run_id: runId, ...payload },
+    { attempts: 3, backoff: { type: "exponential", delay: 1000 } },
+  );
 }
