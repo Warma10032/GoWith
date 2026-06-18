@@ -4,6 +4,8 @@ import type { DB, Json } from "@gowith/db";
 import { env } from "../lib/env";
 
 export type JobName =
+  | "check_bilibili_auth_pool"
+  | "sync_creator_profile"
   | "sync_creator_videos"
   | "fetch_video_metadata"
   | "fetch_subtitle"

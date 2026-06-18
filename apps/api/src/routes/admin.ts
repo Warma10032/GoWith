@@ -24,12 +24,15 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get("/dashboard", async () => {
-    const [creators, videos, candidates, reviews, shops] = await Promise.all([
+    const [creators, videos, candidates, reviews, shops, activeCookies, expiredCookies, riskCookies] = await Promise.all([
       app.db.selectFrom("creators").select((eb) => eb.fn.countAll<string>().as("count")).executeTakeFirst(),
       app.db.selectFrom("videos").select((eb) => eb.fn.countAll<string>().as("count")).executeTakeFirst(),
       app.db.selectFrom("shop_candidates").select((eb) => eb.fn.countAll<string>().as("count")).executeTakeFirst(),
       app.db.selectFrom("review_tasks").where("status", "=", "open").select((eb) => eb.fn.countAll<string>().as("count")).executeTakeFirst(),
       app.db.selectFrom("shops").where("status", "=", "published").select((eb) => eb.fn.countAll<string>().as("count")).executeTakeFirst(),
+      app.db.selectFrom("bilibili_auth_accounts").where("status", "=", "active").select((eb) => eb.fn.countAll<string>().as("count")).executeTakeFirst(),
+      app.db.selectFrom("bilibili_auth_accounts").where("status", "=", "expired").select((eb) => eb.fn.countAll<string>().as("count")).executeTakeFirst(),
+      app.db.selectFrom("bilibili_auth_accounts").where("status", "=", "risk").select((eb) => eb.fn.countAll<string>().as("count")).executeTakeFirst(),
     ]);
 
     return {
@@ -39,8 +42,31 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         shop_candidates: Number(candidates?.count ?? 0),
         open_reviews: Number(reviews?.count ?? 0),
         published_shops: Number(shops?.count ?? 0),
+        active_bilibili_cookies: Number(activeCookies?.count ?? 0),
+        expired_bilibili_cookies: Number(expiredCookies?.count ?? 0),
+        risk_bilibili_cookies: Number(riskCookies?.count ?? 0),
       },
     };
+  });
+
+  app.get("/bilibili-auth", async () => {
+    const accounts = await app.db
+      .selectFrom("bilibili_auth_accounts")
+      .select([
+        "id",
+        "label",
+        "status",
+        "last_health_check_at",
+        "last_success_at",
+        "last_error_code",
+        "last_error_message",
+        "created_at",
+        "updated_at",
+      ])
+      .orderBy("created_at", "desc")
+      .limit(50)
+      .execute();
+    return { accounts };
   });
 
   app.post("/bilibili-auth", async (request) => {
@@ -66,6 +92,11 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     return { account };
   });
 
+  app.post("/bilibili-auth/check", async () => {
+    const job = await enqueuePipelineJob(app.db, "check_bilibili_auth_pool", "system", crypto.randomUUID());
+    return { job_id: job.id };
+  });
+
   app.get("/creators", async (request) => {
     const query = paginationSchema.parse(request.query);
     const creators = await app.db
@@ -80,13 +111,13 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/creators", async (request) => {
     const body = createCreatorRequestSchema.parse(request.body);
-    const name = body.name ?? `B站 UID ${body.bilibili_uid}`;
-    const [creator] = await app.db
+    const placeholderName = `B站 UID ${body.bilibili_uid}`;
+    const creator = await app.db
       .insertInto("creators")
       .values({
         id: crypto.randomUUID(),
         bilibili_uid: body.bilibili_uid,
-        name,
+        name: placeholderName,
         avatar_url: null,
         profile_url: `https://space.bilibili.com/${body.bilibili_uid}`,
         bio: null,
@@ -102,14 +133,16 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       })
       .onConflict((oc) =>
         oc.column("bilibili_uid").doUpdateSet({
-          name,
           status: "active",
           updated_at: new Date(),
         }),
       )
       .returningAll()
-      .execute();
-    return { creator };
+      .executeTakeFirstOrThrow();
+    const job = await enqueuePipelineJob(app.db, "sync_creator_profile", "creator", creator.id, {
+      bilibili_uid: creator.bilibili_uid,
+    });
+    return { creator, profile_job_id: job.id };
   });
 
   app.post("/creators/:id/sync", async (request) => {
@@ -132,6 +165,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         "videos.bvid",
         "videos.title",
         "videos.cover_url",
+        "videos.source_url",
         "videos.workflow_status",
         "videos.is_shop_visit",
         "videos.content_type",
@@ -197,6 +231,8 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         "shop_candidates.name_confidence",
         "shop_candidates.location_confidence",
         "videos.title as video_title",
+        "videos.source_url as video_source_url",
+        "videos.bvid as video_bvid",
         "creators.name as creator_name",
       ])
       .orderBy("shop_candidates.created_at", "desc")

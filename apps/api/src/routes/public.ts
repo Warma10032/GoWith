@@ -5,6 +5,56 @@ import { createUserEventSchema, favoriteRequestSchema } from "@gowith/shared";
 import { HttpError } from "../lib/http";
 import { getUserFromRequest, requireUser } from "../services/auth";
 
+type SourceVideo = {
+  video_id: string;
+  title: string;
+  source_url: string;
+  bvid: string;
+  cover_url: string | null;
+  creator_name: string;
+};
+
+async function getSourceVideosByShopIds(app: Parameters<FastifyPluginAsync>[0], shopIds: string[]) {
+  if (!shopIds.length) return new Map<string, SourceVideo[]>();
+  const rows = await app.db
+    .selectFrom("shop_video_mentions")
+    .innerJoin("videos", "videos.id", "shop_video_mentions.video_id")
+    .innerJoin("creators", "creators.id", "shop_video_mentions.creator_id")
+    .select([
+      "shop_video_mentions.shop_id",
+      "videos.id as video_id",
+      "videos.title",
+      "videos.source_url",
+      "videos.bvid",
+      "videos.cover_url",
+      "creators.name as creator_name",
+    ])
+    .where("shop_video_mentions.shop_id", "in", shopIds)
+    .orderBy("videos.published_at", "desc")
+    .execute();
+
+  const videosByShop = new Map<string, SourceVideo[]>();
+  for (const row of rows) {
+    const videos = videosByShop.get(row.shop_id) ?? [];
+    if (videos.length < 3) {
+      videos.push({
+        video_id: row.video_id,
+        title: row.title,
+        source_url: row.source_url,
+        bvid: row.bvid,
+        cover_url: row.cover_url,
+        creator_name: row.creator_name,
+      });
+    }
+    videosByShop.set(row.shop_id, videos);
+  }
+  return videosByShop;
+}
+
+function attachSourceVideos<T extends { id: string }>(shops: T[], videosByShop: Map<string, SourceVideo[]>) {
+  return shops.map((shop) => ({ ...shop, source_videos: videosByShop.get(shop.id) ?? [] }));
+}
+
 export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
   app.get("/creators", async () => {
     const creators = await app.db
@@ -29,7 +79,8 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
       .where("shops.status", "=", "published")
       .limit(100)
       .execute();
-    return { creator, shops };
+    const videosByShop = await getSourceVideosByShopIds(app, shops.map((shop) => shop.id));
+    return { creator, shops: attachSourceVideos(shops, videosByShop) };
   });
 
   app.get("/shops/recommended", async (request) => {
@@ -80,7 +131,8 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
       items.push({ ...shop, recommendation_item_id: itemId, score });
     }
 
-    return { recommendation_request_id: requestId, shops: items };
+    const videosByShop = await getSourceVideosByShopIds(app, items.map((shop) => shop.id));
+    return { recommendation_request_id: requestId, shops: attachSourceVideos(items, videosByShop) };
   });
 
   app.get("/shops/map", async (request) => {
@@ -97,7 +149,9 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
       ORDER BY published_at DESC NULLS LAST
       LIMIT 500
     `.execute(app.db);
-    return { shops: shops.rows };
+    const mapShops = shops.rows as Array<{ id: string }>;
+    const videosByShop = await getSourceVideosByShopIds(app, mapShops.map((shop) => shop.id));
+    return { shops: attachSourceVideos(mapShops, videosByShop) };
   });
 
   app.get("/shops/:id", async (request) => {
@@ -109,7 +163,7 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
         .selectFrom("shop_video_mentions")
         .innerJoin("videos", "videos.id", "shop_video_mentions.video_id")
         .innerJoin("creators", "creators.id", "shop_video_mentions.creator_id")
-        .select(["videos.title", "videos.source_url", "videos.cover_url", "creators.name as creator_name"])
+        .select(["videos.id as video_id", "videos.title", "videos.source_url", "videos.bvid", "videos.cover_url", "creators.name as creator_name"])
         .where("shop_video_mentions.shop_id", "=", params.id)
         .execute(),
       app.db.selectFrom("evidence").select(["source", "text_excerpt", "start_sec", "end_sec", "confidence"]).where("shop_id", "=", params.id).limit(20).execute(),
