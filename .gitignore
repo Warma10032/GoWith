@@ -16,6 +16,7 @@ __pycache__/
 .env.*
 !.env.example
 tmp/
+tmp-*.png
 logs/
 playwright-report/
 test-results/
