@@ -62,6 +62,7 @@ services:
       CI: "true"
       DATABASE_URL: postgres://gowith:gowith@postgres:5432/gowith
       REDIS_URL: redis://redis:6379
+      AI_WORKER_URL: http://ai-worker:8000
     volumes:
       - .:/workspace
       - node_modules:/workspace/node_modules

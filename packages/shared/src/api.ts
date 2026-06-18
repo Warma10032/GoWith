@@ -15,7 +15,6 @@ export const loginRequestSchema = z.object({
 
 export const createCreatorRequestSchema = z.object({
   bilibili_uid: z.string().min(1),
-  name: z.string().min(1).optional(),
 });
 
 export const createUserEventSchema = z.object({
@@ -44,4 +43,3 @@ export type LoginRequest = z.infer<typeof loginRequestSchema>;
 export type CreateCreatorRequest = z.infer<typeof createCreatorRequestSchema>;
 export type CreateUserEvent = z.infer<typeof createUserEventSchema>;
 export type FavoriteRequest = z.infer<typeof favoriteRequestSchema>;
-
