@@ -201,6 +201,17 @@ export const poiMatchResultSchema = z.object({
       provider_poi_id: z.string(),
       name: z.string(),
       address: z.string().nullable().optional(),
+      province: z.string().nullable().optional(),
+      city: z.string().nullable().optional(),
+      district: z.string().nullable().optional(),
+      business_area: z.string().nullable().optional(),
+      location: z.object({
+        lng: z.number(),
+        lat: z.number(),
+        coord_type: z.enum(["gcj02", "bd09", "wgs84"]),
+      }),
+      category: z.string().nullable().optional(),
+      category_code: z.string().nullable().optional(),
       match_features: z.record(z.number()).default({}),
       match_score: z.number().min(0).max(1),
     }),
@@ -243,9 +254,37 @@ export const publishedShopSnapshotSchema = z.object({
   quality: z.record(z.unknown()).default({}),
 });
 
+export const sourceVideoSchema = z.object({
+  video_id: z.string().optional(),
+  title: z.string(),
+  source_url: z.string(),
+  bvid: z.string().optional(),
+  cover_url: z.string().nullable().optional(),
+  creator_name: z.string().optional(),
+});
+
+export const mapShopSchema = z.object({
+  id: z.string(),
+  display_name: z.string(),
+  city: z.string().nullable().optional(),
+  district: z.string().nullable().optional(),
+  address: z.string().nullable().optional(),
+  lng: z.union([z.number(), z.string()]).nullable().optional(),
+  lat: z.union([z.number(), z.string()]).nullable().optional(),
+  coord_type: z.enum(["gcj02", "bd09", "wgs84"]).optional(),
+  card_payload: z.record(z.unknown()).nullable().optional(),
+  quality: z.record(z.unknown()).nullable().optional(),
+  source_videos: z.array(sourceVideoSchema).default([]),
+});
+
+export const shopSearchResultSchema = mapShopSchema.extend({
+  rank_score: z.number().optional(),
+});
+
 export type VideoClassificationResult = z.infer<typeof videoClassificationResultSchema>;
 export type CommentSignalExtraction = z.infer<typeof commentSignalExtractionSchema>;
 export type VideoStructuredAnalysis = z.infer<typeof videoStructuredAnalysisSchema>;
 export type PoiMatchResult = z.infer<typeof poiMatchResultSchema>;
 export type PublishedShopSnapshot = z.infer<typeof publishedShopSnapshotSchema>;
-
+export type MapShop = z.infer<typeof mapShopSchema>;
+export type ShopSearchResult = z.infer<typeof shopSearchResultSchema>;

@@ -119,6 +119,7 @@ export interface JobsTable {
   job_type: string;
   entity_type: string;
   entity_id: string;
+  run_id: string | null;
   payload: Json;
   status: "queued" | "running" | "success" | "failed" | "cancelled";
   priority: number;
@@ -131,6 +132,37 @@ export interface JobsTable {
   error_message: string | null;
   created_at: Timestamp;
   updated_at: Timestamp;
+}
+
+export interface PipelineRunsTable {
+  id: GeneratedUuid;
+  run_type: "creator_video_sync" | "video_processing" | "video_asr_retry" | "video_ai_retry" | "poi_match";
+  entity_type: string;
+  entity_id: string;
+  status: "queued" | "running" | "success" | "failed" | "cancelled";
+  triggered_by: string | null;
+  started_at: Timestamp | null;
+  finished_at: Timestamp | null;
+  summary_json: Json;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface PipelineEventsTable {
+  id: GeneratedUuid;
+  run_id: string;
+  job_id: string | null;
+  entity_type: string;
+  entity_id: string;
+  stage: string;
+  event_type: "queued" | "started" | "progress" | "ai_request_prepared" | "ai_response_validated" | "saved" | "skipped" | "failed" | "completed";
+  level: "info" | "success" | "warning" | "error";
+  title: string;
+  message: string | null;
+  progress_percent: number | null;
+  detail_json: Json;
+  ai_run_id: string | null;
+  created_at: Timestamp;
 }
 
 export interface VideoTextAssetsTable {
@@ -369,6 +401,7 @@ export interface ShopAliasesTable {
   shop_id: string;
   alias_name: string;
   source: string;
+  confidence: number | null;
   created_at: Timestamp;
 }
 
@@ -378,9 +411,13 @@ export interface ShopVideoMentionsTable {
   video_id: string;
   creator_id: string;
   shop_candidate_id: string | null;
-  mention_type: "primary" | "secondary" | "comparison";
+  mention_type: "main" | "secondary" | "passing";
+  sentiment: string;
   evidence_ids: string[];
-  confidence: number | null;
+  confidence: number;
+  time_start_sec: number | null;
+  time_end_sec: number | null;
+  summary: string | null;
   created_at: Timestamp;
 }
 
@@ -426,14 +463,14 @@ export interface ReviewTasksTable {
 
 export interface ReviewEventsTable {
   id: GeneratedUuid;
-  task_id: string | null;
+  review_task_id: string | null;
   entity_type: string;
   entity_id: string;
-  actor_id: string | null;
   action: string;
   before_json: Json | null;
   after_json: Json | null;
-  note: string | null;
+  reason: string | null;
+  reviewer_id: string;
   created_at: Timestamp;
 }
 
@@ -502,6 +539,8 @@ export interface DB {
   creators: CreatorsTable;
   videos: VideosTable;
   jobs: JobsTable;
+  pipeline_runs: PipelineRunsTable;
+  pipeline_events: PipelineEventsTable;
   video_text_assets: VideoTextAssetsTable;
   video_text_segments: VideoTextSegmentsTable;
   video_comments: VideoCommentsTable;
