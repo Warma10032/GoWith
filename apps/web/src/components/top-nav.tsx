@@ -4,7 +4,7 @@ import { Compass, MapPinned, ShieldCheck, UserRound } from "lucide-react";
 const navItems = [
   { href: "/", label: "推荐", icon: Compass },
   { href: "/map", label: "地图", icon: MapPinned },
-  { href: "/creators/demo", label: "博主", icon: UserRound },
+  { href: "/creators", label: "博主", icon: UserRound },
   { href: "/admin", label: "后台", icon: ShieldCheck },
 ];
 
