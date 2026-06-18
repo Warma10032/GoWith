@@ -39,7 +39,9 @@ type VideoCandidateRow = {
 };
 type CandidatePoi = {
   id: string;
-  match_score: number;
+  // Kysely + pg returns `numeric` columns as strings to avoid precision
+  // loss; the column is numeric(4,3) in SQL.
+  match_score: string;
   match_status: "candidate" | "selected" | "rejected";
   match_features: Record<string, unknown> | null;
   poi_id: string;
@@ -476,7 +478,7 @@ function CandidatePanel({
                             : "bg-[#e6efff] text-[#1a4f9a]"
                       }`}
                     >
-                      {poi.match_status} · {poi.match_score.toFixed(2)}
+                      {poi.match_status} · {Number(poi.match_score).toFixed(2)}
                     </span>
                     <button
                       onClick={() => onSelectPoi(poi.poi_id)}

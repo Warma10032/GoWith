@@ -36,7 +36,8 @@ type ShopMention = {
   creator_id: string;
   mention_type: string;
   sentiment: string;
-  confidence: number;
+  // numeric(4,3) in SQL -> pg returns as string to avoid precision loss.
+  confidence: string;
   summary: string | null;
 };
 
@@ -227,8 +228,8 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
                 </span>
               </div>
               <p className="mt-1 text-sm">{info.summary ?? "—"}</p>
-              {typeof info.confidence === "number" ? (
-                <p className="mt-1 text-[11px] text-muted">置信度 {(info.confidence * 100).toFixed(0)}%</p>
+              {typeof info.confidence === "number" || typeof info.confidence === "string" ? (
+                <p className="mt-1 text-[11px] text-muted">置信度 {(Number(info.confidence) * 100).toFixed(0)}%</p>
               ) : null}
             </div>
           ))}
@@ -262,8 +263,8 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
                     >
                       {mention.sentiment}
                     </span>
-                    {typeof mention.confidence === "number" ? (
-                      <span className="text-[11px] text-muted">置信度 {(mention.confidence * 100).toFixed(0)}%</span>
+                    {typeof mention.confidence === "string" || typeof mention.confidence === "number" ? (
+                      <span className="text-[11px] text-muted">置信度 {(Number(mention.confidence) * 100).toFixed(0)}%</span>
                     ) : null}
                   </div>
                   {creator ? (
