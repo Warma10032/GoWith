@@ -1039,6 +1039,19 @@ async function matchPoiJob(db: Kysely<DB>, job: Job) {
   const result = await searchAmapPoi(db, entityId, { keywords, region, types });
   const selected = result.selected_poi;
 
+  // Overwrite-on-search semantics: this candidate now keeps ONLY the latest
+  // match attempt's candidates. The previous attempt rows in
+  // poi_match_candidates are deleted (the attempt log row in
+  // poi_match_attempts is preserved for audit). This avoids the
+  // 'one POI appears N times because we ran search N times' problem
+  // in the admin UI. Per AGENTS.md §3.4 + product decision "数据库不要
+  // 保存多次结果". Re-running the job replaces both the candidate rows
+  // and shop_candidates.selected_poi_id (set later in this fn).
+  await db
+    .deleteFrom("poi_match_candidates")
+    .where("shop_candidate_id", "=", entityId)
+    .execute();
+
   const attempt = await db
     .insertInto("poi_match_attempts")
     .values({

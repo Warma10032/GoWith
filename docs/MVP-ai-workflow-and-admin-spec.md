@@ -485,6 +485,8 @@ manual_matched
 manual_rejected
 ```
 
+**重写语义（overwrite-on-search）**：每次 `matchPoiJob` 启动时先 `DELETE FROM poi_match_candidates WHERE shop_candidate_id = ?`，然后插入新 attempt 的候选。同一 POI 不会再因为重复搜索出现 N 次。`poi_match_attempts` 表保留作为查询审计日志（每行是一次 attempt 的查询策略、payload、状态），不被清空。`shop_candidates.selected_poi_id` 也会在 job 末尾被 UPDATE 覆盖为新 attempt 的结果。
+
 阈值建议：
 
 | 条件 | 状态 |
