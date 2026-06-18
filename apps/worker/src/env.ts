@@ -23,4 +23,7 @@ export const env = {
   bilibiliCommentsLimitPerVideo: numberFromEnv("BILIBILI_COMMENTS_LIMIT_PER_VIDEO", 80),
   bilibiliMaxVideosPerCreator: numberFromEnv("BILIBILI_MAX_VIDEOS_PER_CREATOR", 0),
   bilibiliAsrEnabled: booleanFromEnv("BILIBILI_ASR_ENABLED", true),
+  bilibiliCreatorProfileRefreshMs: numberFromEnv("BILIBILI_CREATOR_PROFILE_REFRESH_MS", 6 * 60 * 60 * 1000),
+  bilibiliCookieHealthCheckMs: numberFromEnv("BILIBILI_COOKIE_HEALTH_CHECK_MS", 30 * 60 * 1000),
+  bilibiliCookieExpiredRetentionDays: numberFromEnv("BILIBILI_COOKIE_EXPIRED_RETENTION_DAYS", 30),
 };

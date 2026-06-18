@@ -7,14 +7,33 @@ import {
   videoClassificationResultSchema,
   videoStructuredAnalysisSchema,
 } from "@gowith/shared";
-import { fetchCreatorVideos, fetchVideoAudioForAsr, type TranscriptSegment } from "../adapters/bilibili";
-import { classifyVideo, extractCommentSignals, structureVideo, transcribeAudioFile } from "../adapters/ai";
+import {
+  checkBilibiliCookiePool,
+  fetchCreatorProfile,
+  fetchCreatorVideos,
+  fetchVideoAudioForAsr,
+  type TranscriptSegment,
+} from "../adapters/bilibili";
+import {
+  buildVideoAnalysisRequest,
+  classifyVideo,
+  extractCommentSignals,
+  structureVideo,
+  transcribeAudioFile,
+  type AiResponseEnvelope,
+  type CommentSample,
+  type VideoAnalysisRequest,
+} from "../adapters/ai";
 import { searchAmapPoi } from "../adapters/poi";
 import { env } from "../env";
 import { pipelineQueue } from "../queue";
 
 export async function handlePipelineJob(db: Kysely<DB>, job: Job) {
   switch (job.name) {
+    case "check_bilibili_auth_pool":
+      return checkBilibiliCookiePool(db);
+    case "sync_creator_profile":
+      return syncCreatorProfile(db, job);
     case "sync_creator_videos":
       return syncCreatorVideos(db, job);
     case "run_asr":
@@ -30,6 +49,33 @@ export async function handlePipelineJob(db: Kysely<DB>, job: Job) {
     default:
       return { skipped: true, job: job.name };
   }
+}
+
+async function syncCreatorProfile(db: Kysely<DB>, job: Job) {
+  const { entityId, bilibili_uid } = job.data as { entityId: string; bilibili_uid: string };
+  const payload = await fetchCreatorProfile(db, bilibili_uid);
+  const refreshedAt = new Date();
+
+  await db
+    .updateTable("creators")
+    .set({
+      name: payload.name,
+      avatar_url: payload.avatar_url,
+      bio: payload.bio,
+      follower_count: payload.follower_count,
+      raw_payload_id: payload.raw_payload_id,
+      stats: {
+        profile: {
+          follower_count: payload.follower_count,
+          refreshed_at: refreshedAt.toISOString(),
+        },
+      },
+      updated_at: refreshedAt,
+    })
+    .where("id", "=", entityId)
+    .execute();
+
+  return { updated: true, creator_id: entityId };
 }
 
 async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
@@ -171,7 +217,7 @@ async function saveTextAsset(
       language: input.language,
       content_text: text,
       content_sha256: hash,
-      segments: input.segments,
+      segments: JSON.stringify(input.segments),
       model_provider: input.modelProvider,
       model_name: input.modelName,
       status: "ready",
@@ -197,12 +243,211 @@ async function saveTextAsset(
         start_sec: segment.start_sec,
         end_sec: segment.end_sec,
         text: segment.text,
-        confidence: segment.confidence ?? (input.source === "subtitle" ? 0.99 : null),
+        confidence: normalizeSegmentConfidence(segment.confidence, input.source),
         created_at: new Date(),
       })
       .execute();
   }
   return asset;
+}
+
+function normalizeSegmentConfidence(value: number | null | undefined, source: "subtitle" | "asr"): number | null {
+  if (source === "subtitle") return 1;
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.min(1, Math.max(0, value));
+}
+
+interface AnalysisInput {
+  request: VideoAnalysisRequest;
+  evidenceIds: Set<string>;
+}
+
+async function buildAnalysisInput(
+  db: Kysely<DB>,
+  video: {
+    id: string;
+    bvid: string;
+    creator_id: string;
+    title: string;
+    description: string | null;
+    tags: string[];
+    category: string | null;
+  },
+  options: {
+    commentSignals?: Record<string, unknown>;
+    previousStageOutputs?: Record<string, unknown>;
+  } = {},
+): Promise<AnalysisInput> {
+  const evidenceIds = new Set<string>();
+  const transcriptSegments: Array<TranscriptSegment & { segment_id: string; confidence?: number | null }> = [];
+  const commentSamples: CommentSample[] = [];
+
+  await addTextEvidence(db, evidenceIds, {
+    videoId: video.id,
+    source: "title",
+    sourceRefId: `${video.id}:title`,
+    text: video.title,
+  });
+  if (video.description?.trim()) {
+    await addTextEvidence(db, evidenceIds, {
+      videoId: video.id,
+      source: "description",
+      sourceRefId: `${video.id}:description`,
+      text: video.description,
+    });
+  }
+  for (const tag of video.tags.slice(0, 20)) {
+    await addTextEvidence(db, evidenceIds, {
+      videoId: video.id,
+      source: "tag",
+      sourceRefId: `${video.id}:tag:${tag}`,
+      text: tag,
+    });
+  }
+
+  const textRows = await db
+    .selectFrom("video_text_segments")
+    .innerJoin("video_text_assets", "video_text_assets.id", "video_text_segments.asset_id")
+    .select([
+      "video_text_segments.id",
+      "video_text_segments.start_sec",
+      "video_text_segments.end_sec",
+      "video_text_segments.text",
+      "video_text_segments.confidence",
+      "video_text_assets.source",
+    ])
+    .where("video_text_segments.video_id", "=", video.id)
+    .orderBy("video_text_assets.source", "desc")
+    .orderBy("video_text_segments.segment_index")
+    .limit(240)
+    .execute();
+
+  const preferredSource = textRows.some((row) => row.source === "subtitle") ? "subtitle" : "asr";
+  for (const row of textRows.filter((item) => item.source === preferredSource).slice(0, 180)) {
+    const evidenceId = await addTextEvidence(db, evidenceIds, {
+      videoId: video.id,
+      source: row.source,
+      sourceRefId: row.id,
+      text: row.text,
+      startSec: row.start_sec,
+      endSec: row.end_sec,
+      confidence: row.confidence,
+    });
+    transcriptSegments.push({
+      segment_id: evidenceId,
+      start_sec: row.start_sec ?? 0,
+      end_sec: row.end_sec ?? row.start_sec ?? 0,
+      text: row.text,
+      confidence: row.confidence,
+    });
+  }
+
+  const comments = await db
+    .selectFrom("video_comments")
+    .selectAll()
+    .where("video_id", "=", video.id)
+    .orderBy("contains_shop_signal", "desc")
+    .orderBy("contains_location_signal", "desc")
+    .orderBy("like_count", "desc")
+    .limit(80)
+    .execute();
+
+  for (const comment of comments) {
+    const evidenceId = await addTextEvidence(db, evidenceIds, {
+      videoId: video.id,
+      source: "comment",
+      sourceRefId: comment.id,
+      text: comment.content,
+      confidence: null,
+    });
+    commentSamples.push({
+      comment_id: evidenceId,
+      content: comment.content,
+      like_count: comment.like_count,
+      reply_count: comment.reply_count,
+      sample_type: comment.sample_type,
+      contains_location_signal: comment.contains_location_signal,
+      contains_shop_signal: comment.contains_shop_signal,
+    });
+  }
+
+  return {
+    evidenceIds,
+    request: buildVideoAnalysisRequest({
+      video,
+      transcriptSegments,
+      commentSamples,
+      commentSignals: options.commentSignals,
+      previousStageOutputs: options.previousStageOutputs,
+    }),
+  };
+}
+
+async function addTextEvidence(
+  db: Kysely<DB>,
+  evidenceIds: Set<string>,
+  input: {
+    videoId: string;
+    source: string;
+    sourceRefId: string;
+    text: string;
+    startSec?: number | null;
+    endSec?: number | null;
+    confidence?: number | null;
+  },
+): Promise<string> {
+  const id = crypto.randomUUID();
+  await db
+    .insertInto("evidence")
+    .values({
+      id,
+      video_id: input.videoId,
+      shop_candidate_id: null,
+      shop_id: null,
+      source: input.source,
+      source_ref_id: input.sourceRefId,
+      text_excerpt: input.text.slice(0, 500),
+      start_sec: input.startSec ?? null,
+      end_sec: input.endSec ?? null,
+      confidence: input.confidence ?? null,
+      metadata: JSON.stringify({ generated_for: "ai_input" }),
+      created_at: new Date(),
+    })
+    .execute();
+  evidenceIds.add(id);
+  return id;
+}
+
+function validEvidenceIds(ids: string[], allowed: Set<string>): string[] {
+  return ids.filter((id) => allowed.has(id));
+}
+
+function aiRunValues(
+  stage: string,
+  videoId: string,
+  inputHash: string,
+  inputPayload: Record<string, unknown>,
+  envelope: AiResponseEnvelope<unknown>,
+) {
+  return {
+    id: crypto.randomUUID(),
+    stage,
+    entity_type: "video",
+    entity_id: videoId,
+    provider: envelope.provider,
+    model: envelope.model,
+    prompt_version: envelope.prompt_version,
+    input_hash: inputHash,
+    input_payload: JSON.stringify(inputPayload),
+    output_payload: JSON.stringify(envelope.output),
+    raw_output_text: envelope.raw_output_text,
+    usage: JSON.stringify(envelope.usage),
+    status: "success" as const,
+    error_message: null,
+    started_at: new Date(),
+    finished_at: new Date(),
+    created_at: new Date(),
+  };
 }
 
 async function runAsrJob(db: Kysely<DB>, job: Job) {
@@ -251,28 +496,21 @@ async function runAsrJob(db: Kysely<DB>, job: Job) {
 async function classifyVideoJob(db: Kysely<DB>, job: Job) {
   const { entityId } = job.data as { entityId: string };
   const video = await db.selectFrom("videos").selectAll().where("id", "=", entityId).executeTakeFirstOrThrow();
-  const result = videoClassificationResultSchema.parse(await classifyVideo(video));
+  const analysisInput = await buildAnalysisInput(db, video);
+  const envelope = await classifyVideo(analysisInput.request);
+  const result = videoClassificationResultSchema.parse(envelope.output);
+  result.evidence_ids = validEvidenceIds(result.evidence_ids, analysisInput.evidenceIds);
   const aiRun = await db
     .insertInto("ai_runs")
-    .values({
-      id: crypto.randomUUID(),
-      stage: "classify_video",
-      entity_type: "video",
-      entity_id: video.id,
-      provider: "mock",
-      model: "mock-classifier",
-      prompt_version: "classify_video.v1",
-      input_hash: crypto.createHash("sha256").update(video.title).digest("hex"),
-      input_payload: { title: video.title, bvid: video.bvid },
-      output_payload: result,
-      raw_output_text: null,
-      usage: {},
-      status: "success",
-      error_message: null,
-      started_at: new Date(),
-      finished_at: new Date(),
-      created_at: new Date(),
-    })
+    .values(
+      aiRunValues(
+        "classify_video",
+        video.id,
+        crypto.createHash("sha256").update(JSON.stringify(analysisInput.request)).digest("hex"),
+        { request: analysisInput.request },
+        { ...envelope, output: result },
+      ),
+    )
     .returningAll()
     .executeTakeFirstOrThrow();
   await db
@@ -287,7 +525,7 @@ async function classifyVideoJob(db: Kysely<DB>, job: Job) {
       reason_codes: result.reason_codes,
       risk_flags: result.risk_flags,
       need_manual_review: result.need_manual_review,
-      evidence_ids: [],
+      evidence_ids: result.evidence_ids,
       created_at: new Date(),
     })
     .execute();
@@ -306,35 +544,39 @@ async function classifyVideoJob(db: Kysely<DB>, job: Job) {
 
   if (result.is_shop_visit) {
     await pipelineQueue.add("extract_comment_signals", { entityType: "video", entityId: video.id }, { attempts: 3 });
-    await pipelineQueue.add("structure_video", { entityType: "video", entityId: video.id }, { attempts: 3 });
   }
   return result;
 }
 
 async function commentSignalsJob(db: Kysely<DB>, job: Job) {
   const { entityId } = job.data as { entityId: string };
-  const result = commentSignalExtractionSchema.parse(await extractCommentSignals(entityId));
+  const video = await db.selectFrom("videos").selectAll().where("id", "=", entityId).executeTakeFirstOrThrow();
+  const classification = await db
+    .selectFrom("video_classifications")
+    .selectAll()
+    .where("video_id", "=", entityId)
+    .orderBy("created_at", "desc")
+    .executeTakeFirst();
+  const analysisInput = await buildAnalysisInput(db, video, { previousStageOutputs: { classification } });
+  const envelope = await extractCommentSignals(analysisInput.request);
+  const result = commentSignalExtractionSchema.parse(envelope.output);
+  for (const mention of result.shop_name_mentions) mention.evidence_ids = validEvidenceIds(mention.evidence_ids, analysisInput.evidenceIds);
+  for (const mention of result.address_mentions) mention.evidence_ids = validEvidenceIds(mention.evidence_ids, analysisInput.evidenceIds);
+  for (const question of result.location_questions) question.evidence_ids = validEvidenceIds(question.evidence_ids, analysisInput.evidenceIds);
+  for (const sentiment of Object.values(result.aspect_sentiments)) {
+    sentiment.evidence_ids = validEvidenceIds(sentiment.evidence_ids, analysisInput.evidenceIds);
+  }
   const aiRun = await db
     .insertInto("ai_runs")
-    .values({
-      id: crypto.randomUUID(),
-      stage: "comment_signal",
-      entity_type: "video",
-      entity_id: entityId,
-      provider: "mock",
-      model: "mock-comment-signal",
-      prompt_version: "comment_signal.v1",
-      input_hash: entityId,
-      input_payload: { video_id: entityId },
-      output_payload: result,
-      raw_output_text: null,
-      usage: {},
-      status: "success",
-      error_message: null,
-      started_at: new Date(),
-      finished_at: new Date(),
-      created_at: new Date(),
-    })
+    .values(
+      aiRunValues(
+        "comment_signal",
+        entityId,
+        crypto.createHash("sha256").update(JSON.stringify(analysisInput.request)).digest("hex"),
+        { request: analysisInput.request },
+        { ...envelope, output: result },
+      ),
+    )
     .returningAll()
     .executeTakeFirstOrThrow();
   await db
@@ -343,43 +585,60 @@ async function commentSignalsJob(db: Kysely<DB>, job: Job) {
       id: crypto.randomUUID(),
       video_id: entityId,
       ai_run_id: aiRun.id,
-      sample_strategy: result.sample_strategy,
-      shop_name_mentions: result.shop_name_mentions,
-      address_mentions: result.address_mentions,
-      status_mentions: result.status_mentions,
-      aspect_sentiments: result.aspect_sentiments,
+      sample_strategy: JSON.stringify(result.sample_strategy),
+      shop_name_mentions: JSON.stringify(result.shop_name_mentions),
+      address_mentions: JSON.stringify(result.address_mentions),
+      status_mentions: JSON.stringify(result.status_mentions),
+      aspect_sentiments: JSON.stringify(result.aspect_sentiments),
       risk_flags: result.risk_flags,
       created_at: new Date(),
     })
     .execute();
+  await pipelineQueue.add("structure_video", { entityType: "video", entityId }, { attempts: 3 });
   return result;
 }
 
 async function structureVideoJob(db: Kysely<DB>, job: Job) {
   const { entityId } = job.data as { entityId: string };
   const video = await db.selectFrom("videos").selectAll().where("id", "=", entityId).executeTakeFirstOrThrow();
-  const result = videoStructuredAnalysisSchema.parse(await structureVideo(video));
+  const commentSignals = await db
+    .selectFrom("comment_signal_extractions")
+    .selectAll()
+    .where("video_id", "=", entityId)
+    .orderBy("created_at", "desc")
+    .executeTakeFirst();
+  const classification = await db
+    .selectFrom("video_classifications")
+    .selectAll()
+    .where("video_id", "=", entityId)
+    .orderBy("created_at", "desc")
+    .executeTakeFirst();
+  const analysisInput = await buildAnalysisInput(db, video, {
+    commentSignals: commentSignals ?? undefined,
+    previousStageOutputs: { classification, commentSignals },
+  });
+  const envelope = await structureVideo(analysisInput.request);
+  const result = videoStructuredAnalysisSchema.parse(envelope.output);
+  result.video.evidence_ids = validEvidenceIds(result.video.evidence_ids, analysisInput.evidenceIds);
+  for (const candidate of result.shop_candidates) {
+    for (const dish of candidate.card_payload.recommended_dishes) dish.evidence_ids = validEvidenceIds(dish.evidence_ids, analysisInput.evidenceIds);
+    for (const avoidPoint of candidate.card_payload.avoid_points) avoidPoint.evidence_ids = validEvidenceIds(avoidPoint.evidence_ids, analysisInput.evidenceIds);
+    for (const dimension of Object.values(candidate.review_dimensions)) {
+      dimension.evidence_ids = validEvidenceIds(dimension.evidence_ids, analysisInput.evidenceIds);
+    }
+    candidate.comment_summary.evidence_ids = validEvidenceIds(candidate.comment_summary.evidence_ids, analysisInput.evidenceIds);
+  }
   const aiRun = await db
     .insertInto("ai_runs")
-    .values({
-      id: crypto.randomUUID(),
-      stage: "structure_video",
-      entity_type: "video",
-      entity_id: video.id,
-      provider: "mock",
-      model: "mock-structure-video",
-      prompt_version: "structure_video.v1",
-      input_hash: crypto.createHash("sha256").update(video.title).digest("hex"),
-      input_payload: { title: video.title },
-      output_payload: result,
-      raw_output_text: null,
-      usage: {},
-      status: "success",
-      error_message: null,
-      started_at: new Date(),
-      finished_at: new Date(),
-      created_at: new Date(),
-    })
+    .values(
+      aiRunValues(
+        "structure_video",
+        video.id,
+        crypto.createHash("sha256").update(JSON.stringify(analysisInput.request)).digest("hex"),
+        { request: analysisInput.request },
+        { ...envelope, output: result },
+      ),
+    )
     .returningAll()
     .executeTakeFirstOrThrow();
   const analysis = await db
