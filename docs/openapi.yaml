@@ -45,6 +45,13 @@ paths:
         "200":
           description: Dashboard counters.
   /api/admin/bilibili-auth:
+    get:
+      summary: List Bilibili cookie pool status
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Cookie pool metadata only. Encrypted Cookie values are never returned.
     post:
       summary: Store encrypted Bilibili cookie
       security:
@@ -66,6 +73,14 @@ paths:
       responses:
         "200":
           description: Cookie account saved.
+  /api/admin/bilibili-auth/check:
+    post:
+      summary: Enqueue Bilibili cookie pool health check
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Cookie pool health-check job enqueued.
   /api/admin/creators:
     get:
       summary: List managed creators
@@ -75,7 +90,7 @@ paths:
         "200":
           description: Creator list.
     post:
-      summary: Create or update a creator
+      summary: Create or update a creator and enqueue Bilibili profile sync
       security:
         - cookieAuth: []
       requestBody:
@@ -86,7 +101,7 @@ paths:
               $ref: "#/components/schemas/CreateCreatorRequest"
       responses:
         "200":
-          description: Creator upserted.
+          description: Creator upserted. A lightweight `sync_creator_profile` job is enqueued to fetch Bilibili username, avatar, bio, and follower count.
   /api/admin/creators/{id}/sync:
     post:
       summary: Enqueue creator video sync
@@ -99,12 +114,12 @@ paths:
           description: Pipeline job enqueued.
   /api/admin/videos:
     get:
-      summary: List admin video tasks
+      summary: List admin video tasks with Bilibili source links
       security:
         - cookieAuth: []
       responses:
         "200":
-          description: Video list.
+          description: Video list, including `source_url` for direct Bilibili access.
   /api/admin/videos/{id}:
     get:
       summary: Get video detail, transcript segments, candidates, and review tasks
@@ -152,7 +167,7 @@ paths:
         - cookieAuth: []
       responses:
         "200":
-          description: Candidate list.
+          description: Candidate list, including source video title, BV id, and direct Bilibili URL.
   /api/admin/shop-candidates/{id}:
     get:
       summary: Get candidate detail with evidence and POI candidates
@@ -240,13 +255,13 @@ paths:
           description: Merge placeholder acknowledged.
   /api/shops/recommended:
     get:
-      summary: Get rule-based recommended shops
+      summary: Get rule-based recommended shops with source videos
       responses:
         "200":
-          description: Recommendation request and ranked shops.
+          description: Recommendation request and ranked shops. Each shop may include `source_videos` for direct Bilibili access.
   /api/shops/map:
     get:
-      summary: Get published shops in a map viewport
+      summary: Get published shops in a map viewport with source videos
       parameters:
         - name: min_lng
           in: query
@@ -262,15 +277,15 @@ paths:
           schema: { type: number }
       responses:
         "200":
-          description: Published shop pins.
+          description: Published shop pins. Each shop may include `source_videos` for direct Bilibili access.
   /api/shops/{id}:
     get:
-      summary: Get public shop detail
+      summary: Get public shop detail with source video links
       parameters:
         - $ref: "#/components/parameters/UuidId"
       responses:
         "200":
-          description: Published shop detail.
+          description: Published shop detail, including source videos that link to Bilibili.
   /api/creators:
     get:
       summary: List public creators
@@ -279,12 +294,12 @@ paths:
           description: Active creator list.
   /api/creators/{id}:
     get:
-      summary: Get creator and published shops
+      summary: Get creator and published shops with source videos
       parameters:
         - $ref: "#/components/parameters/UuidId"
       responses:
         "200":
-          description: Creator detail.
+          description: Creator detail. Shops may include source videos for direct Bilibili access.
   /api/users/events:
     post:
       summary: Write user behavior event
@@ -341,8 +356,6 @@ components:
       required: [bilibili_uid]
       properties:
         bilibili_uid:
-          type: string
-        name:
           type: string
     UserEventRequest:
       type: object
