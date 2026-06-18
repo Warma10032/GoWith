@@ -411,10 +411,10 @@ export interface ShopVideoMentionsTable {
   video_id: string;
   creator_id: string;
   shop_candidate_id: string | null;
-  mention_type: "main" | "secondary" | "passing";
+  mention_type: string;
   sentiment: string;
   evidence_ids: string[];
-  confidence: number;
+  confidence: ColumnType<number, number | undefined, number>;
   time_start_sec: number | null;
   time_end_sec: number | null;
   summary: string | null;
