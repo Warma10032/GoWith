@@ -81,6 +81,11 @@ services:
   web:
     image: node:24-alpine
     working_dir: /workspace
+    # Dev: `next dev` for hot reload. Uses compose service name for the
+    # baked client URL so browser fetches also resolve inside the Docker
+    # network. For host browser access, run a reverse proxy on the host or
+    # set `--add-host host.docker.internal:host-gateway` and override
+    # NEXT_PUBLIC_API_BASE_URL in .env.
     command: sh -c "corepack enable && pnpm config set store-dir /pnpm/store && pnpm install --frozen-lockfile && pnpm --dir apps/web exec next dev -p 3000 -H 0.0.0.0"
     ports:
       - "3000:3000"
@@ -89,7 +94,7 @@ services:
     environment:
       CI: "true"
       API_BASE_URL: http://api:4000
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:4000
+      NEXT_PUBLIC_API_BASE_URL: http://api:4000
     volumes:
       - .:/workspace
       - node_modules:/workspace/node_modules
@@ -99,6 +104,39 @@ services:
       - shared_node_modules:/workspace/packages/shared/node_modules
       - db_node_modules:/workspace/packages/db/node_modules
       - pnpm_store:/pnpm/store
+    depends_on:
+      api:
+        condition: service_started
+
+  # Optional production profile: builds Next.js once and runs `next start`
+  # (much faster first paint than `next dev`). Activate with:
+  #   docker compose --profile production up web-built
+  # Stop the dev `web` first to avoid the 3000 port collision.
+  # Add a reverse proxy (Caddy / nginx) in front of this for browser
+  # access; the baked URL points at the api service inside the network.
+  web-built:
+    image: node:24-alpine
+    working_dir: /workspace
+    profiles: ["production"]
+    command: sh -c "corepack enable && pnpm config set store-dir /pnpm/store && pnpm install --frozen-lockfile && pnpm --dir apps/web build && pnpm --dir apps/web exec next start -p 3000 -H 0.0.0.0"
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      CI: "true"
+      API_BASE_URL: http://api:4000
+      NEXT_PUBLIC_API_BASE_URL: http://api:4000
+    volumes:
+      - .:/workspace
+      - node_modules:/workspace/node_modules
+      - api_node_modules:/workspace/apps/api/node_modules
+      - web_node_modules:/workspace/apps/web/node_modules
+      - worker_node_modules:/workspace/apps/worker/node_modules
+      - shared_node_modules:/workspace/packages/shared/node_modules
+      - db_node_modules:/workspace/packages/db/node_modules
+      - pnpm_store:/pnpm/store
+      - web_next:/workspace/apps/web/.next
     depends_on:
       api:
         condition: service_started
@@ -127,3 +165,4 @@ volumes:
   db_node_modules:
   pnpm_store:
   ai_worker_venv:
+  web_next:
