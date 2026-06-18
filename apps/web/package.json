@@ -12,6 +12,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@amap/amap-jsapi-loader": "^1.0.1",
     "@gowith/shared": "workspace:*",
     "@tanstack/react-query": "^5.62.7",
     "lucide-react": "^0.468.0",

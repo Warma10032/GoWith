@@ -35,3 +35,12 @@ select {
   scrollbar-width: thin;
 }
 
+@layer components {
+  .op-btn {
+    @apply inline-flex items-center gap-1 rounded-md border border-[#d7dde5] bg-white px-2 py-1 text-xs font-semibold text-[#263241] transition hover:border-brand hover:text-brand disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .op-btn.danger {
+    @apply border-[#f2c7bd] bg-[#fff7f4] text-[#9a341f] hover:border-[#d94f30] hover:text-[#9a341f];
+  }
+}

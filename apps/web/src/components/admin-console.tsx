@@ -6,6 +6,7 @@ import {
   Database,
   KeyRound,
   LoaderCircle,
+  MapPin,
   Play,
   ExternalLink,
   Plus,
@@ -61,6 +62,35 @@ type CandidateRow = {
   video_bvid: string;
   creator_name: string;
 };
+type PoiCandidateRow = {
+  id: string;
+  poi_id: string;
+  provider: string;
+  provider_poi_id: string;
+  name: string;
+  address?: string | null;
+  city?: string | null;
+  district?: string | null;
+  business_area?: string | null;
+  category?: string | null;
+  lng: number | string;
+  lat: number | string;
+  coord_type: string;
+  match_score: number | string;
+  match_status: string;
+};
+type CandidateDetail = {
+  candidate: {
+    id: string;
+    candidate_name?: string | null;
+    city?: string | null;
+    district?: string | null;
+    address_hint?: string | null;
+    status: string;
+    selected_poi_id?: string | null;
+  };
+  poi_candidates: PoiCandidateRow[];
+};
 type ShopRow = {
   id: string;
   display_name: string;
@@ -82,6 +112,7 @@ export function AdminConsole() {
   const [creators, setCreators] = useState<Creator[]>([]);
   const [videos, setVideos] = useState<VideoRow[]>([]);
   const [candidates, setCandidates] = useState<CandidateRow[]>([]);
+  const [candidateDetail, setCandidateDetail] = useState<CandidateDetail | null>(null);
   const [shops, setShops] = useState<ShopRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -139,7 +170,15 @@ export function AdminConsole() {
     setCreators(creatorData.creators);
     setVideos(videoData.videos);
     setCandidates(candidateData.candidates);
+    if (candidateDetail && !candidateData.candidates.some((candidate) => candidate.id === candidateDetail.candidate.id)) {
+      setCandidateDetail(null);
+    }
     setShops(shopData.shops);
+  }
+
+  async function loadCandidateDetail(candidateId: string) {
+    const detail = await requestJson<CandidateDetail>(`/api/admin/shop-candidates/${candidateId}`);
+    setCandidateDetail(detail);
   }
 
   async function runAction(label: string, action: () => Promise<void>) {
@@ -410,12 +449,23 @@ export function AdminConsole() {
                   <button
                     onClick={() => void runAction("搜索 POI", async () => {
                       await requestJson(`/api/admin/shop-candidates/${candidate.id}/search-poi`, { method: "POST" });
+                      await loadCandidateDetail(candidate.id);
                     })}
                     className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-xs font-medium"
                     disabled={!!busyAction}
                   >
                     <Search size={13} />
                     POI
+                  </button>
+                  <button
+                    onClick={() => void runAction("查看候选", async () => {
+                      await loadCandidateDetail(candidate.id);
+                    })}
+                    className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-xs font-medium"
+                    disabled={!!busyAction}
+                  >
+                    <MapPin size={13} />
+                    详情
                   </button>
                   <button
                     onClick={() => void runAction("驳回候选", async () => {
@@ -431,6 +481,60 @@ export function AdminConsole() {
               ])}
               empty="暂无候选店铺"
             />
+            {candidateDetail ? (
+              <div className="mt-4 rounded-lg border border-line bg-[#fffaf0] p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold">{candidateDetail.candidate.candidate_name ?? "店名待确认"}</h3>
+                    <p className="mt-1 text-xs text-muted">
+                      {candidateDetail.candidate.city ?? "未知城市"} · {candidateDetail.candidate.district ?? "未知区域"} · {candidateDetail.candidate.status}
+                    </p>
+                  </div>
+                  <button className="rounded-md border border-line bg-white px-2 py-1 text-xs font-medium" onClick={() => setCandidateDetail(null)}>
+                    收起
+                  </button>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {candidateDetail.poi_candidates.length ? (
+                    candidateDetail.poi_candidates.map((poi) => (
+                      <div key={poi.id} className="rounded-lg border border-line bg-white p-3 text-sm">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="font-medium">{poi.name}</div>
+                            <div className="mt-1 text-xs text-muted">
+                              {[poi.city, poi.district, poi.business_area, poi.address].filter(Boolean).join(" · ") || "地址待补充"}
+                            </div>
+                            <div className="mt-1 text-xs text-muted">
+                              {poi.provider}:{poi.provider_poi_id} · {poi.coord_type} · {poi.lng},{poi.lat}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="rounded-md bg-[#eef7ed] px-2 py-1 text-xs text-[#2d6330]">
+                              {Number(poi.match_score).toFixed(2)} · {poi.match_status}
+                            </span>
+                            <button
+                              onClick={() => void runAction("选择 POI", async () => {
+                                await requestJson(`/api/admin/shop-candidates/${candidateDetail.candidate.id}/select-poi`, {
+                                  method: "POST",
+                                  body: JSON.stringify({ poi_id: poi.poi_id }),
+                                });
+                                await loadCandidateDetail(candidateDetail.candidate.id);
+                              })}
+                              className="rounded-md bg-ink px-2 py-1 text-xs font-semibold text-white"
+                              disabled={!!busyAction}
+                            >
+                              选择该 POI
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="rounded-lg border border-dashed border-line bg-white p-3 text-sm text-muted">暂无 POI 候选，请先搜索。</p>
+                  )}
+                </div>
+              </div>
+            ) : null}
           </Panel>
 
           <Panel title="已入库店铺" icon={<Store size={17} />}>

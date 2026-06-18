@@ -1,11 +1,11 @@
-import { AdminConsole } from "@/components/admin-console";
+import { AdminWorkbenchPage } from "@/components/admin-workbench-page";
 import { TopNav } from "@/components/top-nav";
 
 export default function AdminPage() {
   return (
     <main>
       <TopNav />
-      <AdminConsole />
+      <AdminWorkbenchPage />
     </main>
   );
 }
