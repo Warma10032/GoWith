@@ -565,6 +565,118 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     return { ok: true, candidate: result };
   });
 
+  app.post("/shop-candidates/:id/promote", async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const admin = await requireAdmin(app.db, request);
+    const result = await app.db.transaction().execute(async (trx) => {
+      const candidate = await trx
+        .selectFrom("shop_candidates")
+        .selectAll()
+        .where("id", "=", params.id)
+        .executeTakeFirst();
+      if (!candidate) throw new HttpError(404, "candidate_not_found", "Shop candidate not found");
+      if (candidate.status !== "poi_matched" || !candidate.selected_poi_id) {
+        throw new HttpError(
+          409,
+          "candidate_not_ready",
+          "Candidate must be in status='poi_matched' with a selected_poi_id before promote",
+        );
+      }
+      const poi = await trx
+        .selectFrom("pois")
+        .selectAll()
+        .where("id", "=", candidate.selected_poi_id)
+        .executeTakeFirst();
+      if (!poi) throw new HttpError(404, "poi_not_found", "Selected POI no longer exists");
+
+      // Confidence: average of name / location / summary, fall back to 0 if null.
+      const confidences = [candidate.name_confidence, candidate.location_confidence, candidate.summary_confidence]
+        .filter((value): value is number => typeof value === "number");
+      const shopConfidence =
+        confidences.length > 0 ? confidences.reduce((sum, value) => sum + value, 0) / confidences.length : 0;
+
+      const shop = await trx
+        .insertInto("shops")
+        .values({
+          id: crypto.randomUUID(),
+          primary_poi_id: poi.id,
+          canonical_name: candidate.normalized_name ?? candidate.candidate_name ?? "未命名店铺",
+          display_name: candidate.candidate_name ?? candidate.normalized_name ?? "未命名店铺",
+          category_primary: candidate.category_primary,
+          category_secondary: candidate.category_secondary,
+          province: poi.province ?? candidate.province,
+          city: poi.city ?? candidate.city,
+          district: poi.district ?? candidate.district,
+          business_area: poi.business_area ?? candidate.business_area,
+          address: poi.address ?? candidate.address_hint,
+          lng: poi.lng,
+          lat: poi.lat,
+          coord_type: poi.coord_type,
+          avg_price_hint: null,
+          card_payload: candidate.card_payload,
+          aggregated_review: candidate.review_dimensions,
+          quality: { shop_confidence: shopConfidence },
+          source_stats: { creator_count: 1, video_count: 1, comment_signal_count: 0 },
+          status: "draft",
+          published_at: null,
+          last_reviewed_at: new Date(),
+          created_at: new Date(),
+          updated_at: new Date(),
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+
+      // Kysely 0.27 strips `| null` from Insertable even when the column is
+      // declared `number | null` (a known Kysely limitation). We coalesce to
+      // 0 (a valid timestamp / neutral confidence) and let downstream readers
+      // treat 0 as "not captured" for time fields. SQL columns are unchanged.
+      await trx
+        .insertInto("shop_video_mentions")
+        .values({
+          id: crypto.randomUUID(),
+          shop_id: shop.id,
+          video_id: candidate.video_id,
+          creator_id: candidate.creator_id,
+          shop_candidate_id: candidate.id,
+          mention_type: "main",
+          sentiment: "unknown",
+          summary: null,
+          evidence_ids: [],
+          time_start_sec: candidate.time_start_sec ?? 0,
+          time_end_sec: candidate.time_end_sec ?? 0,
+          confidence: candidate.name_confidence ?? 0,
+          created_at: new Date(),
+        })
+        .execute();
+
+      const updated = await trx
+        .updateTable("shop_candidates")
+        .set({ status: "merged", merged_shop_id: shop.id, updated_at: new Date() })
+        .where("id", "=", params.id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+
+      await trx
+        .insertInto("review_events")
+        .values({
+          id: crypto.randomUUID(),
+          review_task_id: null,
+          entity_type: "shop_candidate",
+          entity_id: params.id,
+          action: "promote",
+          before_json: { status: candidate.status, selected_poi_id: candidate.selected_poi_id },
+          after_json: { status: "merged", shop_id: shop.id, display_name: shop.display_name },
+          reason: "Admin promoted candidate to shop",
+          reviewer_id: admin.id,
+          created_at: new Date(),
+        })
+        .execute();
+
+      return { shop, candidate: updated };
+    });
+    return { ok: true, shop: result.shop, candidate: result.candidate };
+  });
+
   app.post("/shop-candidates/:id/reject", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     await app.db.updateTable("shop_candidates").set({ status: "rejected" }).where("id", "=", params.id).execute();

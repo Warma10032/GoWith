@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
+  ArrowUpRight,
   CircleAlert,
   Database,
   ExternalLink,
@@ -376,6 +377,15 @@ export function AdminWorkbenchPage() {
                   <button onClick={() => void run("搜索 POI", async () => adminFetch(`/api/admin/shop-candidates/${candidate.id}/search-poi`, { method: "POST" }))} className="op-btn" disabled={!!busy}>
                     <MapPin size={13} />
                     POI
+                  </button>
+                  <button
+                    onClick={() => void run("晋升为店铺", async () => adminFetch(`/api/admin/shop-candidates/${candidate.id}/promote`, { method: "POST" }))}
+                    className="op-btn"
+                    disabled={!!busy || candidate.status !== "poi_matched"}
+                    title={candidate.status !== "poi_matched" ? "需要先选择 POI 并匹配成功" : "晋升为店铺"}
+                  >
+                    <ArrowUpRight size={13} />
+                    晋升
                   </button>
                   <button onClick={() => void run("驳回候选", async () => adminFetch(`/api/admin/shop-candidates/${candidate.id}/reject`, { method: "POST" }))} className="op-btn danger" disabled={!!busy}>
                     <CircleAlert size={13} />

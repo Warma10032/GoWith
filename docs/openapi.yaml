@@ -342,6 +342,34 @@ paths:
       responses:
         "200":
           description: Candidate matched.
+  /api/admin/shop-candidates/{id}/promote:
+    post:
+      summary: Promote a poi_matched shop candidate into a draft shop
+      description: |
+        Creates a `shops` row from the candidate's `card_payload` / POI fields
+        and a `shop_video_mentions` row linking it back to the source video.
+        Sets `shop_candidates.status = 'merged'` and `merged_shop_id` to the
+        new shop. Writes a `review_events` audit row. Only valid when the
+        candidate is in `status='poi_matched'` with a `selected_poi_id`.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: Candidate promoted; new shop available for review/publish.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  shop: { $ref: "#/components/schemas/Shop" }
+                  candidate: { $ref: "#/components/schemas/ShopCandidate" }
+        "404":
+          description: candidate_not_found or poi_not_found
+        "409":
+          description: candidate_not_ready (status not 'poi_matched' or selected_poi_id missing)
   /api/admin/shop-candidates/{id}/reject:
     post:
       summary: Reject a shop candidate
