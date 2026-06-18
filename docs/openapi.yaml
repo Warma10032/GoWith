@@ -383,12 +383,34 @@ paths:
   /api/admin/shops:
     get:
       summary: List shops
+      description: |
+        Filter by `?status=approved|published|draft|hidden|rejected`. The
+        `/admin/shops` UI defaults to `status=approved` (already through
+        admin review, awaiting publish).
       security:
         - cookieAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string }
       responses:
         "200":
           description: Shop list.
   /api/admin/shops/{id}:
+    get:
+      summary: Get shop detail (with mentions, videos, creators) for the /admin/shops/[id] page
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: |
+            Shop record joined with its shop_video_mentions, the source videos
+            and creators. Powers the AI-info / rating / comment-analysis /
+            evidence-chain view.
+        "404":
+          description: shop_not_found
     patch:
       summary: Update shop fields
       security:
@@ -398,9 +420,34 @@ paths:
       responses:
         "200":
           description: Shop updated.
+  /api/admin/shops/{id}/approve:
+    post:
+      summary: Mark a draft shop as approved (admin review pass)
+      description: |
+        Transitions shop.status from `draft` to `approved` and writes a
+        `review_events` row with `action='approve'`. The `/admin/shops/[id]`
+        page surfaces this button when status='draft'. The publish endpoint
+        requires status='approved'.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: Shop approved.
+        "404":
+          description: shop_not_found
+        "409":
+          description: |
+            shop_not_ready_for_approve (current status is not 'draft').
   /api/admin/shops/{id}/publish:
     post:
       summary: Publish shop and create immutable snapshot
+      description: |
+        Requires the shop to already be in `status='approved'` (call
+        `/approve` first). Creates a new `published_shop_snapshots` row
+        with `version = max + 1` and flips the row's `is_current` to true.
+        Sets `shops.status='published'`, `published_at=now()`.
       security:
         - cookieAuth: []
       parameters:
@@ -408,6 +455,11 @@ paths:
       responses:
         "200":
           description: Shop published.
+        "404":
+          description: shop_not_found
+        "409":
+          description: |
+            shop_not_approved (current status is not 'approved'; call /approve first).
   /api/admin/shops/merge:
     post:
       summary: Merge shops placeholder

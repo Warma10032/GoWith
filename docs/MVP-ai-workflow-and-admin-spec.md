@@ -865,8 +865,18 @@ rejected
 | 选择 POI | `poi_matched` |
 | 合并到已有店铺 | `merged` |
 | 驳回候选 | `rejected` |
-| 审核通过 | `approved` |
-| 发布 | `published` |
+| 晋升为店铺（创建 `shops` 行） | `merged`（candidate）/ `draft`（shop） |
+| 审核通过 | `approved`（shop） |
+| 发布 | `published`（shop） |
+
+候选级动作（修改 / 搜索 POI / 选 POI / 晋升 / 驳回）现在挂在 `/admin/videos/[id]` 视频处理控制台内，而不是工作台。审核通过与发布动作挂在 `/admin/shops/[id]` 店铺详情页。状态机如下：
+
+```
+candidate:    extracted -> poi_matched -> merged (when promoted to draft shop)
+shop:         draft -> approved -> published
+              ↑
+         (no direct promote-to-published; must pass through approved)
+```
 
 ### 13.3 需要记录的审计字段
 
