@@ -83,9 +83,16 @@ paths:
           description: Cookie pool health-check job enqueued.
   /api/admin/creators:
     get:
-      summary: List managed creators
+      summary: List managed creators with optional search
       security:
         - cookieAuth: []
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string }
       responses:
         "200":
           description: Creator list.
@@ -104,25 +111,67 @@ paths:
           description: Creator upserted. A lightweight `sync_creator_profile` job is enqueued to fetch Bilibili username, avatar, bio, and follower count.
   /api/admin/creators/{id}/sync:
     post:
-      summary: Enqueue creator video sync
+      summary: Enqueue creator video metadata sync and create observable run
       security:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/UuidId"
       responses:
         "200":
-          description: Pipeline job enqueued.
-  /api/admin/videos:
+          description: Pipeline run and job enqueued.
+  /api/admin/creators/{id}:
     get:
-      summary: List admin video tasks with Bilibili source links
+      summary: Get creator detail, stats, and latest observable run
       security:
         - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: Creator detail.
+  /api/admin/creators/{id}/videos:
+    get:
+      summary: List all videos for a creator as admin cards
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: content_type
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Creator video list.
+  /api/admin/videos:
+    get:
+      summary: List admin video tasks with search and Bilibili source links
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: creator_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { type: string }
+        - name: content_type
+          in: query
+          schema: { type: string }
       responses:
         "200":
           description: Video list, including `source_url` for direct Bilibili access.
   /api/admin/videos/{id}:
     get:
-      summary: Get video detail, transcript segments, candidates, and review tasks
+      summary: Get video detail, text assets, comments, AI runs, candidates, and latest run
       security:
         - cookieAuth: []
       parameters:
@@ -130,6 +179,16 @@ paths:
       responses:
         "200":
           description: Video detail.
+  /api/admin/videos/{id}/process:
+    post:
+      summary: Start observable video processing pipeline
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: Pipeline run and first job enqueued.
   /api/admin/videos/{id}/retry-asr:
     post:
       summary: Retry ASR for a video
@@ -139,7 +198,7 @@ paths:
         - $ref: "#/components/parameters/UuidId"
       responses:
         "200":
-          description: ASR job enqueued.
+          description: ASR run and job enqueued.
   /api/admin/videos/{id}/retry-ai:
     post:
       summary: Retry AI classification and extraction for a video
@@ -149,7 +208,56 @@ paths:
         - $ref: "#/components/parameters/UuidId"
       responses:
         "200":
-          description: AI job enqueued.
+          description: AI run and job enqueued.
+  /api/admin/pipeline-runs:
+    get:
+      summary: List observable pipeline runs
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: entity_type
+          in: query
+          schema: { type: string }
+        - name: entity_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Pipeline run list.
+  /api/admin/pipeline-runs/{id}/events:
+    get:
+      summary: Get pipeline run events for polling UI
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: Pipeline run and ordered events.
+  /api/admin/ai-runs:
+    get:
+      summary: List AI runs for admin debugging
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: entity_type
+          in: query
+          schema: { type: string }
+        - name: entity_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: stage
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: AI run list with provider, model, prompt version, and status.
   /api/admin/videos/{id}/mark-non-shop:
     post:
       summary: Mark video as non shop visit
@@ -189,21 +297,48 @@ paths:
           description: Candidate updated.
   /api/admin/shop-candidates/{id}/search-poi:
     post:
-      summary: Enqueue POI search for a candidate
+      summary: Enqueue AMap POI search for a candidate
       security:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/UuidId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                keywords:
+                  type: string
+                  description: Optional keyword override. Defaults to candidate name and location hints.
+                region:
+                  type: string
+                  description: Optional city/district override.
+                types:
+                  type: string
+                  description: Optional AMap typecode filter.
       responses:
         "200":
           description: POI match job enqueued.
   /api/admin/shop-candidates/{id}/select-poi:
     post:
-      summary: Select POI for a candidate
+      summary: Select POI for a candidate and write review event
       security:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/UuidId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [poi_id]
+              properties:
+                poi_id:
+                  type: string
+                  format: uuid
       responses:
         "200":
           description: Candidate matched.
@@ -275,9 +410,36 @@ paths:
         - name: max_lat
           in: query
           schema: { type: number }
+        - name: q
+          in: query
+          schema: { type: string }
+          description: Optional filter over published shop name, address, city, and district.
+        - name: creator_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: category
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500 }
       responses:
         "200":
           description: Published shop pins. Each shop may include `source_videos` for direct Bilibili access.
+  /api/shops/search:
+    get:
+      summary: Search published GoWith shops
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+          required: true
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50 }
+      responses:
+        "200":
+          description: Published shop search results with coordinates and source videos.
   /api/shops/{id}:
     get:
       summary: Get public shop detail with source video links
