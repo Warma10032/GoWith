@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { MapPin, Navigation, ShieldCheck, Star } from "lucide-react";
+import { ExternalLink, MapPin, Navigation, ShieldCheck, Star } from "lucide-react";
 import type { ShopCardData } from "@/lib/api";
 
 export function ShopCard({ shop }: { shop: ShopCardData }) {
   const card = shop.card_payload ?? {};
   const tags = card.tags ?? [];
   const confidence = shop.quality?.shop_confidence;
+  const sourceVideo = shop.source_videos?.[0];
 
   return (
     <article className="rounded-lg border border-line bg-white p-4 shadow-card">
@@ -46,6 +47,18 @@ export function ShopCard({ shop }: { shop: ShopCardData }) {
               <Star size={14} />
               置信度 {typeof confidence === "number" ? confidence.toFixed(2) : "待评估"}
             </span>
+            {sourceVideo ? (
+              <a
+                href={sourceVideo.source_url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex min-w-0 items-center gap-1 font-medium text-brand"
+                title={sourceVideo.title}
+              >
+                <ExternalLink size={14} />
+                <span className="max-w-[160px] truncate">原视频</span>
+              </a>
+            ) : null}
             <Link href={`/shops/${shop.id}`} className="ml-auto inline-flex items-center gap-1 font-medium text-brand">
               <Navigation size={14} />
               详情
@@ -56,4 +69,3 @@ export function ShopCard({ shop }: { shop: ShopCardData }) {
     </article>
   );
 }
-

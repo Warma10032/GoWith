@@ -4,7 +4,7 @@ import { ExternalLink, ShieldCheck } from "lucide-react";
 
 export default async function ShopPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const data = await apiFetch<{ shop: ShopCardData; mentions?: Array<{ title: string; source_url: string; creator_name: string }>; evidence?: Array<{ source: string; text_excerpt: string }> }>(
+  const data = await apiFetch<{ shop: ShopCardData; mentions?: Array<{ title: string; source_url: string; bvid?: string; creator_name: string }>; evidence?: Array<{ source: string; text_excerpt: string }> }>(
     `/api/shops/${id}`,
     undefined,
     { shop: fallbackShop, mentions: [], evidence: [] },
@@ -37,10 +37,10 @@ export default async function ShopPage({ params }: { params: Promise<{ id: strin
           <div className="mt-3 space-y-3">
             {(data.mentions ?? []).length ? (
               data.mentions?.map((mention) => (
-                <a key={mention.source_url} href={mention.source_url} className="block rounded-lg border border-line p-3 text-sm hover:border-brand">
+                <a key={mention.source_url} href={mention.source_url} target="_blank" rel="noreferrer" className="block rounded-lg border border-line p-3 text-sm hover:border-brand">
                   <span className="font-medium">{mention.title}</span>
                   <span className="mt-1 flex items-center gap-1 text-muted">
-                    {mention.creator_name}
+                    {[mention.creator_name, mention.bvid].filter(Boolean).join(" · ")}
                     <ExternalLink size={13} />
                   </span>
                 </a>

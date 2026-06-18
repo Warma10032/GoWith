@@ -1,6 +1,6 @@
 import { TopNav } from "@/components/top-nav";
 import { apiFetch, fallbackShops, type ShopCardData } from "@/lib/api";
-import { MapPin } from "lucide-react";
+import { ExternalLink, MapPin } from "lucide-react";
 
 export default async function MapPage() {
   const data = await apiFetch<{ shops: ShopCardData[] }>("/api/shops/map", undefined, { shops: fallbackShops });
@@ -23,13 +23,24 @@ export default async function MapPage() {
           <h2 className="font-semibold">当前范围店铺</h2>
           <div className="mt-4 space-y-3">
             {data.shops.map((shop) => (
-              <a key={shop.id} href={`/shops/${shop.id}`} className="block rounded-lg border border-line p-3 hover:border-brand">
-                <div className="flex items-center gap-2 font-medium">
+              <div key={shop.id} className="rounded-lg border border-line p-3 hover:border-brand">
+                <a href={`/shops/${shop.id}`} className="flex items-center gap-2 font-medium">
                   <MapPin size={16} className="text-brand" />
                   {shop.display_name}
-                </div>
+                </a>
                 <p className="mt-1 text-sm text-muted">{shop.address ?? [shop.city, shop.district].filter(Boolean).join(" · ")}</p>
-              </a>
+                {shop.source_videos?.[0] ? (
+                  <a
+                    href={shop.source_videos[0].source_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 inline-flex max-w-full items-center gap-1 text-xs font-medium text-brand"
+                  >
+                    <ExternalLink size={13} />
+                    <span className="truncate">原视频：{shop.source_videos[0].title}</span>
+                  </a>
+                ) : null}
+              </div>
             ))}
           </div>
         </aside>
@@ -37,4 +48,3 @@ export default async function MapPage() {
     </main>
   );
 }
-

@@ -7,6 +7,7 @@ import {
   KeyRound,
   LoaderCircle,
   Play,
+  ExternalLink,
   Plus,
   RefreshCw,
   Search,
@@ -22,12 +23,26 @@ type Counts = {
   shop_candidates: number;
   open_reviews: number;
   published_shops: number;
+  active_bilibili_cookies: number;
+  expired_bilibili_cookies: number;
+  risk_bilibili_cookies: number;
+};
+type BilibiliAuthAccount = {
+  id: string;
+  label: string;
+  status: "active" | "expired" | "paused" | "risk" | string;
+  last_health_check_at?: string | null;
+  last_success_at?: string | null;
+  last_error_code?: string | null;
+  last_error_message?: string | null;
+  updated_at?: string | null;
 };
 type Creator = { id: string; bilibili_uid: string; name: string; status: string; last_synced_at?: string | null };
 type VideoRow = {
   id: string;
   bvid: string;
   title: string;
+  source_url: string;
   workflow_status: string;
   is_shop_visit?: boolean | null;
   content_type?: string | null;
@@ -42,6 +57,8 @@ type CandidateRow = {
   status: string;
   risk_flags: string[];
   video_title: string;
+  video_source_url: string;
+  video_bvid: string;
   creator_name: string;
 };
 type ShopRow = {
@@ -53,17 +70,15 @@ type ShopRow = {
   updated_at?: string;
 };
 
-const seedUids = ["3546888255048212", "99157282", "1781681364", "544336675", "8263502"];
-
 export function AdminConsole() {
   const [user, setUser] = useState<User | null>(null);
   const [email, setEmail] = useState("admin@gowith.local");
   const [password, setPassword] = useState("admin123456");
   const [cookieLabel, setCookieLabel] = useState("main");
   const [cookieValue, setCookieValue] = useState("");
-  const [creatorUid, setCreatorUid] = useState(seedUids[0]);
-  const [creatorName, setCreatorName] = useState("");
+  const [creatorUid, setCreatorUid] = useState("");
   const [counts, setCounts] = useState<Counts | null>(null);
+  const [bilibiliAccounts, setBilibiliAccounts] = useState<BilibiliAuthAccount[]>([]);
   const [creators, setCreators] = useState<Creator[]>([]);
   const [videos, setVideos] = useState<VideoRow[]>([]);
   const [candidates, setCandidates] = useState<CandidateRow[]>([]);
@@ -118,7 +133,9 @@ export function AdminConsole() {
       requestJson<{ candidates: CandidateRow[] }>("/api/admin/shop-candidates?limit=20"),
       requestJson<{ shops: ShopRow[] }>("/api/admin/shops?limit=20"),
     ]);
+    const authData = await requestJson<{ accounts: BilibiliAuthAccount[] }>("/api/admin/bilibili-auth");
     setCounts(dashboard.counts);
+    setBilibiliAccounts(authData.accounts);
     setCreators(creatorData.creators);
     setVideos(videoData.videos);
     setCandidates(candidateData.candidates);
@@ -168,9 +185,8 @@ export function AdminConsole() {
     await runAction("新增博主", async () => {
       await requestJson("/api/admin/creators", {
         method: "POST",
-        body: JSON.stringify({ bilibili_uid: creatorUid, name: creatorName || undefined }),
+        body: JSON.stringify({ bilibili_uid: creatorUid }),
       });
-      setCreatorName("");
     });
   }
 
@@ -246,6 +262,16 @@ export function AdminConsole() {
       <div className="mt-5 grid gap-4 lg:grid-cols-[380px_1fr]">
         <div className="space-y-4">
           <Panel title="B站登录态" icon={<KeyRound size={17} />}>
+            <div className="mb-3 grid grid-cols-3 gap-2 text-xs">
+              <StatusPill label="可用" value={counts?.active_bilibili_cookies ?? 0} tone="success" />
+              <StatusPill label="失效" value={counts?.expired_bilibili_cookies ?? 0} tone="error" />
+              <StatusPill label="风控" value={counts?.risk_bilibili_cookies ?? 0} tone="warning" />
+            </div>
+            {(counts?.active_bilibili_cookies ?? 0) === 0 ? (
+              <Notice tone="error" text="当前没有可用 B站 Cookie，真实视频同步会失败。" />
+            ) : (counts?.expired_bilibili_cookies ?? 0) + (counts?.risk_bilibili_cookies ?? 0) > 0 ? (
+              <Notice tone="error" text="Cookie 池中存在失效或风控账号，系统会自动跳过并定时清理。" />
+            ) : null}
             <form onSubmit={handleCookieSave} className="space-y-3">
               <input value={cookieLabel} onChange={(event) => setCookieLabel(event.target.value)} className="w-full rounded-lg border border-line px-3 py-2 text-sm" placeholder="账号标签" />
               <textarea
@@ -259,16 +285,51 @@ export function AdminConsole() {
                 加密保存
               </button>
             </form>
+            <button
+              onClick={() => void runAction("检查 Cookie 池", async () => {
+                await requestJson("/api/admin/bilibili-auth/check", { method: "POST" });
+              })}
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-line px-3 py-2 text-sm font-medium"
+              disabled={!!busyAction}
+            >
+              <RefreshCw size={16} className={busyAction === "检查 Cookie 池" ? "animate-spin" : ""} />
+              检查 Cookie 池
+            </button>
+            <div className="mt-4 space-y-2">
+              {bilibiliAccounts.length ? (
+                bilibiliAccounts.map((account) => (
+                  <div key={account.id} className="rounded-lg border border-line p-3 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">{account.label}</span>
+                      <span className={`rounded-md px-2 py-1 ${account.status === "active" ? "bg-[#eef7ed] text-[#2d6330]" : account.status === "risk" ? "bg-[#fff6df] text-[#8a5b00]" : "bg-[#fff1ee] text-[#9a341f]"}`}>
+                        {account.status}
+                      </span>
+                    </div>
+                    <div className="mt-2 text-muted">
+                      最近成功：{formatTime(account.last_success_at)} · 检查：{formatTime(account.last_health_check_at)}
+                    </div>
+                    {account.last_error_code ? <div className="mt-1 text-[#9a341f]">{account.last_error_code}</div> : null}
+                  </div>
+                ))
+              ) : (
+                <p className="rounded-lg border border-dashed border-line p-3 text-xs text-muted">暂无 Cookie，保存后会进入池。</p>
+              )}
+            </div>
           </Panel>
 
           <Panel title="博主管理" icon={<Plus size={17} />}>
             <form onSubmit={handleCreatorCreate} className="space-y-3">
-              <select value={creatorUid} onChange={(event) => setCreatorUid(event.target.value)} className="w-full rounded-lg border border-line px-3 py-2 text-sm">
-                {seedUids.map((uid) => (
-                  <option key={uid} value={uid}>{uid}</option>
-                ))}
-              </select>
-              <input value={creatorName} onChange={(event) => setCreatorName(event.target.value)} className="w-full rounded-lg border border-line px-3 py-2 text-sm" placeholder="昵称，可选" />
+              <input
+                value={creatorUid}
+                onChange={(event) => setCreatorUid(event.target.value.replace(/\D/g, ""))}
+                inputMode="numeric"
+                pattern="[0-9]*"
+                className="w-full rounded-lg border border-line px-3 py-2 text-sm"
+                placeholder="输入 B站 UID"
+              />
+              <p className="rounded-lg bg-[#f7efe8] px-3 py-2 text-xs leading-5 text-muted">
+                昵称、头像和简介会在同步时从 B站资料自动更新。
+              </p>
               <button className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand px-3 py-2 text-sm font-semibold text-white" disabled={!creatorUid || !!busyAction}>
                 <Plus size={16} />
                 新增或更新
@@ -304,7 +365,18 @@ export function AdminConsole() {
             <DataTable
               columns={["标题", "博主", "状态", "分类"]}
               rows={videos.map((video) => [
-                <span key="title" className="line-clamp-1">{video.title}</span>,
+                <div key="title" className="min-w-0">
+                  <span className="line-clamp-1">{video.title}</span>
+                  <a
+                    href={video.source_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1 inline-flex max-w-full items-center gap-1 text-xs font-medium text-brand"
+                  >
+                    <ExternalLink size={12} />
+                    <span className="truncate">{video.bvid}</span>
+                  </a>
+                </div>,
                 video.creator_name,
                 video.workflow_status,
                 video.content_type ?? (video.is_shop_visit ? "shop_visit" : "待分类"),
@@ -321,7 +393,18 @@ export function AdminConsole() {
                   <div className="font-medium">{candidate.candidate_name ?? "店名待确认"}</div>
                   <div className="mt-1 text-xs text-muted">{candidate.status} · {candidate.risk_flags.join(", ") || "no_risk"}</div>
                 </div>,
-                <span key="source" className="line-clamp-1">{candidate.creator_name} / {candidate.video_title}</span>,
+                <div key="source" className="min-w-0">
+                  <span className="line-clamp-1">{candidate.creator_name} / {candidate.video_title}</span>
+                  <a
+                    href={candidate.video_source_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1 inline-flex max-w-full items-center gap-1 text-xs font-medium text-brand"
+                  >
+                    <ExternalLink size={12} />
+                    <span className="truncate">{candidate.video_bvid}</span>
+                  </a>
+                </div>,
                 [candidate.city, candidate.district, candidate.address_hint].filter(Boolean).join(" · ") || "待补全",
                 <div key="actions" className="flex flex-wrap gap-2">
                   <button
@@ -385,6 +468,31 @@ function Metric({ label, value }: { label: string; value: number }) {
       <div className="mt-1 text-sm text-muted">{label}</div>
     </div>
   );
+}
+
+function StatusPill({ label, value, tone }: { label: string; value: number; tone: "success" | "warning" | "error" }) {
+  const toneClass =
+    tone === "success"
+      ? "border-[#c9dfc8] bg-[#eef7ed] text-[#2d6330]"
+      : tone === "warning"
+        ? "border-[#f0d89a] bg-[#fff6df] text-[#8a5b00]"
+        : "border-[#f2c7bd] bg-[#fff1ee] text-[#9a341f]";
+  return (
+    <div className={`rounded-lg border px-2 py-2 ${toneClass}`}>
+      <div className="text-lg font-semibold">{value}</div>
+      <div>{label}</div>
+    </div>
+  );
+}
+
+function formatTime(value?: string | null) {
+  if (!value) return "未记录";
+  return new Date(value).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function Panel({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {

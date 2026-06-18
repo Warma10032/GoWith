@@ -43,6 +43,14 @@ export interface ShopCardData {
     avoid_points?: Array<{ text?: string }>;
   };
   quality?: Record<string, unknown>;
+  source_videos?: Array<{
+    video_id?: string;
+    title: string;
+    source_url: string;
+    bvid?: string;
+    cover_url?: string | null;
+    creator_name?: string;
+  }>;
   recommendation_item_id?: string;
   score?: number;
 }
@@ -66,6 +74,14 @@ export const fallbackShops: ShopCardData[] = [
       shop_confidence: 0.86,
       review_status: "approved",
     },
+    source_videos: [
+      {
+        title: "示例探店视频",
+        source_url: "https://www.bilibili.com",
+        bvid: "BV_SAMPLE",
+        creator_name: "示例博主",
+      },
+    ],
   },
 ];
 
