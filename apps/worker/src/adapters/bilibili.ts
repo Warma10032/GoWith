@@ -99,104 +99,6 @@ const MIXIN_KEY_ENC_TAB = [
   20, 34, 44, 52,
 ] as const;
 
-const MOCK_CREATORS: Record<string, string> = {
-  "3546888255048212": "食野地图",
-  "99157282": "城市饭点",
-  "1781681364": "咖啡因漫游",
-  "544336675": "小巷开饭",
-  "8263502": "周末去哪吃",
-};
-
-function mockPayload(uid: string): CreatorPayload {
-  const name = MOCK_CREATORS[uid] ?? `B站博主 ${uid}`;
-  const now = new Date().toISOString();
-  return {
-    name,
-    avatar_url: "https://i0.hdslb.com/bfs/face/mock.jpg",
-    bio: "Mock creator profile for local development.",
-    follower_count: 120000,
-    raw_payload_id: null,
-    videos: [
-      {
-        bvid: `BV${uid.slice(-8)}A1`,
-        aid: null,
-        cid: null,
-        title: `${name}在上海找到一家牛肉面小店`,
-        description: "本期探店上海南京东路附近的面馆，主打牛肉面和卤味。",
-        cover_url: "https://i0.hdslb.com/bfs/archive/mock-cover.jpg",
-        source_url: `https://www.bilibili.com/video/BV${uid.slice(-8)}A1`,
-        duration_sec: 420,
-        published_at: now,
-        tags: ["探店", "上海", "牛肉面"],
-        category: "美食",
-        stats: { view: 230000, like: 12000, reply: 360 },
-        raw_payload_id: null,
-        transcript: [
-          { start_sec: 12, end_sec: 25, text: "今天来南京东路附近吃一家牛肉面。" },
-          { start_sec: 80, end_sec: 96, text: "牛肉给得很足，汤底是浓郁型。" },
-          { start_sec: 120, end_sec: 135, text: "高峰期排队比较久，人均大概三十。" },
-        ],
-        transcript_language: "zh-CN",
-        transcript_raw_payload_id: null,
-        needs_asr: false,
-        comments: [
-          {
-            id: `${uid}-c1`,
-            content: "这家是不是南京东路那家？上周去还在排队。",
-            like_count: 88,
-            reply_count: 2,
-            published_at: now,
-            sample_type: "hot",
-            user_hash: null,
-            raw_payload_id: null,
-          },
-          {
-            id: `${uid}-c2`,
-            content: "牛肉面确实分量足，但是饭点要等。",
-            like_count: 35,
-            reply_count: 0,
-            published_at: now,
-            sample_type: "latest",
-            user_hash: null,
-            raw_payload_id: null,
-          },
-        ],
-      },
-      {
-        bvid: `BV${uid.slice(-8)}B2`,
-        aid: null,
-        cid: null,
-        title: `${name}的周末城市散步`,
-        description: "城市散步和聊天，非线下店铺探店。",
-        cover_url: "https://i0.hdslb.com/bfs/archive/mock-cover-2.jpg",
-        source_url: `https://www.bilibili.com/video/BV${uid.slice(-8)}B2`,
-        duration_sec: 300,
-        published_at: now,
-        tags: ["vlog", "散步"],
-        category: "生活",
-        stats: { view: 51000, like: 3200, reply: 84 },
-        raw_payload_id: null,
-        transcript: [{ start_sec: 10, end_sec: 40, text: "今天主要是城市散步，没有具体探店。" }],
-        transcript_language: "zh-CN",
-        transcript_raw_payload_id: null,
-        needs_asr: false,
-        comments: [],
-      },
-    ],
-  };
-}
-
-function mockProfilePayload(uid: string): CreatorProfilePayload {
-  const payload = mockPayload(uid);
-  return {
-    name: payload.name,
-    avatar_url: payload.avatar_url,
-    bio: payload.bio,
-    follower_count: payload.follower_count,
-    raw_payload_id: payload.raw_payload_id,
-  };
-}
-
 function sha256(value: string | Buffer): string {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
@@ -1218,7 +1120,6 @@ export async function fetchCreatorVideos(
   db: Kysely<DB>,
   uid: string,
 ): Promise<CreatorPayload> {
-  if (!env.isExternalLive) return mockPayload(uid);
   return new LiveBilibiliClient(db).fetchCreatorVideos(uid);
 }
 
@@ -1307,7 +1208,6 @@ export async function fetchCreatorProfile(
   db: Kysely<DB>,
   uid: string,
 ): Promise<CreatorProfilePayload> {
-  if (!env.isExternalLive) return mockProfilePayload(uid);
   return new LiveBilibiliClient(db).fetchCreatorProfile(uid);
 }
 
@@ -1315,21 +1215,6 @@ export async function fetchVideoAudioForAsr(
   db: Kysely<DB>,
   video: { bvid: string; cid: string | null },
 ): Promise<AudioDownload> {
-  if (!env.isExternalLive) {
-    const directory = await mkdtemp(path.join(tmpdir(), "gowith-mock-asr-"));
-    const fileName = `${video.bvid}-mock.txt`;
-    const filePath = path.join(directory, fileName);
-    await writeFile(filePath, "mock audio");
-    return {
-      filePath,
-      fileName,
-      mimeType: "text/plain",
-      rawPayloadId: null,
-      cleanup: async () => {
-        await rm(directory, { recursive: true, force: true });
-      },
-    };
-  }
   return new LiveBilibiliClient(db).fetchAudio(video);
 }
 

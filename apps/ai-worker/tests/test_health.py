@@ -29,17 +29,11 @@ def test_health() -> None:
     assert response.json()["ok"] is True
 
 
-def test_asr_mock_response(monkeypatch) -> None:
-    monkeypatch.setenv("EXTERNAL_MODE", "mock")
+def test_asr_requires_file() -> None:
     client = TestClient(app)
-    response = client.post(
-        "/asr/transcribe",
-        files={"file": ("sample.m4s", b"mock-audio", "audio/mp4")},
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["source"] == "asr"
-    assert payload["segments"]
+    response = client.post("/asr/transcribe")
+    assert response.status_code == 400
+    assert response.json()["detail"] == "audio_file_required"
 
 
 def test_groq_avg_logprob_maps_to_confidence() -> None:
@@ -86,7 +80,6 @@ def test_minimax_classify_success(monkeypatch) -> None:
             {"total_tokens": 123},
         )
 
-    monkeypatch.setenv("EXTERNAL_MODE", "real")
     monkeypatch.setattr(main, "_chat_completion", fake_chat_completion)
     client = TestClient(app)
     response = client.post("/ai/classify-video", json=_analysis_payload())
@@ -111,6 +104,7 @@ def test_minimax_invalid_json_repairs_once(monkeypatch) -> None:
             {
               "schema_version": "video_classification.v1",
               "video_id": "video-1",
+              "video_id": "video-1",
               "bvid": "BV1",
               "is_shop_visit": false,
               "content_type": "non_shop_visit",
@@ -126,7 +120,6 @@ def test_minimax_invalid_json_repairs_once(monkeypatch) -> None:
             {"total_tokens": 2},
         )
 
-    monkeypatch.setenv("EXTERNAL_MODE", "real")
     monkeypatch.setattr(main, "_chat_completion", fake_chat_completion)
     client = TestClient(app)
     response = client.post("/ai/classify-video", json=_analysis_payload())

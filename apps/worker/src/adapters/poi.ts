@@ -75,10 +75,15 @@ function normalizeKeyword(value: string): string {
 }
 
 function compactText(parts: Array<string | null | undefined>): string {
-  return parts.filter((part): part is string => Boolean(part?.trim())).join(" ");
+  return parts
+    .filter((part): part is string => Boolean(part?.trim()))
+    .join(" ");
 }
 
-function diceSimilarity(left: string | null | undefined, right: string | null | undefined): number {
+function diceSimilarity(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): number {
   const a = (left ?? "").replace(/\s+/g, "").toLowerCase();
   const b = (right ?? "").replace(/\s+/g, "").toLowerCase();
   if (!a || !b) return 0;
@@ -95,12 +100,19 @@ function diceSimilarity(left: string | null | undefined, right: string | null | 
   const leftGrams = grams(a);
   const rightGrams = grams(b);
   let overlap = 0;
-  for (const [gram, count] of leftGrams) overlap += Math.min(count, rightGrams.get(gram) ?? 0);
-  const total = Math.max(1, [...leftGrams.values()].reduce((sum, count) => sum + count, 0) + [...rightGrams.values()].reduce((sum, count) => sum + count, 0));
+  for (const [gram, count] of leftGrams)
+    overlap += Math.min(count, rightGrams.get(gram) ?? 0);
+  const total = Math.max(
+    1,
+    [...leftGrams.values()].reduce((sum, count) => sum + count, 0) +
+      [...rightGrams.values()].reduce((sum, count) => sum + count, 0),
+  );
   return (2 * overlap) / total;
 }
 
-function parseLocation(value: string | undefined): { lng: number; lat: number } | null {
+function parseLocation(
+  value: string | undefined,
+): { lng: number; lat: number } | null {
   if (!value) return null;
   const [lngText, latText] = value.split(",");
   const lng = Number(lngText);
@@ -109,12 +121,27 @@ function parseLocation(value: string | undefined): { lng: number; lat: number } 
   return { lng, lat };
 }
 
-function buildQuery(candidate: CandidateContext, overrides: PoiSearchOverrides) {
-  const inferredKeyword = candidate.candidate_name ?? candidate.normalized_name ?? compactText([candidate.business_area, candidate.address_hint, candidate.category_primary]);
+function buildQuery(
+  candidate: CandidateContext,
+  overrides: PoiSearchOverrides,
+) {
+  const inferredKeyword =
+    candidate.candidate_name ??
+    candidate.normalized_name ??
+    compactText([
+      candidate.business_area,
+      candidate.address_hint,
+      candidate.category_primary,
+    ]);
   const keywords = normalizeKeyword(overrides.keywords ?? inferredKeyword);
-  const region = normalizeKeyword(overrides.region ?? candidate.district ?? candidate.city ?? "");
+  const region = normalizeKeyword(
+    overrides.region ?? candidate.district ?? candidate.city ?? "",
+  );
   const types = overrides.types?.trim() || undefined;
-  const forcedReview = !candidate.candidate_name || candidate.risk_flags.includes("shop_name_missing") || candidate.risk_flags.includes("generic_name_risk");
+  const forcedReview =
+    !candidate.candidate_name ||
+    candidate.risk_flags.includes("shop_name_missing") ||
+    candidate.risk_flags.includes("generic_name_risk");
   return {
     keywords,
     region,
@@ -133,16 +160,41 @@ function buildQuery(candidate: CandidateContext, overrides: PoiSearchOverrides) 
   };
 }
 
-function matchFeatures(candidate: CandidateContext, poi: AmapPoi): PoiMatchFeatures {
+function matchFeatures(
+  candidate: CandidateContext,
+  poi: AmapPoi,
+): PoiMatchFeatures {
   const address = safeText(poi.address);
   const businessArea = poi.business?.business_area ?? null;
   const categoryText = poi.type ?? "";
-  const nameSimilarity = diceSimilarity(candidate.candidate_name ?? candidate.normalized_name, poi.name);
-  const cityMatch = candidate.city && poi.cityname?.includes(candidate.city.replace(/市$/, "")) ? 1 : 0;
-  const districtMatch = candidate.district && poi.adname?.includes(candidate.district.replace(/区|县|市$/, "")) ? 1 : 0;
-  const businessAreaMatch = candidate.business_area && businessArea?.includes(candidate.business_area) ? 1 : 0;
-  const addressTextMatch = candidate.address_hint && address ? diceSimilarity(candidate.address_hint, address) : 0;
-  const categoryMatch = candidate.category_primary && categoryText.includes(candidate.category_primary) ? 0.8 : categoryText.includes("餐饮") ? 0.6 : 0;
+  const nameSimilarity = diceSimilarity(
+    candidate.candidate_name ?? candidate.normalized_name,
+    poi.name,
+  );
+  const cityMatch =
+    candidate.city && poi.cityname?.includes(candidate.city.replace(/市$/, ""))
+      ? 1
+      : 0;
+  const districtMatch =
+    candidate.district &&
+    poi.adname?.includes(candidate.district.replace(/区|县|市$/, ""))
+      ? 1
+      : 0;
+  const businessAreaMatch =
+    candidate.business_area && businessArea?.includes(candidate.business_area)
+      ? 1
+      : 0;
+  const addressTextMatch =
+    candidate.address_hint && address
+      ? diceSimilarity(candidate.address_hint, address)
+      : 0;
+  const categoryMatch =
+    candidate.category_primary &&
+    categoryText.includes(candidate.category_primary)
+      ? 0.8
+      : categoryText.includes("餐饮")
+        ? 0.6
+        : 0;
   return {
     name_similarity: Number(nameSimilarity.toFixed(4)),
     city_match: cityMatch,
@@ -153,7 +205,10 @@ function matchFeatures(candidate: CandidateContext, poi: AmapPoi): PoiMatchFeatu
   };
 }
 
-function scoreFeatures(features: PoiMatchFeatures, forcedReview: boolean): number {
+function scoreFeatures(
+  features: PoiMatchFeatures,
+  forcedReview: boolean,
+): number {
   const score =
     features.name_similarity * 0.46 +
     features.city_match * 0.16 +
@@ -161,24 +216,43 @@ function scoreFeatures(features: PoiMatchFeatures, forcedReview: boolean): numbe
     features.business_area_match * 0.08 +
     features.address_text_match * 0.12 +
     features.category_match * 0.08;
-  return Number(Math.min(forcedReview ? 0.88 : 1, Math.max(0, score)).toFixed(4));
+  return Number(
+    Math.min(forcedReview ? 0.88 : 1, Math.max(0, score)).toFixed(4),
+  );
 }
 
-function riskFlagsFor(candidate: CandidateContext, candidates: Array<{ name: string; match_score: number }>, forcedReview: boolean): PoiMatchResult["risk_flags"] {
+function riskFlagsFor(
+  candidate: CandidateContext,
+  candidates: Array<{ name: string; match_score: number }>,
+  forcedReview: boolean,
+): PoiMatchResult["risk_flags"] {
   const flags = new Set<PoiMatchResult["risk_flags"][number]>();
   if (!candidate.candidate_name) flags.add("shop_name_missing");
   if (forcedReview) flags.add("needs_manual_review");
-  if (candidate.risk_flags.includes("closed_or_moved_mentioned")) flags.add("closed_or_moved_mentioned");
+  if (candidate.risk_flags.includes("closed_or_moved_mentioned"))
+    flags.add("closed_or_moved_mentioned");
   const bestName = candidates[0]?.name;
-  const sameNameCount = bestName ? candidates.filter((item) => item.name === bestName && item.match_score >= 0.65).length : 0;
+  const sameNameCount = bestName
+    ? candidates.filter(
+        (item) => item.name === bestName && item.match_score >= 0.65,
+      ).length
+    : 0;
   if (sameNameCount > 1) flags.add("poi_many_same_name_candidates");
   if (!candidates.length) flags.add("poi_no_candidate");
-  else if ((candidates[0]?.match_score ?? 0) < 0.65) flags.add("poi_low_confidence");
+  else if ((candidates[0]?.match_score ?? 0) < 0.65)
+    flags.add("poi_low_confidence");
   return [...flags];
 }
 
-export function normalizeAmapTextResponse(candidate: CandidateContext, response: AmapTextResponse, query: ReturnType<typeof buildQuery>, rawPayloadId: string | null): PoiSearchResult {
-  const pois = Array.isArray(response.pois) ? response.pois : (response.pois?.poi ?? []);
+export function normalizeAmapTextResponse(
+  candidate: CandidateContext,
+  response: AmapTextResponse,
+  query: ReturnType<typeof buildQuery>,
+  rawPayloadId: string | null,
+): PoiSearchResult {
+  const pois = Array.isArray(response.pois)
+    ? response.pois
+    : (response.pois?.poi ?? []);
   const candidates = pois
     .map((poi) => {
       const location = parseLocation(poi.location);
@@ -236,74 +310,30 @@ export function normalizeAmapTextResponse(candidate: CandidateContext, response:
     match_score: matchScore,
     match_status: matchStatus,
     risk_flags,
-    manual_review_reasons: risk_flags.length ? ["高德 POI 匹配存在不确定性，需要人工确认。"] : [],
+    manual_review_reasons: risk_flags.length
+      ? ["高德 POI 匹配存在不确定性，需要人工确认。"]
+      : [],
     query_payload: query,
     raw_payload_id: rawPayloadId,
   };
 }
 
-function mockPoiResult(candidateId: string): PoiSearchResult {
-  return {
-    schema_version: "poi_match.v1",
-    candidate_id: candidateId,
-    provider: "amap",
-    selected_poi: {
-      provider_poi_id: `mock_amap_${candidateId.slice(0, 8)}`,
-      name: "某某牛肉面",
-      address: "上海市黄浦区南京东路步行街附近",
-      province: "上海市",
-      city: "上海市",
-      district: "黄浦区",
-      business_area: "南京东路",
-      location: {
-        lng: 121.4826,
-        lat: 31.2382,
-        coord_type: "gcj02",
-      },
-      category: "餐饮服务;中餐厅;中餐厅",
-      raw_provider_payload_id: null,
-    },
-    candidates: [
-      {
-        provider_poi_id: `mock_amap_${candidateId.slice(0, 8)}`,
-        name: "某某牛肉面",
-        address: "上海市黄浦区南京东路步行街附近",
-        province: "上海市",
-        city: "上海市",
-        district: "黄浦区",
-        business_area: "南京东路",
-        location: {
-          lng: 121.4826,
-          lat: 31.2382,
-          coord_type: "gcj02",
-        },
-        category: "餐饮服务;中餐厅;中餐厅",
-        category_code: "050100",
-        match_features: {
-          name_similarity: 0.92,
-          city_match: 1,
-          district_match: 0.8,
-          business_area_match: 0.7,
-          category_match: 0.9,
-          address_text_match: 0.62,
-        },
-        match_score: 0.86,
-      },
-    ],
-    match_score: 0.86,
-    match_status: "need_review",
-    risk_flags: ["address_missing"],
-    manual_review_reasons: ["地址线索不足，需人工确认是否为该分店。"],
-    query_payload: { mock: true },
-    raw_payload_id: null,
-  };
-}
-
-async function saveRawAmapPayload(db: Kysely<DB>, candidateId: string, requestPayload: Record<string, unknown>, payload: AmapTextResponse) {
+async function saveRawAmapPayload(
+  db: Kysely<DB>,
+  candidateId: string,
+  requestPayload: Record<string, unknown>,
+  payload: AmapTextResponse,
+) {
   const sanitized = { request: requestPayload, response: payload };
   const serialized = JSON.stringify(sanitized);
-  const requestHash = crypto.createHash("sha256").update(JSON.stringify(requestPayload)).digest("hex");
-  const payloadHash = crypto.createHash("sha256").update(serialized).digest("hex");
+  const requestHash = crypto
+    .createHash("sha256")
+    .update(JSON.stringify(requestPayload))
+    .digest("hex");
+  const payloadHash = crypto
+    .createHash("sha256")
+    .update(serialized)
+    .digest("hex");
   const [row] = await db
     .insertInto("raw_ingest_payloads")
     .values({
@@ -319,20 +349,28 @@ async function saveRawAmapPayload(db: Kysely<DB>, candidateId: string, requestPa
       expires_at: null,
       created_at: new Date(),
     })
-    .onConflict((oc) => oc.columns(["provider", "request_hash"]).doUpdateSet({
-      payload: sanitized as unknown as Json,
-      payload_sha256: payloadHash,
-      fetched_at: new Date(),
-    }))
+    .onConflict((oc) =>
+      oc.columns(["provider", "request_hash"]).doUpdateSet({
+        payload: sanitized as unknown as Json,
+        payload_sha256: payloadHash,
+        fetched_at: new Date(),
+      }),
+    )
     .returning(["id"])
     .execute();
   return row?.id ?? null;
 }
 
-export async function searchAmapPoi(db: Kysely<DB>, candidateId: string, overrides: PoiSearchOverrides = {}): Promise<PoiSearchResult> {
-  if (!env.isExternalLive) return mockPoiResult(candidateId);
-
-  const candidate = await db.selectFrom("shop_candidates").selectAll().where("id", "=", candidateId).executeTakeFirstOrThrow();
+export async function searchAmapPoi(
+  db: Kysely<DB>,
+  candidateId: string,
+  overrides: PoiSearchOverrides = {},
+): Promise<PoiSearchResult> {
+  const candidate = await db
+    .selectFrom("shop_candidates")
+    .selectAll()
+    .where("id", "=", candidateId)
+    .executeTakeFirstOrThrow();
   const context: CandidateContext = {
     id: candidate.id,
     candidate_name: candidate.candidate_name,
@@ -347,9 +385,15 @@ export async function searchAmapPoi(db: Kysely<DB>, candidateId: string, overrid
   };
   const query = buildQuery(context, overrides);
   if (!query.keywords) {
-    return normalizeAmapTextResponse(context, { status: "1", info: "OK", infocode: "10000", count: "0", pois: [] }, query, null);
+    return normalizeAmapTextResponse(
+      context,
+      { status: "1", info: "OK", infocode: "10000", count: "0", pois: [] },
+      query,
+      null,
+    );
   }
-  if (!env.amapWebServiceKey) throw new Error("AMAP_WEB_SERVICE_KEY is required for live POI search");
+  if (!env.amapWebServiceKey)
+    throw new Error("AMAP_WEB_SERVICE_KEY is required for live POI search");
 
   const requestPayload = {
     endpoint: "v5/place/text",
@@ -372,12 +416,23 @@ export async function searchAmapPoi(db: Kysely<DB>, candidateId: string, overrid
   params.set("show_fields", "business,photos");
   params.set("output", "json");
 
-  const response = await fetch(`https://restapi.amap.com/v5/place/text?${params.toString()}`, {
-    headers: { accept: "application/json" },
-  });
+  const response = await fetch(
+    `https://restapi.amap.com/v5/place/text?${params.toString()}`,
+    {
+      headers: { accept: "application/json" },
+    },
+  );
   if (!response.ok) throw new Error(`amap_http_${response.status}`);
   const payload = (await response.json()) as AmapTextResponse;
-  const rawPayloadId = await saveRawAmapPayload(db, candidateId, requestPayload, payload);
-  if (payload.status !== "1") throw new Error(`amap_${payload.infocode ?? "unknown"}_${payload.info ?? "failed"}`);
+  const rawPayloadId = await saveRawAmapPayload(
+    db,
+    candidateId,
+    requestPayload,
+    payload,
+  );
+  if (payload.status !== "1")
+    throw new Error(
+      `amap_${payload.infocode ?? "unknown"}_${payload.info ?? "failed"}`,
+    );
   return normalizeAmapTextResponse(context, payload, query, rawPayloadId);
 }

@@ -13,7 +13,6 @@ export type JobName =
   | "process_video"
   | "run_asr"
   | "classify_video"
-  | "extract_shop_candidates"
   | "extract_comment_signals"
   | "structure_video"
   | "match_poi"

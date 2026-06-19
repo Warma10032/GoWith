@@ -771,14 +771,15 @@ pnpm dev                       # concurrently 启 web + api + worker + ai-worker
 
 默认端口：web=3000，api=4000（Swagger UI `/docs`），ai-worker=8000，postgres=5432，redis=6380。
 
-### 10.6 外部模式 MOCK 切换
+### 10.6 外部模式
 
-`.env` 中 `EXTERNAL_MODE`：
+仓库已 Hard cut：所有 adapter（`bilibili.ts` / `poi.ts`）与 AI worker 都直接走真实外部 API。Mock 实现与 `EXTERNAL_MODE` 切换变量已删除。
 
-- `mock`（默认）：`apps/worker/src/adapters/bilibili.ts` 返回 5 个种子 UID 的确定性 fixture（每 UID 2 视频：1 探店 + 1 vlog）；`apps/ai-worker/app/main.py` 用启发式返回分类与抽取；`apps/worker/src/adapters/poi.ts` 返回硬编码 POI。
-- `real`（M1 启用）：B站 adapter 真实 HTTP、AI worker 接 OpenAI/Groq、POI 走高德。
+- B 站：`apps/worker/src/adapters/bilibili.ts` 通过 `x/space/accinfo` + `x/web-interface/view` 拿真实数据；登录态存 `bilibili_auth_accounts.encrypted_cookie`，由 `POST /api/admin/bilibili-auth` 写入。
+- AI：`apps/ai-worker/app/main.py` 全部 5 阶段调 MiniMax + Groq Whisper，需要 `MINIMAX_API_KEY` / `GROQ_API_KEY`。
+- POI：`apps/worker/src/adapters/poi.ts` 调高德 `v5/place/text`，需要 `AMAP_WEB_SERVICE_KEY`。
 
-切真实时必须保留 mock fixture 作为回归基线（CI 应包含"mock 模式跑通"断言）。
+无凭据时直接真实失败（worker 抛错、AI 5xx、POI 抛错）；离线开发需自行配置凭据或安装测试 stub。
 
 ### 10.7 推荐训练数据
 
@@ -886,10 +887,10 @@ POI 错配：
 - 4 个 SQL migration 落地（`db/migrations/00{1..4}_*.sql`）
 - Fastify API 公共 + admin 全部路由
 - BullMQ pipeline 消费者 + 5 阶段 AI 编排
-- FastAPI AI worker + Pydantic v2 schemas（mock）
+- FastAPI AI worker + Pydantic v2 schemas（已 Hard cut 真实模式）
 - Next.js 14 用户端（首页 / 地图 / 博主 / 详情）+ `/admin` 后台
 - 单一 E2E smoke + packages 单元测试 + ai-worker health 测试
-- 所有外部依赖走 `EXTERNAL_MODE=mock`
+- 所有外部依赖走真实模式（已 Hard cut，无 mock fallback）
 
 ### M1：数据采集跑通（下一阶段）
 
