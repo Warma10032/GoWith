@@ -16,6 +16,7 @@ import {
   Workflow,
 } from "lucide-react";
 import { apiBaseUrl } from "@/lib/api";
+import { RUN_STATUS_LABELS, lookupLabel } from "@/lib/labels";
 
 type Counts = {
   creators: number;
@@ -44,7 +45,6 @@ const navItems = [
   { href: "/admin/shops", label: "店铺", icon: Store },
   { href: "/admin/runs", label: "处理任务", icon: Workflow },
   { href: "/admin/ai-runs", label: "AI 运行", icon: Bot },
-  { href: "/admin#cookies", label: "Cookie 池", icon: KeyRound },
 ];
 
 export async function adminFetch<T>(
@@ -330,7 +330,7 @@ function RunStatusBadge({ status }: { status: string }) {
           : "bg-[#f1f3f6] text-[#5a6776]";
   return (
     <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${tone}`}>
-      {status}
+      {lookupLabel(RUN_STATUS_LABELS, status)}
     </span>
   );
 }

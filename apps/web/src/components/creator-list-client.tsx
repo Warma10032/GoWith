@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Search, X } from "lucide-react";
+import { SafeImage } from "./safe-image";
+import { CREATOR_STATUS_LABELS, lookupLabel } from "@/lib/labels";
 
 interface CreatorListItem {
   id: string;
@@ -96,8 +98,7 @@ export function CreatorListClient({ creators }: CreatorListClientProps) {
                 className="flex h-full gap-3 rounded-lg border border-line bg-white p-4 transition hover:border-brand hover:shadow-card"
               >
                 {creator.avatar_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  <SafeImage
                     src={creator.avatar_url}
                     alt=""
                     className="size-16 shrink-0 rounded-lg object-cover"
@@ -119,7 +120,7 @@ export function CreatorListClient({ creators }: CreatorListClientProps) {
                           : "bg-[#f1f3f6] text-[#5a6776]"
                       }`}
                     >
-                      {creator.status}
+                      {lookupLabel(CREATOR_STATUS_LABELS, creator.status)}
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-muted">

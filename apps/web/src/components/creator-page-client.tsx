@@ -6,7 +6,9 @@ import { useCallback, useState } from "react";
 import { ExternalLink, MapPin } from "lucide-react";
 import { ShopCard } from "./shop-card";
 import { CreatorMiniMap } from "./creator-mini-map";
+import { SafeImage } from "./safe-image";
 import { apiFetch, type ShopCardData } from "@/lib/api";
+import { CREATOR_STATUS_LABELS, lookupLabel } from "@/lib/labels";
 
 type LatestVideo = {
   id: string;
@@ -101,8 +103,7 @@ export function CreatorPageClient({
                 title={`UID ${c.bilibili_uid} · ${c.follower_count ?? "?"} 粉`}
               >
                 {c.avatar_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  <SafeImage
                     src={c.avatar_url}
                     alt=""
                     className="size-5 rounded-full object-cover"
@@ -128,8 +129,7 @@ export function CreatorPageClient({
       <div className="mt-4 rounded-lg border border-line bg-white p-6">
         <div className="flex flex-wrap items-start gap-4">
           {creator.avatar_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <SafeImage
               src={creator.avatar_url}
               alt=""
               className="size-20 rounded-lg object-cover"
@@ -149,7 +149,7 @@ export function CreatorPageClient({
                     : "bg-[#f1f3f6] text-[#5a6776]"
                 }`}
               >
-                {creator.status}
+                {lookupLabel(CREATOR_STATUS_LABELS, creator.status)}
               </span>
             </div>
             <p className="mt-1 text-sm text-muted">

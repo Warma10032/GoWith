@@ -13,9 +13,18 @@ import {
   RefreshCw,
   Search,
   Send,
+  Trash2,
   Workflow,
 } from "lucide-react";
 import { AdminShell, adminFetch } from "./admin-shell";
+import {
+  BILIBILI_ACCOUNT_STATUS_LABELS,
+  CREATOR_STATUS_LABELS,
+  RUN_STATUS_LABELS,
+  VIDEO_CONTENT_TYPE_LABELS,
+  VIDEO_WORKFLOW_STATUS_LABELS,
+  lookupLabel,
+} from "@/lib/labels";
 
 type User = { id: string; email?: string | null; role: "user" | "admin" };
 type BilibiliAuthAccount = {
@@ -85,13 +94,14 @@ export function AdminWorkbenchPage() {
   const [accounts, setAccounts] = useState<BilibiliAuthAccount[]>([]);
   const [runs, setRuns] = useState<PipelineRun[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [deletingCookieId, setDeletingCookieId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
   const pendingRuns = useMemo(
     () =>
-      runs.filter((run) => ["queued", "running"].includes(run.status)).length,
+      runs.filter((run) => ["queued", "running"].includes(run.status as string)).length,
     [runs],
   );
 
@@ -150,6 +160,27 @@ export function AdminWorkbenchPage() {
       setError(err instanceof Error ? err.message : "操作失败");
     } finally {
       setBusy(null);
+    }
+  }
+
+  async function handleDeleteCookie(account: BilibiliAuthAccount) {
+    const confirmed = window.confirm(
+      `确认删除 Cookie 账号「${account.label}」？\n删除后 worker 不再使用此账号拉取数据。`,
+    );
+    if (!confirmed) return;
+    setDeletingCookieId(account.id);
+    setError(null);
+    setMessage(null);
+    try {
+      await adminFetch(`/api/admin/bilibili-auth/${account.id}`, {
+        method: "DELETE",
+      });
+      setMessage(`已删除 Cookie「${account.label}」`);
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "删除 Cookie 失败");
+    } finally {
+      setDeletingCookieId(null);
     }
   }
 
@@ -312,7 +343,7 @@ export function AdminWorkbenchPage() {
               rows={runs.map((runItem) => ({
                 id: runItem.id,
                 title: runItem.run_type,
-                meta: `${runItem.entity_type}:${runItem.entity_id.slice(0, 8)} · ${runItem.status}`,
+                meta: `${runItem.entity_type}:${runItem.entity_id.slice(0, 8)} · ${lookupLabel(RUN_STATUS_LABELS, runItem.status)}`,
                 href:
                   runItem.entity_type === "video"
                     ? `/admin/videos/${runItem.entity_id}`
@@ -333,8 +364,35 @@ export function AdminWorkbenchPage() {
               rows={accounts.slice(0, 6).map((account) => ({
                 id: account.id,
                 title: account.label,
-                meta: `${account.status} · 最近成功 ${formatTime(account.last_success_at)}`,
+                meta: `${lookupLabel(BILIBILI_ACCOUNT_STATUS_LABELS, account.status)} · 最近成功 ${formatTime(account.last_success_at)}`,
               }))}
+              actions={Object.fromEntries(
+                accounts.slice(0, 6).map((account) => [
+                  account.id,
+                  <button
+                    key="delete"
+                    type="button"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      void handleDeleteCookie(account);
+                    }}
+                    className="inline-flex size-7 items-center justify-center rounded-md border border-line bg-white text-[#9a341f] hover:border-[#d94f30] hover:bg-[#fff1ee] disabled:opacity-50"
+                    disabled={
+                      deletingCookieId === account.id ||
+                      busy === "检查 Cookie 池"
+                    }
+                    aria-label={`删除 Cookie ${account.label}`}
+                    title="删除该 Cookie 账号"
+                  >
+                    {deletingCookieId === account.id ? (
+                      <LoaderCircle size={13} className="animate-spin" />
+                    ) : (
+                      <Trash2 size={13} />
+                    )}
+                  </button>,
+                ]),
+              )}
               empty="暂无 Cookie"
             />
             <button
@@ -380,7 +438,7 @@ export function AdminWorkbenchPage() {
                   {creator.name}
                 </Link>,
                 creator.bilibili_uid,
-                creator.status,
+                lookupLabel(CREATOR_STATUS_LABELS, creator.status),
                 <div key="actions" className="flex flex-wrap gap-2">
                   <button
                     onClick={() =>
@@ -443,7 +501,7 @@ export function AdminWorkbenchPage() {
                   </a>
                 </div>,
                 video.creator_name,
-                video.workflow_status,
+                lookupLabel(VIDEO_WORKFLOW_STATUS_LABELS, video.workflow_status),
                 <div key="actions" className="flex flex-wrap gap-2">
                   <button
                     onClick={() =>
@@ -545,10 +603,14 @@ function OpsTable({
   columns,
   rows,
   empty,
+  // 表格行数过多时启用行内滚动，避免撑爆右侧两栏布局；
+  // 默认 480px，约 10 行；可由调用方按需覆盖。
+  maxHeightClass = "max-h-[480px]",
 }: {
   columns: string[];
   rows: ReactNode[][];
   empty: string;
+  maxHeightClass?: string;
 }) {
   if (!rows.length)
     return (
@@ -557,9 +619,11 @@ function OpsTable({
       </div>
     );
   return (
-    <div className="overflow-x-auto">
+    <div
+      className={`overflow-x-auto overflow-y-auto ${maxHeightClass}`}
+    >
       <table className="w-full min-w-[760px] text-left text-sm">
-        <thead>
+        <thead className="sticky top-0 z-10 bg-white">
           <tr className="border-b border-[#e3e8ef] text-xs uppercase tracking-wide text-[#6b7785]">
             {columns.map((column) => (
               <th key={column} className="px-3 py-2 font-semibold">
@@ -593,9 +657,12 @@ function OpsTable({
 function CompactRows({
   rows,
   empty,
+  actions,
 }: {
   rows: Array<{ id: string; title: string; meta: string; href?: string }>;
   empty: string;
+  // 按 row.id 注入每行右侧的按钮；未提供或 id 不匹配则不渲染按钮区。
+  actions?: Record<string, ReactNode>;
 }) {
   if (!rows.length)
     return (
@@ -607,11 +674,16 @@ function CompactRows({
     <div className="space-y-2">
       {rows.map((row) => {
         const body = (
-          <div className="rounded-md border border-[#e3e8ef] bg-[#f8fafc] px-3 py-2">
-            <div className="line-clamp-1 text-sm font-semibold text-[#16202b]">
-              {row.title}
+          <div className="flex items-center justify-between gap-2 rounded-md border border-[#e3e8ef] bg-[#f8fafc] px-3 py-2">
+            <div className="min-w-0 flex-1">
+              <div className="line-clamp-1 text-sm font-semibold text-[#16202b]">
+                {row.title}
+              </div>
+              <div className="mt-1 text-xs text-[#6b7785]">{row.meta}</div>
             </div>
-            <div className="mt-1 text-xs text-[#6b7785]">{row.meta}</div>
+            {actions?.[row.id] ? (
+              <div className="shrink-0">{actions[row.id]}</div>
+            ) : null}
           </div>
         );
         return row.href ? (

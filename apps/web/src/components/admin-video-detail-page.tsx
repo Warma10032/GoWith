@@ -15,6 +15,17 @@ import {
   ShieldOff,
 } from "lucide-react";
 import { AdminShell, adminFetch } from "./admin-shell";
+import { SafeImage } from "./safe-image";
+import {
+  POI_MATCH_STATUS_LABELS,
+  RISK_FLAG_LABELS,
+  RUN_STATUS_LABELS,
+  SHOP_CANDIDATE_STATUS_LABELS,
+  VIDEO_CONTENT_TYPE_LABELS,
+  VIDEO_WORKFLOW_STATUS_LABELS,
+  lookupLabel,
+  lookupLabels,
+} from "@/lib/labels";
 
 type PipelineRun = { id: string; run_type: string; status: string; created_at: string; started_at?: string | null; finished_at?: string | null };
 type PipelineEvent = {
@@ -128,7 +139,7 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
   }, [videoId]);
 
   useEffect(() => {
-    if (!activeRun || !["queued", "running"].includes(activeRun.status)) return undefined;
+    if (!activeRun || !["queued", "running"].includes(activeRun.status as string)) return undefined;
     const timer = setInterval(() => {
       void loadEvents(activeRun.id).catch(() => undefined);
     }, 2000);
@@ -221,13 +232,21 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
           <div className="space-y-4">
             <section className="rounded-lg border border-line bg-white p-4">
               <div className="flex flex-wrap gap-4">
-                {detail.video.cover_url ? <img src={detail.video.cover_url} alt="" className="w-56 rounded-lg object-cover" /> : <div className="h-32 w-56 rounded-lg bg-[#f7efe8]" />}
+                {detail.video.cover_url ? (
+                  <SafeImage
+                    src={detail.video.cover_url}
+                    alt=""
+                    className="h-32 w-56 rounded-lg object-cover"
+                  />
+                ) : (
+                  <div className="h-32 w-56 rounded-lg bg-[#f7efe8]" />
+                )}
                 <div className="min-w-0 flex-1">
                   <h2 className="text-xl font-semibold">{detail.video.title}</h2>
                   <p className="mt-2 text-sm text-muted">{detail.video.bvid} · {detail.video.category ?? "未知分区"} · {formatTime(detail.video.published_at)}</p>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <Badge>{detail.video.workflow_status}</Badge>
-                    {detail.video.content_type ? <Badge>{detail.video.content_type}</Badge> : null}
+                    <Badge>{lookupLabel(VIDEO_WORKFLOW_STATUS_LABELS, detail.video.workflow_status)}</Badge>
+                    {detail.video.content_type ? <Badge>{lookupLabel(VIDEO_CONTENT_TYPE_LABELS, detail.video.content_type)}</Badge> : null}
                     {detail.video.classification_confidence ? <Badge>置信度 {Number(detail.video.classification_confidence).toFixed(2)}</Badge> : null}
                   </div>
                   {detail.video.description ? <p className="mt-3 line-clamp-3 text-sm leading-6 text-ink/80">{detail.video.description}</p> : null}
@@ -264,7 +283,7 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
             <section className="rounded-lg border border-line bg-white p-4">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="font-semibold">处理事件流</h2>
-                {activeRun ? <span className="rounded-md bg-[#f7efe8] px-2 py-1 text-xs text-muted">{activeRun.run_type} · {activeRun.status}</span> : null}
+                {activeRun ? <span className="rounded-md bg-[#f7efe8] px-2 py-1 text-xs text-muted">{activeRun.run_type} · {lookupLabel(RUN_STATUS_LABELS, activeRun.status)}</span> : null}
               </div>
               <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#f7efe8]">
                 <div className="h-full bg-brand" style={{ width: `${progress}%` }} />
@@ -319,8 +338,8 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
                     <div>
                       <div className="font-medium">{candidate.candidate_name ?? "店名待确认"}</div>
                       <div className="mt-1 text-xs text-muted">
-                        {candidate.status} · {[candidate.city, candidate.district].filter(Boolean).join(" ") || "位置待补充"}
-                        {candidate.risk_flags.length ? ` · 风险: ${candidate.risk_flags.join(", ")}` : ""}
+                        {lookupLabel(SHOP_CANDIDATE_STATUS_LABELS, candidate.status)} · {[candidate.city, candidate.district].filter(Boolean).join(" ") || "位置待补充"}
+                        {candidate.risk_flags.length ? ` · 风险: ${lookupLabels(RISK_FLAG_LABELS, candidate.risk_flags)}` : ""}
                       </div>
                     </div>
                     <button
@@ -488,7 +507,7 @@ function CandidatePanel({
                             : "bg-[#e6efff] text-[#1a4f9a]"
                       }`}
                     >
-                      {poi.match_status} · {Number(poi.match_score).toFixed(2)}
+                      {lookupLabel(POI_MATCH_STATUS_LABELS, poi.match_status)} · {Number(poi.match_score).toFixed(2)}
                     </span>
                     <button
                       onClick={() => onSelectPoi(poi.poi_id)}

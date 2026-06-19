@@ -4,6 +4,13 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ExternalLink, LoaderCircle, Play, Search } from "lucide-react";
 import { AdminShell, adminFetch } from "./admin-shell";
+import { SafeImage } from "./safe-image";
+import {
+  CREATOR_STATUS_LABELS,
+  VIDEO_CONTENT_TYPE_LABELS,
+  VIDEO_WORKFLOW_STATUS_LABELS,
+  lookupLabel,
+} from "@/lib/labels";
 
 type CreatorDetail = {
   creator: {
@@ -82,11 +89,21 @@ export function AdminCreatorDetailPage({ creatorId }: { creatorId: string }) {
         <div className="space-y-4">
           <section className="rounded-lg border border-line bg-white p-4">
             <div className="flex flex-wrap items-start gap-4">
-              {detail.creator.avatar_url ? <img src={detail.creator.avatar_url} alt="" className="size-16 rounded-lg object-cover" /> : <div className="size-16 rounded-lg bg-[#f7efe8]" />}
+              {detail.creator.avatar_url ? (
+                <SafeImage
+                  src={detail.creator.avatar_url}
+                  alt=""
+                  className="size-16 rounded-lg object-cover"
+                />
+              ) : (
+                <div className="size-16 rounded-lg bg-[#f7efe8]" />
+              )}
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-xl font-semibold">{detail.creator.name}</h2>
-                  <span className="rounded-md bg-[#eef7ed] px-2 py-1 text-xs text-[#2d6330]">{detail.creator.status}</span>
+                  <span className="rounded-md bg-[#eef7ed] px-2 py-1 text-xs text-[#2d6330]">
+                    {lookupLabel(CREATOR_STATUS_LABELS, detail.creator.status)}
+                  </span>
                 </div>
                 <p className="mt-1 text-sm text-muted">UID {detail.creator.bilibili_uid} · 粉丝 {detail.creator.follower_count ?? "未知"} · 最近同步 {formatTime(detail.creator.last_synced_at)}</p>
                 {detail.creator.bio ? <p className="mt-2 line-clamp-2 text-sm text-ink/80">{detail.creator.bio}</p> : null}
@@ -132,14 +149,22 @@ export function AdminCreatorDetailPage({ creatorId }: { creatorId: string }) {
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {videos.map((video) => (
                 <article key={video.id} className="overflow-hidden rounded-lg border border-line bg-white">
-                  {video.cover_url ? <img src={video.cover_url} alt="" className="aspect-video w-full object-cover" /> : <div className="aspect-video bg-[#f7efe8]" />}
+                  {video.cover_url ? (
+                    <SafeImage
+                      src={video.cover_url}
+                      alt=""
+                      className="aspect-video w-full object-cover"
+                    />
+                  ) : (
+                    <div className="aspect-video bg-[#f7efe8]" />
+                  )}
                   <div className="p-3">
                     <Link href={`/admin/videos/${video.id}`} className="line-clamp-2 min-h-10 font-semibold hover:text-brand">
                       {video.title}
                     </Link>
                     <div className="mt-2 flex flex-wrap gap-1">
-                      <Badge>{video.workflow_status}</Badge>
-                      {video.content_type ? <Badge>{video.content_type}</Badge> : null}
+                      <Badge>{lookupLabel(VIDEO_WORKFLOW_STATUS_LABELS, video.workflow_status)}</Badge>
+                      {video.content_type ? <Badge>{lookupLabel(VIDEO_CONTENT_TYPE_LABELS, video.content_type)}</Badge> : null}
                       {video.category ? <Badge>{video.category}</Badge> : null}
                     </div>
                     <div className="mt-2 text-xs text-muted">

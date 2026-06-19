@@ -10,6 +10,12 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import { AdminShell, adminFetch } from "./admin-shell";
+import {
+  AI_RUN_STAGE_LABELS,
+  PIPELINE_RUN_TYPE_LABELS,
+  RUN_STATUS_LABELS,
+  lookupLabel,
+} from "@/lib/labels";
 
 interface PipelineRunDetail {
   id: string;
@@ -116,14 +122,18 @@ export function AdminRunDetailPage({ runId }: AdminRunDetailPageProps) {
   }
 
   const entityLink = entityHref(data.run.entity_type, data.run.entity_id);
-  const runType = data.type === "pipeline" ? data.run.run_type : data.run.stage;
+  const runTypeRaw = data.type === "pipeline" ? data.run.run_type : data.run.stage;
+  const runType =
+    data.type === "pipeline"
+      ? lookupLabel(PIPELINE_RUN_TYPE_LABELS, runTypeRaw)
+      : lookupLabel(AI_RUN_STAGE_LABELS, runTypeRaw);
   const createdAt = data.run.created_at;
   const finishedAt =
     "finished_at" in data.run ? (data.run.finished_at ?? null) : null;
 
   return (
     <AdminShell
-      title={`${data.type === "pipeline" ? "Pipeline" : "AI"} · ${runType}`}
+      title={`${data.type === "pipeline" ? "处理任务" : "AI"} · ${runType}`}
       description={`${data.run.entity_type} ${data.run.entity_id}`}
     >
       <div className="space-y-4">
@@ -303,7 +313,7 @@ function RunStatusBadge({ status }: { status: string }) {
           : "bg-[#f1f3f6] text-[#5a6776]";
   return (
     <span className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${tone}`}>
-      {status}
+      {lookupLabel(RUN_STATUS_LABELS, status)}
     </span>
   );
 }

@@ -4,8 +4,14 @@ import Link from "next/link";
 import { useState } from "react";
 import { ExternalLink, Search } from "lucide-react";
 import { AdminShell, adminFetch } from "./admin-shell";
+import { SafeImage } from "./safe-image";
 import { ListState } from "./admin-list-state";
 import { useDebouncedEffect } from "@/lib/use-debounced-effect";
+import {
+  VIDEO_CONTENT_TYPE_LABELS,
+  VIDEO_WORKFLOW_STATUS_LABELS,
+  lookupLabel,
+} from "@/lib/labels";
 
 type VideoRow = {
   id: string;
@@ -85,7 +91,7 @@ export function AdminVideosPage() {
               "failed",
             ].map((item) => (
               <option key={item} value={item}>
-                {item}
+                {lookupLabel(VIDEO_WORKFLOW_STATUS_LABELS, item)}
               </option>
             ))}
           </select>
@@ -132,7 +138,7 @@ export function AdminVideosPage() {
               {videos.map((video) => (
                 <div key={video.id} className="flex gap-3 py-3">
                   {video.cover_url ? (
-                    <img
+                    <SafeImage
                       src={video.cover_url}
                       alt=""
                       className="h-20 w-32 rounded-lg object-cover"
@@ -149,7 +155,8 @@ export function AdminVideosPage() {
                     </Link>
                     <div className="mt-1 text-xs text-muted">
                       {video.creator_name} · {video.bvid} ·{" "}
-                      {video.workflow_status} · {video.content_type ?? "待分类"}
+                      {lookupLabel(VIDEO_WORKFLOW_STATUS_LABELS, video.workflow_status)} ·{" "}
+                      {lookupLabel(VIDEO_CONTENT_TYPE_LABELS, video.content_type ?? null)}
                     </div>
                     <div className="mt-2 flex gap-2">
                       <Link

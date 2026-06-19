@@ -4,6 +4,8 @@ import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { ExternalLink, LoaderCircle, Play, Plus, Search } from "lucide-react";
 import { AdminShell, adminFetch } from "./admin-shell";
+import { SafeImage } from "./safe-image";
+import { CREATOR_STATUS_LABELS, lookupLabel } from "@/lib/labels";
 
 type Creator = {
   id: string;
@@ -94,12 +96,20 @@ export function AdminCreatorsPage() {
             {creators.map((creator) => (
               <article key={creator.id} className="rounded-lg border border-line p-3">
                 <div className="flex gap-3">
-                  {creator.avatar_url ? <img src={creator.avatar_url} alt="" className="size-12 rounded-lg object-cover" /> : <div className="size-12 rounded-lg bg-[#f7efe8]" />}
+                  {creator.avatar_url ? (
+                    <SafeImage
+                      src={creator.avatar_url}
+                      alt=""
+                      className="size-12 rounded-lg object-cover"
+                    />
+                  ) : (
+                    <div className="size-12 rounded-lg bg-[#f7efe8]" />
+                  )}
                   <div className="min-w-0 flex-1">
                     <Link href={`/admin/creators/${creator.id}`} className="line-clamp-1 font-semibold hover:text-brand">
                       {creator.name}
                     </Link>
-                    <div className="mt-1 text-xs text-muted">UID {creator.bilibili_uid} · {creator.status}</div>
+                    <div className="mt-1 text-xs text-muted">UID {creator.bilibili_uid} · {lookupLabel(CREATOR_STATUS_LABELS, creator.status)}</div>
                     <div className="mt-1 text-xs text-muted">粉丝 {creator.follower_count ?? "未知"} · 同步 {formatTime(creator.last_synced_at)}</div>
                   </div>
                 </div>

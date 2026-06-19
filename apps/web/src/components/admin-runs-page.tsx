@@ -5,6 +5,12 @@ import { useState } from "react";
 import { AdminShell, adminFetch } from "./admin-shell";
 import { ListState } from "./admin-list-state";
 import { useDebouncedEffect } from "@/lib/use-debounced-effect";
+import {
+  AI_RUN_STAGE_LABELS,
+  PIPELINE_RUN_TYPE_LABELS,
+  RUN_STATUS_LABELS,
+  lookupLabel,
+} from "@/lib/labels";
 
 type PipelineRun = {
   id: string;
@@ -95,7 +101,7 @@ export function AdminRunsPage({ mode }: { mode: "pipeline" | "ai" }) {
             <option value="">全部状态</option>
             {RUN_STATUS_OPTIONS.map((item) => (
               <option key={item} value={item}>
-                {item}
+                {lookupLabel(RUN_STATUS_LABELS, item)}
               </option>
             ))}
           </select>
@@ -151,13 +157,15 @@ export function AdminRunsPage({ mode }: { mode: "pipeline" | "ai" }) {
                   <tr key={row.id} className="border-b border-line/70">
                     <td className="px-3 py-3">
                       {isAi
-                        ? (row as AiRun).stage
-                        : (row as PipelineRun).run_type}
+                        ? lookupLabel(AI_RUN_STAGE_LABELS, (row as AiRun).stage)
+                        : lookupLabel(PIPELINE_RUN_TYPE_LABELS, (row as PipelineRun).run_type)}
                     </td>
                     <td className="px-3 py-3">
                       {row.entity_type}:{row.entity_id.slice(0, 8)}
                     </td>
-                    <td className="px-3 py-3">{row.status}</td>
+                    <td className="px-3 py-3">
+                      {lookupLabel(RUN_STATUS_LABELS, row.status)}
+                    </td>
                     <td className="px-3 py-3">
                       {new Date(row.created_at).toLocaleString("zh-CN")}
                     </td>

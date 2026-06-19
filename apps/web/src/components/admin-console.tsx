@@ -16,6 +16,19 @@ import {
   Store,
 } from "lucide-react";
 import { apiBaseUrl } from "@/lib/api";
+import {
+  BILIBILI_ACCOUNT_STATUS_LABELS,
+  BILIBILI_ERROR_CODE_LABELS,
+  CREATOR_STATUS_LABELS,
+  POI_MATCH_STATUS_LABELS,
+  RISK_FLAG_LABELS,
+  SHOP_CANDIDATE_STATUS_LABELS,
+  SHOP_STATUS_LABELS,
+  VIDEO_CONTENT_TYPE_LABELS,
+  VIDEO_WORKFLOW_STATUS_LABELS,
+  lookupLabel,
+  lookupLabels,
+} from "@/lib/labels";
 
 type User = { id: string; email?: string | null; role: "user" | "admin" };
 type Counts = {
@@ -341,13 +354,17 @@ export function AdminConsole() {
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium">{account.label}</span>
                       <span className={`rounded-md px-2 py-1 ${account.status === "active" ? "bg-[#eef7ed] text-[#2d6330]" : account.status === "risk" ? "bg-[#fff6df] text-[#8a5b00]" : "bg-[#fff1ee] text-[#9a341f]"}`}>
-                        {account.status}
+                        {lookupLabel(BILIBILI_ACCOUNT_STATUS_LABELS, account.status)}
                       </span>
                     </div>
                     <div className="mt-2 text-muted">
                       最近成功：{formatTime(account.last_success_at)} · 检查：{formatTime(account.last_health_check_at)}
                     </div>
-                    {account.last_error_code ? <div className="mt-1 text-[#9a341f]">{account.last_error_code}</div> : null}
+                    {account.last_error_code ? (
+                      <div className="mt-1 text-[#9a341f]">
+                        {lookupLabel(BILIBILI_ERROR_CODE_LABELS, account.last_error_code)}
+                      </div>
+                    ) : null}
                   </div>
                 ))
               ) : (
@@ -417,8 +434,12 @@ export function AdminConsole() {
                   </a>
                 </div>,
                 video.creator_name,
-                video.workflow_status,
-                video.content_type ?? (video.is_shop_visit ? "shop_visit" : "待分类"),
+                lookupLabel(VIDEO_WORKFLOW_STATUS_LABELS, video.workflow_status),
+                video.content_type
+                  ? lookupLabel(VIDEO_CONTENT_TYPE_LABELS, video.content_type)
+                  : (video.is_shop_visit
+                    ? lookupLabel(VIDEO_CONTENT_TYPE_LABELS, "shop_visit")
+                    : "待分类"),
               ])}
               empty="暂无视频任务"
             />
@@ -430,7 +451,12 @@ export function AdminConsole() {
               rows={candidates.map((candidate) => [
                 <div key="candidate" className="min-w-0">
                   <div className="font-medium">{candidate.candidate_name ?? "店名待确认"}</div>
-                  <div className="mt-1 text-xs text-muted">{candidate.status} · {candidate.risk_flags.join(", ") || "no_risk"}</div>
+                  <div className="mt-1 text-xs text-muted">
+                    {lookupLabel(SHOP_CANDIDATE_STATUS_LABELS, candidate.status)} ·{" "}
+                    {candidate.risk_flags.length > 0
+                      ? lookupLabels(RISK_FLAG_LABELS, candidate.risk_flags)
+                      : "无风险"}
+                  </div>
                 </div>,
                 <div key="source" className="min-w-0">
                   <span className="line-clamp-1">{candidate.creator_name} / {candidate.video_title}</span>
@@ -487,7 +513,7 @@ export function AdminConsole() {
                   <div>
                     <h3 className="font-semibold">{candidateDetail.candidate.candidate_name ?? "店名待确认"}</h3>
                     <p className="mt-1 text-xs text-muted">
-                      {candidateDetail.candidate.city ?? "未知城市"} · {candidateDetail.candidate.district ?? "未知区域"} · {candidateDetail.candidate.status}
+                      {candidateDetail.candidate.city ?? "未知城市"} · {candidateDetail.candidate.district ?? "未知区域"} · {lookupLabel(SHOP_CANDIDATE_STATUS_LABELS, candidateDetail.candidate.status)}
                     </p>
                   </div>
                   <button className="rounded-md border border-line bg-white px-2 py-1 text-xs font-medium" onClick={() => setCandidateDetail(null)}>
@@ -510,7 +536,7 @@ export function AdminConsole() {
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="rounded-md bg-[#eef7ed] px-2 py-1 text-xs text-[#2d6330]">
-                              {Number(poi.match_score).toFixed(2)} · {poi.match_status}
+                              {Number(poi.match_score).toFixed(2)} · {lookupLabel(POI_MATCH_STATUS_LABELS, poi.match_status)}
                             </span>
                             <button
                               onClick={() => void runAction("选择 POI", async () => {
@@ -543,7 +569,7 @@ export function AdminConsole() {
               rows={shops.map((shop) => [
                 shop.display_name,
                 [shop.city, shop.district].filter(Boolean).join(" · ") || "待确认",
-                shop.status,
+                lookupLabel(SHOP_STATUS_LABELS, shop.status),
                 <button
                   key="publish"
                   onClick={() => void runAction("发布店铺", async () => {

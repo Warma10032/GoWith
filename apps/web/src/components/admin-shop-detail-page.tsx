@@ -4,6 +4,12 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, ExternalLink, LoaderCircle, RefreshCw, Send } from "lucide-react";
 import { AdminShell, adminFetch } from "./admin-shell";
+import {
+  MENTION_TYPE_LABELS,
+  SENTIMENT_LABELS,
+  SHOP_STATUS_LABELS,
+  lookupLabel,
+} from "@/lib/labels";
 
 type ShopDetail = {
   id: string;
@@ -152,7 +158,7 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
   return (
     <AdminShell
       title={shop.display_name}
-      description={`状态：${shop.status} · ${shop.city ?? "?"} / ${shop.district ?? "?"}${shop.business_area ? " / " + shop.business_area : ""}`}
+      description={`状态：${lookupLabel(SHOP_STATUS_LABELS, shop.status)} · ${shop.city ?? "?"} / ${shop.district ?? "?"}${shop.business_area ? " / " + shop.business_area : ""}`}
     >
       {busy ? (
         <div className="mb-3 flex items-center gap-2 rounded-lg border border-[#f0c674] bg-[#fff5e1] px-3 py-2 text-sm text-[#7a4f00]">
@@ -230,7 +236,7 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
                         : "bg-[#f1f3f6] text-[#5a6776]"
                   }`}
                 >
-                  {info.sentiment ?? "unknown"}
+                  {info.sentiment ? lookupLabel(SENTIMENT_LABELS, info.sentiment) : "暂无评价"}
                 </span>
               </div>
               <p className="mt-1 text-sm">{info.summary ?? "—"}</p>
@@ -257,7 +263,9 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
                     <Link href={`/admin/videos/${mention.video_id}`} className="line-clamp-1 font-medium hover:text-brand">
                       {video?.title ?? mention.video_id}
                     </Link>
-                    <span className="rounded bg-[#f1f3f6] px-1.5 py-0.5 text-[10px] font-semibold text-[#5a6776]">{mention.mention_type}</span>
+                    <span className="rounded bg-[#f1f3f6] px-1.5 py-0.5 text-[10px] font-semibold text-[#5a6776]">
+                      {lookupLabel(MENTION_TYPE_LABELS, mention.mention_type)}
+                    </span>
                     <span
                       className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
                         mention.sentiment === "positive"
@@ -267,7 +275,7 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
                             : "bg-[#f1f3f6] text-[#5a6776]"
                       }`}
                     >
-                      {mention.sentiment}
+                      {lookupLabel(SENTIMENT_LABELS, mention.sentiment)}
                     </span>
                     {typeof mention.confidence === "string" || typeof mention.confidence === "number" ? (
                       <span className="text-[11px] text-muted">置信度 {(Number(mention.confidence) * 100).toFixed(0)}%</span>

@@ -6,6 +6,7 @@ import { Search } from "lucide-react";
 import { AdminShell, adminFetch } from "./admin-shell";
 import { ListState } from "./admin-list-state";
 import { useDebouncedEffect } from "@/lib/use-debounced-effect";
+import { SHOP_STATUS_LABELS, lookupLabel } from "@/lib/labels";
 
 type ShopRow = {
   id: string;
@@ -88,7 +89,7 @@ export function AdminShopsPage() {
             <option value="">全部状态</option>
             {SHOP_STATUS_OPTIONS.map((item) => (
               <option key={item} value={item}>
-                {item}
+                {lookupLabel(SHOP_STATUS_LABELS, item)}
               </option>
             ))}
           </select>
@@ -166,7 +167,7 @@ export function AdminShopsPage() {
                                 : "bg-[#f1f3f6] text-[#5a6776]"
                           }`}
                         >
-                          {shop.status}
+                          {lookupLabel(SHOP_STATUS_LABELS, shop.status)}
                         </span>
                         <span className="text-[11px] text-muted">
                           AI 评分 {qualityScore}
