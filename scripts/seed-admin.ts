@@ -35,6 +35,7 @@ async function main() {
         phone: null,
         username: null,
         avatar_url: null,
+        avatar_source_url: null,
         last_login_at: null,
         created_at: new Date(),
         updated_at: new Date(),

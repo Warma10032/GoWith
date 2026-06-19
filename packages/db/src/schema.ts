@@ -21,6 +21,7 @@ export interface UsersTable {
   username: string | null;
   display_name: string | null;
   avatar_url: string | null;
+  avatar_source_url: string | null;
   role: "user" | "admin";
   status: "active" | "disabled";
   password_hash: string | null;
@@ -75,6 +76,7 @@ export interface CreatorsTable {
   bilibili_uid: string;
   name: string;
   avatar_url: string | null;
+  avatar_source_url: string | null;
   profile_url: string;
   bio: string | null;
   follower_count: number | null;
@@ -97,6 +99,7 @@ export interface VideosTable {
   title: string;
   description: string | null;
   cover_url: string | null;
+  cover_source_url: string | null;
   source_url: string;
   duration_sec: number | null;
   published_at: Timestamp | null;

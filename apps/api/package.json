@@ -13,6 +13,7 @@
   "dependencies": {
     "@fastify/cookie": "^11.0.1",
     "@fastify/cors": "^10.0.2",
+    "@fastify/static": "^9.1.3",
     "@fastify/swagger": "^9.4.0",
     "@fastify/swagger-ui": "^5.2.0",
     "@gowith/db": "workspace:*",

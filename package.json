@@ -11,6 +11,7 @@
     "dev:ai": "uv run --project apps/ai-worker --link-mode=copy uvicorn app.main:app --app-dir apps/ai-worker --host 0.0.0.0 --port 8000 --reload",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed-admin.ts",
+    "backfill:images": "tsx scripts/backfill-images.ts",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",

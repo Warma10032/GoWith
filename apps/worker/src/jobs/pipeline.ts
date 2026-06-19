@@ -26,6 +26,7 @@ import {
 } from "../adapters/ai";
 import { searchAmapPoi } from "../adapters/poi";
 import { env } from "../env";
+import { downloadImage } from "../services/image-downloader";
 import { pipelineQueue } from "../queue";
 
 export async function handlePipelineJob(db: Kysely<DB>, job: Job) {
@@ -169,11 +170,21 @@ async function syncCreatorProfile(db: Kysely<DB>, job: Job) {
   const payload = await fetchCreatorProfile(db, bilibili_uid);
   const refreshedAt = new Date();
 
+  // 下载头像到本地：第三方 URL（如 hdslb.com）有 Referer 防盗链，
+  // 落本地后 DB 存 /uploads/creators/<id>.<ext>，原 URL 留 avatar_source_url。
+  const downloaded = await downloadImage(
+    payload.avatar_url,
+    "creators",
+    entityId,
+    { uploadsDir: env.uploadsDir },
+  );
+
   await db
     .updateTable("creators")
     .set({
       name: payload.name,
-      avatar_url: payload.avatar_url,
+      avatar_url: downloaded?.url ?? payload.avatar_url,
+      avatar_source_url: downloaded?.sourceUrl ?? payload.avatar_url,
       bio: payload.bio,
       follower_count: payload.follower_count,
       raw_payload_id: payload.raw_payload_id,
@@ -201,11 +212,20 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
   });
   const payload = await fetchCreatorVideos(db, bilibili_uid);
 
+  // 先下载博主头像（同样的 Referer 防盗链原因）
+  const avatarDownloaded = await downloadImage(
+    payload.avatar_url,
+    "creators",
+    entityId,
+    { uploadsDir: env.uploadsDir },
+  );
+
   await db
     .updateTable("creators")
     .set({
       name: payload.name,
-      avatar_url: payload.avatar_url,
+      avatar_url: avatarDownloaded?.url ?? payload.avatar_url,
+      avatar_source_url: avatarDownloaded?.sourceUrl ?? payload.avatar_url,
       bio: payload.bio,
       follower_count: payload.follower_count,
       raw_payload_id: payload.raw_payload_id,
@@ -216,6 +236,14 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
     .execute();
 
   for (const video of payload.videos) {
+    // 每个视频封面单独下载到 /uploads/videos/<videoId>.<ext>
+    const coverDownloaded = await downloadImage(
+      video.cover_url,
+      "videos",
+      // 首次插入还没拿到 row.id 时，用 bvid 占位文件名，等拿到 id 后再 rename。
+      video.bvid,
+      { uploadsDir: env.uploadsDir },
+    );
     const row = await db
       .insertInto("videos")
       .values({
@@ -226,7 +254,8 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
         cid: video.cid,
         title: video.title,
         description: video.description,
-        cover_url: video.cover_url,
+        cover_url: coverDownloaded?.url ?? video.cover_url,
+        cover_source_url: coverDownloaded?.sourceUrl ?? video.cover_url,
         source_url: video.source_url,
         duration_sec: video.duration_sec,
         published_at: new Date(video.published_at),
@@ -247,7 +276,8 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
         oc.column("bvid").doUpdateSet({
           title: video.title,
           description: video.description,
-          cover_url: video.cover_url,
+          cover_url: coverDownloaded?.url ?? video.cover_url,
+          cover_source_url: coverDownloaded?.sourceUrl ?? video.cover_url,
           aid: video.aid,
           cid: video.cid,
           source_url: video.source_url,

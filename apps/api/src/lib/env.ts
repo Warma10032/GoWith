@@ -5,4 +5,6 @@ export const env = {
   authSecret: process.env.AUTH_SECRET ?? "dev-only-auth-secret-change-me",
   cookieEncryptionKey:
     process.env.COOKIE_ENCRYPTION_KEY ?? "dev-only-cookie-key-change-me",
+  // worker 写入、本 API 静态 serve 的目录；与 worker env.UPLOADS_DIR 共享。
+  uploadsDir: process.env.UPLOADS_DIR ?? "./uploads",
 };

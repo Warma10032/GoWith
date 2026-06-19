@@ -67,6 +67,7 @@ export async function getUserFromRequest(db: Kysely<DB>, request: FastifyRequest
       "users.username",
       "users.display_name",
       "users.avatar_url",
+      "users.avatar_source_url",
       "users.role",
       "users.status",
       "users.password_hash",
@@ -129,6 +130,7 @@ export function sanitizeUser(user: User) {
     email: user.email,
     display_name: user.display_name,
     avatar_url: user.avatar_url,
+    avatar_source_url: user.avatar_source_url,
     role: user.role,
     status: user.status,
   };

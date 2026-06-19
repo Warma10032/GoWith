@@ -1,3 +1,5 @@
+import path from "node:path";
+
 function numberFromEnv(name: string, fallback: number): number {
   const value = process.env[name];
   if (!value) return fallback;
@@ -17,6 +19,10 @@ export const env = {
     process.env.COOKIE_ENCRYPTION_KEY ?? "dev-only-cookie-key-change-me",
   aiWorkerUrl: process.env.AI_WORKER_URL ?? "http://localhost:8000",
   amapWebServiceKey: process.env.AMAP_WEB_SERVICE_KEY ?? "",
+  // 图片下载到本地的目录；与 apps/api 共享，让 @fastify/static 直接 serve。
+  uploadsDir: process.env.UPLOADS_DIR
+    ? path.resolve(process.env.UPLOADS_DIR)
+    : path.resolve(process.cwd(), "apps", "api", "uploads"),
   bilibiliRequestIntervalMs: numberFromEnv(
     "BILIBILI_REQUEST_INTERVAL_MS",
     1200,
