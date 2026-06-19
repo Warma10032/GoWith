@@ -43,9 +43,11 @@ type PipelineEvent = {
 type VideoCandidateRow = {
   id: string;
   candidate_name?: string | null;
+  normalized_name?: string | null;
   status: string;
   city?: string | null;
   district?: string | null;
+  selected_poi_id?: string | null;
   risk_flags: string[];
 };
 type CandidatePoi = {
@@ -280,7 +282,7 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
               </div>
             </section>
 
-            <section className="rounded-lg border border-line bg-white p-4">
+            <section className="overflow-hidden rounded-lg border border-line bg-white p-4">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="font-semibold">处理事件流</h2>
                 {activeRun ? <span className="rounded-md bg-[#f7efe8] px-2 py-1 text-xs text-muted">{activeRun.run_type} · {lookupLabel(RUN_STATUS_LABELS, activeRun.status)}</span> : null}
@@ -299,7 +301,7 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
                       </div>
                       {event.message ? <p className="mt-1 text-sm text-muted">{event.message}</p> : null}
                       {event.detail_json && Object.keys(event.detail_json).length ? (
-                        <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-[#fbfaf8] p-2 text-xs text-muted">{JSON.stringify(event.detail_json, null, 2)}</pre>
+                        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-[#fbfaf8] p-2 text-xs text-muted">{JSON.stringify(event.detail_json, null, 2)}</pre>
                       ) : null}
                     </div>
                   ))
@@ -332,7 +334,7 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
             </Panel>
 
             <Panel title="候选店铺（POI / 晋升 / 驳回）">
-              {detail.candidates.map((candidate) => (
+              {dedupeCandidates(detail.candidates).map((candidate) => (
                 <div key={candidate.id} className="rounded-lg border border-line p-3 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
@@ -399,11 +401,45 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
   );
 }
 
+function dedupeCandidates(candidates: VideoCandidateRow[]): VideoCandidateRow[] {
+  // 与 API 层 DISTINCT ON 同样的去重逻辑，作为前端兜底：
+  // 优先按 selected_poi_id（已匹配的 POI）合并；否则按
+  // (normalized_name || candidate_name, city) 合并（同名同城候选视为同一）。
+  // 所有 status 默认都展示（包括 merged / rejected），让 admin 看完整历史。
+  const STATUS_PRIORITY: Record<string, number> = {
+    poi_matched: 0,
+    poi_match_need_review: 1,
+    poi_match_low_confidence: 2,
+    poi_candidates_found: 3,
+    extracted: 4,
+    name_missing: 5,
+    merged: 6,
+    rejected: 7,
+  };
+  const byKey = new Map<string, VideoCandidateRow>();
+  for (const candidate of candidates) {
+    const key = candidate.selected_poi_id
+      ? `poi:${candidate.selected_poi_id}`
+      : `name:${candidate.normalized_name ?? candidate.candidate_name ?? ""}@${candidate.city ?? ""}`;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, candidate);
+      continue;
+    }
+    const existingRank = STATUS_PRIORITY[existing.status] ?? 99;
+    const incomingRank = STATUS_PRIORITY[candidate.status] ?? 99;
+    if (incomingRank < existingRank) {
+      byKey.set(key, candidate);
+    }
+  }
+  return Array.from(byKey.values());
+}
+
 function Panel({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="rounded-lg border border-line bg-white p-4">
+    <section className="overflow-hidden rounded-lg border border-line bg-white p-4">
       <h2 className="mb-3 font-semibold">{title}</h2>
-      <div className="space-y-2">{children}</div>
+      <div className="min-w-0 space-y-2">{children}</div>
     </section>
   );
 }

@@ -204,7 +204,7 @@ export function AdminRunDetailPage({ runId }: AdminRunDetailPageProps) {
               <summary className="cursor-pointer text-xs font-semibold text-[#5f6b79]">
                 output_payload
               </summary>
-              <pre className="mt-2 max-h-60 overflow-auto rounded-md bg-white p-2 text-[11px] text-[#16202b]">
+              <pre className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap break-all rounded-md bg-white p-2 text-[11px] text-[#16202b]">
                 {JSON.stringify(data.run.output_payload, null, 2)}
               </pre>
             </details>
@@ -255,7 +255,7 @@ export function AdminRunDetailPage({ runId }: AdminRunDetailPageProps) {
                   ) : null}
                   {event.detail_json &&
                   Object.keys(event.detail_json).length ? (
-                    <pre className="mt-2 max-h-40 overflow-auto rounded-md bg-white p-2 text-[11px] text-muted">
+                    <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-white p-2 text-[11px] text-muted">
                       {JSON.stringify(event.detail_json, null, 2)}
                     </pre>
                   ) : null}
