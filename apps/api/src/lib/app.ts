@@ -31,10 +31,9 @@ export function buildApp() {
   const uploadsRoot = path.isAbsolute(env.uploadsDir)
     ? env.uploadsDir
     : path.resolve(process.cwd(), env.uploadsDir);
-  // 临时 debug
   app.register(staticFiles, {
     root: uploadsRoot,
-    prefix: "/uploads",
+    prefix: "/uploads/",
     serve: true,
     cacheControl: true,
     maxAge: 60 * 60 * 24,
