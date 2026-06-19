@@ -101,7 +101,13 @@ async function main() {
 
     for (const video of videos) {
       const sourceUrl = video.cover_url;
-      if (!sourceUrl || sourceUrl.startsWith("/uploads/")) {
+      // 同样的模式：主字段保持原始 B站 URL，仅补 cover_source_url 做审计。
+      if (!sourceUrl) {
+        stats.videosSkipped++;
+        continue;
+      }
+      if (sourceUrl.startsWith("/uploads/")) {
+        // 历史遗留的本地化记录，不动；如需还原可手动 SQL
         stats.videosSkipped++;
         continue;
       }
@@ -109,33 +115,20 @@ async function main() {
         stats.videosSkipped++;
         continue;
       }
-      try {
-        const result = await downloadImage(sourceUrl, "videos", video.id, {
-          uploadsDir: UPLOADS_DIR,
-        });
-        if (!result) {
-          stats.videosSkipped++;
-          continue;
-        }
+      if (!video.cover_source_url) {
         await db
           .updateTable("videos")
           .set({
-            cover_url: result.url,
-            cover_source_url: result.sourceUrl,
+            cover_source_url: sourceUrl,
             updated_at: new Date(),
           })
           .where("id", "=", video.id)
           .execute();
-        console.log(`[video] ${video.bvid} ${video.title} → ${result.url}`);
         stats.videosDownloaded++;
-      } catch (err) {
-        stats.videosFailed++;
-        console.warn(
-          `[video] ${video.bvid} ${video.title} FAILED: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
+      } else {
+        stats.videosSkipped++;
       }
+      console.log(`[video] ${video.bvid} ${video.title} → source=${sourceUrl}`);
     }
 
     console.log("\n=== backfill 完成 ===");
