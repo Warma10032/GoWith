@@ -285,7 +285,8 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
     const creatorId = query.creator_id?.trim();
     const category = query.category?.trim();
     const shops = await sql`
-      SELECT DISTINCT shops.id, shops.display_name, shops.city, shops.district, shops.address, shops.lng, shops.lat, shops.coord_type, shops.card_payload, shops.quality, shops.published_at
+      SELECT DISTINCT ON (shops.primary_poi_id)
+        shops.id, shops.display_name, shops.city, shops.district, shops.address, shops.lng, shops.lat, shops.coord_type, shops.card_payload, shops.quality, shops.published_at
       FROM shops
       ${creatorId ? sql`INNER JOIN shop_video_mentions svm_filter ON svm_filter.shop_id = shops.id` : sql``}
       WHERE shops.status = 'published'
@@ -293,7 +294,7 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
         ${q ? sql`AND (shops.display_name ILIKE ${`%${q}%`} OR shops.address ILIKE ${`%${q}%`} OR shops.city ILIKE ${`%${q}%`} OR shops.district ILIKE ${`%${q}%`} OR shops.display_name % ${q})` : sql``}
         ${creatorId ? sql`AND svm_filter.creator_id = ${creatorId}` : sql``}
         ${category ? sql`AND (shops.category_primary = ${category} OR shops.category_secondary = ${category})` : sql``}
-      ORDER BY shops.published_at DESC NULLS LAST
+      ORDER BY shops.primary_poi_id, shops.published_at DESC NULLS LAST
       LIMIT ${limit}
     `.execute(app.db);
     const mapShops = shops.rows as Array<{ id: string }>;
@@ -310,7 +311,8 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
     const limit = Math.min(50, Math.max(1, Number(query.limit ?? 20)));
     if (!q) return { shops: [] };
     const shops = await sql`
-      SELECT id, display_name, city, district, address, lng, lat, coord_type, card_payload, quality,
+      SELECT DISTINCT ON (primary_poi_id)
+        id, display_name, city, district, address, lng, lat, coord_type, card_payload, quality,
         GREATEST(
           similarity(display_name, ${q}),
           similarity(COALESCE(address, ''), ${q}),
@@ -326,7 +328,7 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
           OR display_name % ${q}
           OR COALESCE(address, '') % ${q}
         )
-      ORDER BY rank_score DESC, shops.published_at DESC NULLS LAST
+      ORDER BY primary_poi_id, rank_score DESC, shops.published_at DESC NULLS LAST
       LIMIT ${limit}
     `.execute(app.db);
     const searchShops = shops.rows as Array<{ id: string }>;
