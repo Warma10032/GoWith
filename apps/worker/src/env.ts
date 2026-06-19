@@ -1,4 +1,5 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 function numberFromEnv(name: string, fallback: number): number {
   const value = process.env[name];
@@ -13,6 +14,11 @@ function booleanFromEnv(name: string, fallback: boolean): boolean {
   return ["1", "true", "yes", "on"].includes(value.toLowerCase());
 }
 
+// 用 import.meta.url 锚定源文件位置，而不是 cwd —— 这样无论
+// `pnpm dev`（concurrently，从 monorepo 根启动）还是 `pnpm dev:worker`
+// （从 apps/worker 启动）都能解析到同一个 uploads 目录。
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 export const env = {
   redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
   cookieEncryptionKey:
@@ -20,9 +26,11 @@ export const env = {
   aiWorkerUrl: process.env.AI_WORKER_URL ?? "http://localhost:8000",
   amapWebServiceKey: process.env.AMAP_WEB_SERVICE_KEY ?? "",
   // 图片下载到本地的目录；与 apps/api 共享，让 @fastify/static 直接 serve。
+  // 默认 = apps/api/uploads/，与 apps/api/src/lib/env.ts 默认值一致，
+  // 与启动方式无关。
   uploadsDir: process.env.UPLOADS_DIR
     ? path.resolve(process.env.UPLOADS_DIR)
-    : path.resolve(process.cwd(), "apps", "api", "uploads"),
+    : path.resolve(__dirname, "..", "..", "..", "api", "uploads"),
   bilibiliRequestIntervalMs: numberFromEnv(
     "BILIBILI_REQUEST_INTERVAL_MS",
     1200,
