@@ -33,7 +33,7 @@ const SHOP_STATUS_OPTIONS = [
 
 export function AdminShopsPage() {
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState("approved");
+  const [status, setStatus] = useState("");
   const [shops, setShops] = useState<ShopRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
