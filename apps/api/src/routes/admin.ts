@@ -1,12 +1,19 @@
 import crypto from "node:crypto";
 import type { FastifyPluginAsync } from "fastify";
-import { sql } from "kysely";
+import { sql, type Transaction } from "kysely";
 import { z } from "zod";
+import {
+  SYSTEM_TASK_ENTITY_ID,
+  tryAcquireTaskStartLock,
+  type DB,
+  type Json,
+  type TaskLockKey,
+} from "@gowith/db";
 import { createCreatorRequestSchema } from "@gowith/shared";
 import { HttpError } from "../lib/http";
 import { encryptSecret } from "../services/crypto";
 import { requireAdmin } from "../services/auth";
-import { enqueuePipelineJob } from "../services/queue";
+import { enqueuePipelineJob, enqueuePipelineRunJob } from "../services/queue";
 
 const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
@@ -27,38 +34,86 @@ const bilibiliAuthSchema = z.object({
   csrf_token: z.string().optional(),
 });
 
-async function createPipelineRun(
-  app: Parameters<FastifyPluginAsync>[0],
-  input: {
-    runType:
-      | "creator_video_sync"
-      | "video_processing"
-      | "video_asr_retry"
-      | "video_ai_retry"
-      | "poi_match";
-    entityType: string;
-    entityId: string;
-    triggeredBy: string;
-    summary?: Record<string, unknown>;
-  },
+const POI_RESOLVED_RISK_FLAGS = new Set([
+  "poi_no_candidate",
+  "poi_low_confidence",
+  "poi_many_same_name_candidates",
+  "address_missing",
+]);
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function toNumber(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function countCommentSignals(signal: unknown) {
+  const row = asRecord(signal);
+  const sentiments = asRecord(row.aspect_sentiments);
+  return (
+    asArray(row.shop_name_mentions).length +
+    asArray(row.address_mentions).length +
+    asArray(row.status_mentions).length +
+    Object.values(sentiments).filter((item) => {
+      const summary = asRecord(item).summary;
+      return typeof summary === "string" && summary.trim().length > 0;
+    }).length
+  );
+}
+
+function mergeAggregatedReview(
+  candidateReview: unknown,
+  candidateCommentSummary: unknown,
+  commentSignals: unknown,
 ) {
-  return app.db
-    .insertInto("pipeline_runs")
-    .values({
-      id: crypto.randomUUID(),
-      run_type: input.runType,
-      entity_type: input.entityType,
-      entity_id: input.entityId,
-      status: "queued",
-      triggered_by: input.triggeredBy,
-      started_at: null,
-      finished_at: null,
-      summary_json: input.summary ?? {},
-      created_at: new Date(),
-      updated_at: new Date(),
-    })
-    .returningAll()
-    .executeTakeFirstOrThrow();
+  const signals = asRecord(commentSignals);
+  const signalReview = asRecord(signals.aspect_sentiments);
+  const review = { ...signalReview, ...asRecord(candidateReview) };
+  return {
+    ...review,
+    comment_summary: candidateCommentSummary,
+    comment_signals: {
+      shop_name_mentions: signals.shop_name_mentions ?? [],
+      address_mentions: signals.address_mentions ?? [],
+      status_mentions: signals.status_mentions ?? [],
+      risk_flags: signals.risk_flags ?? [],
+    },
+  };
+}
+
+function remainingRisksAfterPoiSelection(riskFlags: string[]) {
+  return riskFlags.filter((flag) => !POI_RESOLVED_RISK_FLAGS.has(flag));
+}
+
+async function runAdminActionWithLock<T>(
+  app: Parameters<FastifyPluginAsync>[0],
+  key: TaskLockKey,
+  action: (trx: Transaction<DB>) => Promise<T>,
+) {
+  return app.db.transaction().execute(async (trx) => {
+    const acquired = await tryAcquireTaskStartLock(trx, key);
+    if (!acquired) {
+      throw new HttpError(
+        409,
+        "task_already_running",
+        `Task '${key.jobType}' is already running for ${key.entityType}:${key.entityId}`,
+      );
+    }
+    return action(trx);
+  });
 }
 
 export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
@@ -217,7 +272,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       app.db,
       "check_bilibili_auth_pool",
       "system",
-      crypto.randomUUID(),
+      SYSTEM_TASK_ENTITY_ID,
     );
     return { job_id: job.id };
   });
@@ -225,9 +280,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
   app.delete("/bilibili-auth/:id", async (request) => {
     // 删除单个 B站登录态账号。后续 worker / pipeline 进程不再使用它；
     // 历史 raw_ingest_payloads / jobs 仍保留以供审计。
-    const params = z
-      .object({ id: z.string().uuid() })
-      .parse(request.params);
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const result = await app.db
       .deleteFrom("bilibili_auth_accounts")
       .where("id", "=", params.id)
@@ -349,20 +402,17 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       .executeTakeFirst();
     if (!creator)
       throw new HttpError(404, "creator_not_found", "Creator not found");
-    const run = await createPipelineRun(app, {
-      runType: "creator_video_sync",
-      entityType: "creator",
-      entityId: creator.id,
-      triggeredBy: admin.id,
-      summary: { bilibili_uid: creator.bilibili_uid },
-    });
-    const job = await enqueuePipelineJob(
+    const { run, job } = await enqueuePipelineRunJob(
       app.db,
-      "sync_creator_videos",
-      "creator",
-      creator.id,
       {
-        run_id: run.id,
+        runType: "creator_video_sync",
+        entityType: "creator",
+        entityId: creator.id,
+        triggeredBy: admin.id,
+        summary: { bilibili_uid: creator.bilibili_uid },
+      },
+      "sync_creator_videos",
+      {
         bilibili_uid: creator.bilibili_uid,
       },
     );
@@ -466,11 +516,33 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
           .orderBy("like_count", "desc")
           .limit(80)
           .execute(),
-        app.db
+        // 候选去重：相同 POI（已匹配）只保留一条；相同 (candidate_name, city) 也只保留一条
+// （防止 AI 重跑遗留的同名候选）。所有 status 默认都展示（包括 merged / rejected），
+// 让 admin 看完整历史；按 status 优先级 + created_at asc 在每组内取最早一条。
+app.db
           .selectFrom("shop_candidates")
           .selectAll()
           .where("video_id", "=", params.id)
-          .orderBy("created_at", "desc")
+          .distinctOn([
+            sql`COALESCE(selected_poi_id::text, 'name:' || COALESCE(candidate_name, '') || '|' || COALESCE(city, ''))`,
+          ])
+          .orderBy(
+            sql`COALESCE(selected_poi_id::text, 'name:' || COALESCE(candidate_name, '') || '|' || COALESCE(city, ''))`,
+          )
+          .orderBy(
+            sql`CASE status
+              WHEN 'poi_matched' THEN 0
+              WHEN 'poi_match_need_review' THEN 1
+              WHEN 'poi_match_low_confidence' THEN 2
+              WHEN 'poi_candidates_found' THEN 3
+              WHEN 'extracted' THEN 4
+              WHEN 'name_missing' THEN 5
+              WHEN 'merged' THEN 6
+              WHEN 'rejected' THEN 7
+              ELSE 99
+            END`,
+          )
+          .orderBy("created_at", "asc")
           .execute(),
         app.db
           .selectFrom("review_tasks")
@@ -515,19 +587,16 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       .where("id", "=", params.id)
       .executeTakeFirst();
     if (!video) throw new HttpError(404, "video_not_found", "Video not found");
-    const run = await createPipelineRun(app, {
-      runType: "video_processing",
-      entityType: "video",
-      entityId: params.id,
-      triggeredBy: admin.id,
-      summary: { title: video.title },
-    });
-    const job = await enqueuePipelineJob(
+    const { run, job } = await enqueuePipelineRunJob(
       app.db,
+      {
+        runType: "video_processing",
+        entityType: "video",
+        entityId: params.id,
+        triggeredBy: admin.id,
+        summary: { title: video.title },
+      },
       "process_video",
-      "video",
-      params.id,
-      { run_id: run.id },
     );
     return { run_id: run.id, job_id: job.data.db_job_id ?? job.id };
   });
@@ -535,18 +604,15 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
   app.post("/videos/:id/retry-asr", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const admin = await requireAdmin(app.db, request);
-    const run = await createPipelineRun(app, {
-      runType: "video_asr_retry",
-      entityType: "video",
-      entityId: params.id,
-      triggeredBy: admin.id,
-    });
-    const job = await enqueuePipelineJob(
+    const { run, job } = await enqueuePipelineRunJob(
       app.db,
+      {
+        runType: "video_asr_retry",
+        entityType: "video",
+        entityId: params.id,
+        triggeredBy: admin.id,
+      },
       "run_asr",
-      "video",
-      params.id,
-      { run_id: run.id },
     );
     return { run_id: run.id, job_id: job.data.db_job_id ?? job.id };
   });
@@ -554,18 +620,15 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
   app.post("/videos/:id/retry-ai", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const admin = await requireAdmin(app.db, request);
-    const run = await createPipelineRun(app, {
-      runType: "video_ai_retry",
-      entityType: "video",
-      entityId: params.id,
-      triggeredBy: admin.id,
-    });
-    const job = await enqueuePipelineJob(
+    const { run, job } = await enqueuePipelineRunJob(
       app.db,
+      {
+        runType: "video_ai_retry",
+        entityType: "video",
+        entityId: params.id,
+        triggeredBy: admin.id,
+      },
       "classify_video",
-      "video",
-      params.id,
-      { run_id: run.id },
     );
     return { run_id: run.id, job_id: job.data.db_job_id ?? job.id };
   });
@@ -805,144 +868,172 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const body = z.object({ poi_id: z.string().uuid() }).parse(request.body);
     const admin = await requireAdmin(app.db, request);
-    const result = await app.db.transaction().execute(async (trx) => {
-      const before = await trx
-        .selectFrom("shop_candidates")
-        .selectAll()
-        .where("id", "=", params.id)
-        .executeTakeFirst();
-      if (!before)
-        throw new HttpError(
-          404,
-          "candidate_not_found",
-          "Shop candidate not found",
+    const result = await runAdminActionWithLock(
+      app,
+      {
+        jobType: "select_poi",
+        entityType: "shop_candidate",
+        entityId: params.id,
+      },
+      async (trx) => {
+        const before = await trx
+          .selectFrom("shop_candidates")
+          .selectAll()
+          .where("id", "=", params.id)
+          .executeTakeFirst();
+        if (!before)
+          throw new HttpError(
+            404,
+            "candidate_not_found",
+            "Shop candidate not found",
+          );
+        const poi = await trx
+          .selectFrom("pois")
+          .selectAll()
+          .where("id", "=", body.poi_id)
+          .executeTakeFirst();
+        if (!poi) throw new HttpError(404, "poi_not_found", "POI not found");
+        const remainingRisks = remainingRisksAfterPoiSelection(
+          before.risk_flags,
         );
-      const poi = await trx
-        .selectFrom("pois")
-        .selectAll()
-        .where("id", "=", body.poi_id)
-        .executeTakeFirst();
-      if (!poi) throw new HttpError(404, "poi_not_found", "POI not found");
-      const openReview = await trx
-        .selectFrom("review_tasks")
-        .select(["id"])
-        .where("entity_type", "=", "shop_candidate")
-        .where("entity_id", "=", params.id)
-        .where("status", "=", "open")
-        .orderBy("created_at", "desc")
-        .executeTakeFirst();
-      const updated = await trx
-        .updateTable("shop_candidates")
-        .set({
-          selected_poi_id: body.poi_id,
-          status: "poi_matched",
-          updated_at: new Date(),
-        })
-        .where("id", "=", params.id)
-        .returningAll()
-        .executeTakeFirstOrThrow();
-      await trx
-        .updateTable("poi_match_candidates")
-        .set({ match_status: "rejected" })
-        .where("shop_candidate_id", "=", params.id)
-        .where("match_status", "=", "selected")
-        .execute();
-      await trx
-        .updateTable("poi_match_candidates")
-        .set({ match_status: "selected" })
-        .where("shop_candidate_id", "=", params.id)
-        .where("poi_id", "=", body.poi_id)
-        .execute();
-      if (openReview) {
-        await trx
-          .updateTable("review_tasks")
+        const openReview = await trx
+          .selectFrom("review_tasks")
+          .select(["id"])
+          .where("entity_type", "=", "shop_candidate")
+          .where("entity_id", "=", params.id)
+          .where("status", "=", "open")
+          .orderBy("created_at", "desc")
+          .executeTakeFirst();
+        const updated = await trx
+          .updateTable("shop_candidates")
           .set({
-            status: "resolved",
-            resolved_by: admin.id,
-            resolved_at: new Date(),
-            updated_at: new Date(),
-          })
-          .where("id", "=", openReview.id)
-          .execute();
-      }
-      await trx
-        .insertInto("review_events")
-        .values({
-          id: crypto.randomUUID(),
-          review_task_id: openReview?.id ?? null,
-          entity_type: "shop_candidate",
-          entity_id: params.id,
-          action: "select_poi",
-          before_json: {
-            selected_poi_id: before.selected_poi_id,
-            status: before.status,
-          },
-          after_json: {
             selected_poi_id: body.poi_id,
             status: "poi_matched",
-            poi_name: poi.name,
-          },
-          reason: "Admin selected POI candidate",
-          reviewer_id: admin.id,
-          created_at: new Date(),
-        })
-        .execute();
-      return updated;
-    });
+            updated_at: new Date(),
+          })
+          .where("id", "=", params.id)
+          .returningAll()
+          .executeTakeFirstOrThrow();
+        await trx
+          .updateTable("poi_match_candidates")
+          .set({ match_status: "rejected" })
+          .where("shop_candidate_id", "=", params.id)
+          .where("match_status", "=", "selected")
+          .execute();
+        await trx
+          .updateTable("poi_match_candidates")
+          .set({ match_status: "selected" })
+          .where("shop_candidate_id", "=", params.id)
+          .where("poi_id", "=", body.poi_id)
+          .execute();
+        if (openReview && !remainingRisks.length) {
+          await trx
+            .updateTable("review_tasks")
+            .set({
+              status: "resolved",
+              resolved_by: admin.id,
+              resolved_at: new Date(),
+              updated_at: new Date(),
+            })
+            .where("id", "=", openReview.id)
+            .execute();
+        }
+        await trx
+          .insertInto("review_events")
+          .values({
+            id: crypto.randomUUID(),
+            review_task_id: openReview?.id ?? null,
+            entity_type: "shop_candidate",
+            entity_id: params.id,
+            action: "select_poi",
+            before_json: {
+              selected_poi_id: before.selected_poi_id,
+              status: before.status,
+            },
+            after_json: {
+              selected_poi_id: body.poi_id,
+              status: "poi_matched",
+              poi_name: poi.name,
+              remaining_risk_flags: remainingRisks,
+            },
+            reason: "Admin selected POI candidate",
+            reviewer_id: admin.id,
+            created_at: new Date(),
+          })
+          .execute();
+        return updated;
+      },
+    );
     return { ok: true, candidate: result };
   });
 
   app.post("/shop-candidates/:id/promote", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const admin = await requireAdmin(app.db, request);
-    const result = await app.db.transaction().execute(async (trx) => {
-      const candidate = await trx
-        .selectFrom("shop_candidates")
-        .selectAll()
-        .where("id", "=", params.id)
-        .executeTakeFirst();
-      if (!candidate)
-        throw new HttpError(
-          404,
-          "candidate_not_found",
-          "Shop candidate not found",
-        );
-      if (candidate.status !== "poi_matched" || !candidate.selected_poi_id) {
-        throw new HttpError(
-          409,
-          "candidate_not_ready",
-          "Candidate must be in status='poi_matched' with a selected_poi_id before promote",
-        );
-      }
-      const poi = await trx
-        .selectFrom("pois")
-        .selectAll()
-        .where("id", "=", candidate.selected_poi_id)
-        .executeTakeFirst();
-      if (!poi)
-        throw new HttpError(
-          404,
-          "poi_not_found",
-          "Selected POI no longer exists",
+    const result = await runAdminActionWithLock(
+      app,
+      {
+        jobType: "promote_shop_candidate",
+        entityType: "shop_candidate",
+        entityId: params.id,
+      },
+      async (trx) => {
+        const candidate = await trx
+          .selectFrom("shop_candidates")
+          .selectAll()
+          .where("id", "=", params.id)
+          .executeTakeFirst();
+        if (!candidate)
+          throw new HttpError(
+            404,
+            "candidate_not_found",
+            "Shop candidate not found",
+          );
+        if (candidate.status !== "poi_matched" || !candidate.selected_poi_id) {
+          throw new HttpError(
+            409,
+            "candidate_not_ready",
+            "Candidate must be in status='poi_matched' with a selected_poi_id before promote",
+          );
+        }
+        const poi = await trx
+          .selectFrom("pois")
+          .selectAll()
+          .where("id", "=", candidate.selected_poi_id)
+          .executeTakeFirst();
+        if (!poi)
+          throw new HttpError(
+            404,
+            "poi_not_found",
+            "Selected POI no longer exists",
+          );
+
+        const commentSignals = await trx
+          .selectFrom("comment_signal_extractions")
+          .selectAll()
+          .where("video_id", "=", candidate.video_id)
+          .orderBy("created_at", "desc")
+          .executeTakeFirst();
+        const commentSignalCount = countCommentSignals(commentSignals);
+        const aggregatedReview = mergeAggregatedReview(
+          candidate.review_dimensions,
+          candidate.comment_summary,
+          commentSignals,
         );
 
-      // Confidence: average of name / location / summary, fall back to 0 if null.
-      const confidences = [
-        candidate.name_confidence,
-        candidate.location_confidence,
-        candidate.summary_confidence,
-      ].filter((value): value is number => typeof value === "number");
-      const shopConfidence =
-        confidences.length > 0
-          ? confidences.reduce((sum, value) => sum + value, 0) /
-            confidences.length
-          : 0;
+        // Confidence: average of name / location / summary, fall back to 0 if null.
+        const confidences = [
+          toNumber(candidate.name_confidence),
+          toNumber(candidate.location_confidence),
+          toNumber(candidate.summary_confidence),
+        ].filter((value): value is number => value !== null);
+        const shopConfidence =
+          confidences.length > 0
+            ? confidences.reduce((sum, value) => sum + value, 0) /
+              confidences.length
+            : 0;
 
-      const shop = await trx
-        .insertInto("shops")
-        .values({
-          id: crypto.randomUUID(),
-          primary_poi_id: poi.id,
+        const shopValues = {
           canonical_name:
             candidate.normalized_name ??
             candidate.candidate_name ??
@@ -961,93 +1052,143 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
           lng: poi.lng,
           lat: poi.lat,
           coord_type: poi.coord_type,
-          avg_price_hint: null,
           card_payload: candidate.card_payload,
-          aggregated_review: candidate.review_dimensions,
-          quality: { shop_confidence: shopConfidence },
+          aggregated_review: aggregatedReview as unknown as Json,
+          quality: {
+            shop_confidence: shopConfidence,
+            poi_confidence: toNumber(candidate.location_confidence),
+            summary_confidence: toNumber(candidate.summary_confidence),
+            risk_flags: candidate.risk_flags,
+          } as unknown as Json,
           source_stats: {
             creator_count: 1,
             video_count: 1,
-            comment_signal_count: 0,
-          },
-          status: "draft",
-          published_at: null,
+            comment_signal_count: commentSignalCount,
+          } as unknown as Json,
           last_reviewed_at: new Date(),
-          created_at: new Date(),
           updated_at: new Date(),
-        })
-        .returningAll()
-        .executeTakeFirstOrThrow();
+        };
+        const existingShop = await trx
+          .selectFrom("shops")
+          .selectAll()
+          .where("primary_poi_id", "=", poi.id)
+          .orderBy("created_at", "asc")
+          .executeTakeFirst();
 
-      // Kysely 0.27 strips `| null` from Insertable even when the column is
-      // declared `number | null` (a known Kysely limitation). We coalesce to
-      // 0 (a valid timestamp / neutral confidence) and let downstream readers
-      // treat 0 as "not captured" for time fields. SQL columns are unchanged.
-      await trx
-        .insertInto("shop_video_mentions")
-        .values({
-          id: crypto.randomUUID(),
-          shop_id: shop.id,
-          video_id: candidate.video_id,
-          creator_id: candidate.creator_id,
-          shop_candidate_id: candidate.id,
-          mention_type: "main",
-          sentiment: "unknown",
-          summary: null,
-          evidence_ids: [],
-          time_start_sec: candidate.time_start_sec ?? 0,
-          time_end_sec: candidate.time_end_sec ?? 0,
-          confidence: candidate.name_confidence ?? 0,
-          created_at: new Date(),
-        })
-        .execute();
+        // 按 POI 合并：相同 POI = 同一个店铺；总是覆盖写 shops 的内容字段，
+        // status / published_at 保留（admin 已审核过的发布状态不能被 promote 推翻），
+        // 但 display_name / category / card_payload / aggregated_review / quality /
+        // source_stats / last_reviewed_at 都用最新候选刷新。
+        const shop = existingShop
+          ? await trx
+              .updateTable("shops")
+              .set(shopValues)
+              .where("id", "=", existingShop.id)
+              .returningAll()
+              .executeTakeFirstOrThrow()
+          : await trx
+              .insertInto("shops")
+              .values({
+                id: crypto.randomUUID(),
+                primary_poi_id: poi.id,
+                ...shopValues,
+                avg_price_hint: null,
+                status: "draft",
+                published_at: null,
+                created_at: new Date(),
+              })
+              .returningAll()
+              .executeTakeFirstOrThrow();
 
-      const updated = await trx
-        .updateTable("shop_candidates")
-        .set({
-          status: "merged",
-          merged_shop_id: shop.id,
-          updated_at: new Date(),
-        })
-        .where("id", "=", params.id)
-        .returningAll()
-        .executeTakeFirstOrThrow();
-
-      await trx
-        .insertInto("review_events")
-        .values({
-          id: crypto.randomUUID(),
-          review_task_id: null,
-          entity_type: "shop_candidate",
-          entity_id: params.id,
-          action: "promote",
-          before_json: {
-            status: candidate.status,
-            selected_poi_id: candidate.selected_poi_id,
-          },
-          after_json: {
-            status: "merged",
+        // Kysely 0.27 strips `| null` from Insertable even when the column is
+        // declared `number | null` (a known Kysely limitation). We coalesce to
+        // 0 (a valid timestamp / neutral confidence) and let downstream readers
+        // treat 0 as "not captured" for time fields. SQL columns are unchanged.
+        await trx
+          .insertInto("shop_video_mentions")
+          .values({
+            id: crypto.randomUUID(),
             shop_id: shop.id,
-            display_name: shop.display_name,
-          },
-          reason: "Admin promoted candidate to shop",
-          reviewer_id: admin.id,
-          created_at: new Date(),
-        })
-        .execute();
+            video_id: candidate.video_id,
+            creator_id: candidate.creator_id,
+            shop_candidate_id: candidate.id,
+            mention_type: "main",
+            sentiment: "unknown",
+            summary: null,
+            evidence_ids: [],
+            time_start_sec: candidate.time_start_sec ?? 0,
+            time_end_sec: candidate.time_end_sec ?? 0,
+            confidence: candidate.name_confidence ?? 0,
+            created_at: new Date(),
+          })
+          .onConflict((conflict) =>
+            conflict
+              .columns(["shop_id", "video_id", "mention_type"])
+              .doUpdateSet({
+                shop_candidate_id: candidate.id,
+                confidence: candidate.name_confidence ?? 0,
+              }),
+          )
+          .execute();
 
-      return { shop, candidate: updated };
-    });
+        const updated = await trx
+          .updateTable("shop_candidates")
+          .set({
+            status: "merged",
+            merged_shop_id: shop.id,
+            updated_at: new Date(),
+          })
+          .where("id", "=", params.id)
+          .returningAll()
+          .executeTakeFirstOrThrow();
+
+        await trx
+          .insertInto("review_events")
+          .values({
+            id: crypto.randomUUID(),
+            review_task_id: null,
+            entity_type: "shop_candidate",
+            entity_id: params.id,
+            action: "promote",
+            before_json: {
+              status: candidate.status,
+              selected_poi_id: candidate.selected_poi_id,
+            },
+            after_json: {
+              status: "merged",
+              shop_id: shop.id,
+              display_name: shop.display_name,
+              refreshed_existing_shop: Boolean(existingShop),
+            },
+            reason: "Admin promoted candidate to shop",
+            reviewer_id: admin.id,
+            created_at: new Date(),
+          })
+          .execute();
+
+        return { shop, candidate: updated };
+      },
+    );
     return { ok: true, shop: result.shop, candidate: result.candidate };
   });
 
   app.post("/shop-candidates/:id/reject", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    await app.db
-      .updateTable("shop_candidates")
-      .set({ status: "rejected" })
-      .where("id", "=", params.id)
-      .execute();
+    await runAdminActionWithLock(
+      app,
+      {
+        jobType: "reject_shop_candidate",
+        entityType: "shop_candidate",
+        entityId: params.id,
+      },
+      async (trx) => {
+        await trx
+          .updateTable("shop_candidates")
+          .set({ status: "rejected" })
+          .where("id", "=", params.id)
+          .execute();
+      },
+    );
     return { ok: true };
   });
 
@@ -1122,47 +1263,55 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
   app.post("/shops/:id/approve", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const admin = await requireAdmin(app.db, request);
-    const result = await app.db.transaction().execute(async (trx) => {
-      const shop = await trx
-        .selectFrom("shops")
-        .selectAll()
-        .where("id", "=", params.id)
-        .executeTakeFirst();
-      if (!shop) throw new HttpError(404, "shop_not_found", "Shop not found");
-      if (shop.status !== "draft") {
-        throw new HttpError(
-          409,
-          "shop_not_ready_for_approve",
-          `Shop is in status='${shop.status}'; expected 'draft'`,
-        );
-      }
-      const updated = await trx
-        .updateTable("shops")
-        .set({
-          status: "approved",
-          last_reviewed_at: new Date(),
-          updated_at: new Date(),
-        })
-        .where("id", "=", params.id)
-        .returningAll()
-        .executeTakeFirstOrThrow();
-      await trx
-        .insertInto("review_events")
-        .values({
-          id: crypto.randomUUID(),
-          review_task_id: null,
-          entity_type: "shop",
-          entity_id: params.id,
-          action: "approve",
-          before_json: { status: shop.status },
-          after_json: { status: "approved" },
-          reason: "Admin approved shop for publication",
-          reviewer_id: admin.id,
-          created_at: new Date(),
-        })
-        .execute();
-      return updated;
-    });
+    const result = await runAdminActionWithLock(
+      app,
+      {
+        jobType: "approve_shop",
+        entityType: "shop",
+        entityId: params.id,
+      },
+      async (trx) => {
+        const shop = await trx
+          .selectFrom("shops")
+          .selectAll()
+          .where("id", "=", params.id)
+          .executeTakeFirst();
+        if (!shop) throw new HttpError(404, "shop_not_found", "Shop not found");
+        if (shop.status !== "draft") {
+          throw new HttpError(
+            409,
+            "shop_not_ready_for_approve",
+            `Shop is in status='${shop.status}'; expected 'draft'`,
+          );
+        }
+        const updated = await trx
+          .updateTable("shops")
+          .set({
+            status: "approved",
+            last_reviewed_at: new Date(),
+            updated_at: new Date(),
+          })
+          .where("id", "=", params.id)
+          .returningAll()
+          .executeTakeFirstOrThrow();
+        await trx
+          .insertInto("review_events")
+          .values({
+            id: crypto.randomUUID(),
+            review_task_id: null,
+            entity_type: "shop",
+            entity_id: params.id,
+            action: "approve",
+            before_json: { status: shop.status },
+            after_json: { status: "approved" },
+            reason: "Admin approved shop for publication",
+            reviewer_id: admin.id,
+            created_at: new Date(),
+          })
+          .execute();
+        return updated;
+      },
+    );
     return { shop: result };
   });
 
@@ -1188,62 +1337,70 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
   app.post("/shops/:id/publish", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const admin = await requireAdmin(app.db, request);
-    const result = await app.db.transaction().execute(async (trx) => {
-      const shop = await trx
-        .selectFrom("shops")
-        .selectAll()
-        .where("id", "=", params.id)
-        .executeTakeFirst();
-      if (!shop) throw new HttpError(404, "shop_not_found", "Shop not found");
-      // Per AGENTS.md §3.5: publish must follow an explicit approve step.
-      if (shop.status !== "approved") {
-        throw new HttpError(
-          409,
-          "shop_not_approved",
-          `Shop is in status='${shop.status}'; call /approve before /publish`,
-        );
-      }
-      const current = await trx
-        .selectFrom("published_shop_snapshots")
-        .select((eb) => eb.fn.max<number>("version").as("version"))
-        .where("shop_id", "=", params.id)
-        .executeTakeFirst();
-      const version = Number(current?.version ?? 0) + 1;
-      await trx
-        .updateTable("published_shop_snapshots")
-        .set({ is_current: false })
-        .where("shop_id", "=", params.id)
-        .execute();
-      await trx
-        .insertInto("published_shop_snapshots")
-        .values({
-          id: crypto.randomUUID(),
-          shop_id: params.id,
-          version,
-          snapshot_json: {
-            shop_id: shop.id,
-            canonical_name: shop.canonical_name,
-            display_name: shop.display_name,
-            card: shop.card_payload,
-            quality: shop.quality,
-          },
-          published_by: admin.id,
-          published_at: new Date(),
-          is_current: true,
-        })
-        .execute();
-      const [published] = await trx
-        .updateTable("shops")
-        .set({
-          status: "published",
-          published_at: new Date(),
-          updated_at: new Date(),
-        })
-        .where("id", "=", params.id)
-        .returningAll()
-        .execute();
-      return published;
-    });
+    const result = await runAdminActionWithLock(
+      app,
+      {
+        jobType: "publish_shop",
+        entityType: "shop",
+        entityId: params.id,
+      },
+      async (trx) => {
+        const shop = await trx
+          .selectFrom("shops")
+          .selectAll()
+          .where("id", "=", params.id)
+          .executeTakeFirst();
+        if (!shop) throw new HttpError(404, "shop_not_found", "Shop not found");
+        // Per AGENTS.md §3.5: publish must follow an explicit approve step.
+        if (shop.status !== "approved") {
+          throw new HttpError(
+            409,
+            "shop_not_approved",
+            `Shop is in status='${shop.status}'; call /approve before /publish`,
+          );
+        }
+        const current = await trx
+          .selectFrom("published_shop_snapshots")
+          .select((eb) => eb.fn.max<number>("version").as("version"))
+          .where("shop_id", "=", params.id)
+          .executeTakeFirst();
+        const version = Number(current?.version ?? 0) + 1;
+        await trx
+          .updateTable("published_shop_snapshots")
+          .set({ is_current: false })
+          .where("shop_id", "=", params.id)
+          .execute();
+        await trx
+          .insertInto("published_shop_snapshots")
+          .values({
+            id: crypto.randomUUID(),
+            shop_id: params.id,
+            version,
+            snapshot_json: {
+              shop_id: shop.id,
+              canonical_name: shop.canonical_name,
+              display_name: shop.display_name,
+              card: shop.card_payload,
+              quality: shop.quality,
+            },
+            published_by: admin.id,
+            published_at: new Date(),
+            is_current: true,
+          })
+          .execute();
+        const [published] = await trx
+          .updateTable("shops")
+          .set({
+            status: "published",
+            published_at: new Date(),
+            updated_at: new Date(),
+          })
+          .where("id", "=", params.id)
+          .returningAll()
+          .execute();
+        return published;
+      },
+    );
     return { shop: result };
   });
 
