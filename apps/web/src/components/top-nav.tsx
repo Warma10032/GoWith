@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Compass, MapPinned, ShieldCheck, UserRound } from "lucide-react";
 
 const navItems = [
@@ -8,7 +11,14 @@ const navItems = [
   { href: "/admin", label: "后台", icon: ShieldCheck },
 ];
 
+function isActive(href: string, pathname: string) {
+  if (href === "/") return pathname === "/";
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
 export function TopNav() {
+  const pathname = usePathname() ?? "/";
+
   return (
     <header className="sticky top-0 z-20 border-b border-line bg-[#faf8f5]/95 backdrop-blur">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
@@ -17,18 +27,28 @@ export function TopNav() {
             G
           </span>
           <span>
-            <span className="block text-base font-semibold leading-tight">GoWith</span>
-            <span className="block text-xs text-muted">B站探店地图</span>
+            <span className="block text-base font-semibold leading-tight">
+              GoWith
+            </span>
+            <span className="hidden text-xs text-muted sm:block">
+              B站探店地图
+            </span>
           </span>
         </Link>
         <nav className="flex items-center gap-1">
           {navItems.map((item) => {
             const Icon = item.icon;
+            const active = isActive(item.href, pathname);
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-muted transition hover:bg-white hover:text-ink"
+                aria-current={active ? "page" : undefined}
+                className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                  active
+                    ? "bg-white text-ink shadow-card"
+                    : "text-muted hover:bg-white hover:text-ink"
+                }`}
               >
                 <Icon size={16} />
                 {item.label}
@@ -40,4 +60,3 @@ export function TopNav() {
     </header>
   );
 }
-

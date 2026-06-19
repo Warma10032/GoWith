@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 import { ExternalLink, MapPin } from "lucide-react";
 import { ShopCard } from "./shop-card";
+import { CreatorMiniMap } from "./creator-mini-map";
 import { apiFetch, type ShopCardData } from "@/lib/api";
 
 type LatestVideo = {
@@ -37,7 +38,11 @@ type Props = {
   initialSelector: CreatorItem[];
 };
 
-export function CreatorPageClient({ initialId, initialDetail, initialSelector }: Props) {
+export function CreatorPageClient({
+  initialId,
+  initialDetail,
+  initialSelector,
+}: Props) {
   const router = useRouter();
   const [detail, setDetail] = useState<CreatorDetail>(initialDetail);
   const [switching, setSwitching] = useState<string | null>(null);
@@ -49,7 +54,9 @@ export function CreatorPageClient({ initialId, initialDetail, initialSelector }:
       setSwitching(creatorId);
       setError(null);
       try {
-        const next = await apiFetch<CreatorDetail>(`/api/creators/${creatorId}`);
+        const next = await apiFetch<CreatorDetail>(
+          `/api/creators/${creatorId}`,
+        );
         setDetail(next);
         // Update the URL without a full reload so the back button works.
         router.replace(`/creators/${creatorId}`, { scroll: false });
@@ -65,6 +72,8 @@ export function CreatorPageClient({ initialId, initialDetail, initialSelector }:
   const { creator, shops } = detail;
   const shopCount = shops.length;
   const cityCount = new Set(shops.map((s) => s.city ?? "未知")).size;
+  // shops 已经按 latest_video 时间倒序，第一条就是最近探店。
+  const latestShop = shops[0];
 
   return (
     <section className="mx-auto max-w-7xl px-4 py-6">
@@ -72,7 +81,9 @@ export function CreatorPageClient({ initialId, initialDetail, initialSelector }:
       <div className="rounded-lg border border-line bg-white p-4">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-ink">切换博主</h2>
-          <span className="text-[11px] text-muted">共 {initialSelector.length} 位</span>
+          <span className="text-[11px] text-muted">
+            共 {initialSelector.length} 位
+          </span>
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
           {initialSelector.map((c) => {
@@ -91,7 +102,11 @@ export function CreatorPageClient({ initialId, initialDetail, initialSelector }:
               >
                 {c.avatar_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={c.avatar_url} alt="" className="size-5 rounded-full object-cover" />
+                  <img
+                    src={c.avatar_url}
+                    alt=""
+                    className="size-5 rounded-full object-cover"
+                  />
                 ) : (
                   <span className="grid size-5 place-items-center rounded-full bg-[#f7efe8] text-[10px]">
                     {c.name.slice(0, 1)}
@@ -114,7 +129,11 @@ export function CreatorPageClient({ initialId, initialDetail, initialSelector }:
         <div className="flex flex-wrap items-start gap-4">
           {creator.avatar_url ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={creator.avatar_url} alt="" className="size-20 rounded-lg object-cover" />
+            <img
+              src={creator.avatar_url}
+              alt=""
+              className="size-20 rounded-lg object-cover"
+            />
           ) : (
             <div className="grid size-20 place-items-center rounded-lg bg-[#f7efe8] text-2xl font-semibold text-muted">
               {creator.name.slice(0, 1)}
@@ -134,9 +153,14 @@ export function CreatorPageClient({ initialId, initialDetail, initialSelector }:
               </span>
             </div>
             <p className="mt-1 text-sm text-muted">
-              UID {creator.bilibili_uid} · 粉丝 {creator.follower_count?.toLocaleString() ?? "—"}
+              UID {creator.bilibili_uid} · 粉丝{" "}
+              {creator.follower_count?.toLocaleString() ?? "—"}
             </p>
-            {creator.bio ? <p className="mt-2 line-clamp-2 text-sm leading-6 text-ink/80">{creator.bio}</p> : null}
+            {creator.bio ? (
+              <p className="mt-2 line-clamp-2 text-sm leading-6 text-ink/80">
+                {creator.bio}
+              </p>
+            ) : null}
             <div className="mt-3 flex flex-wrap gap-2">
               <a
                 href={creator.profile_url}
@@ -144,8 +168,7 @@ export function CreatorPageClient({ initialId, initialDetail, initialSelector }:
                 rel="noreferrer"
                 className="inline-flex items-center gap-1 rounded-md border border-line px-3 py-1.5 text-xs font-medium"
               >
-                <ExternalLink size={12} />
-                B 站主页
+                <ExternalLink size={12} />B 站主页
               </a>
               <Link
                 href={`/map?creator_id=${creator.id}`}
@@ -156,9 +179,15 @@ export function CreatorPageClient({ initialId, initialDetail, initialSelector }:
               </Link>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2 text-sm">
+          <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
             <Stat label="已发布店铺" value={shopCount} hint="published" />
             <Stat label="覆盖城市" value={cityCount} hint="distinct cities" />
+            <Stat
+              label="最近探店"
+              value={formatShortDate(latestShop?.latest_video?.published_at)}
+              hint="latest video"
+              text
+            />
           </div>
         </div>
       </div>
@@ -171,34 +200,24 @@ export function CreatorPageClient({ initialId, initialDetail, initialSelector }:
               <h2 className="text-sm font-semibold">博主探店地图</h2>
               <span className="text-[11px] text-muted">{shopCount} 个 pin</span>
             </header>
-            <div className="grid min-h-[420px] place-items-center bg-map p-6 text-center">
-              <div>
-                <MapPin size={28} className="mx-auto text-brand" />
-                <p className="mt-3 text-sm font-medium">该博主的探店地图</p>
-                <p className="mt-1 max-w-[280px] text-xs text-muted">
-                  M0 阶段 placeholder；按博主关联店铺过滤地图 pin。
-                </p>
-                <Link
-                  href={`/map?creator_id=${creator.id}`}
-                  className="mt-4 inline-flex items-center gap-1 rounded-md bg-ink px-3 py-1.5 text-xs font-semibold text-white"
-                >
-                  打开完整地图视图
-                </Link>
-              </div>
-            </div>
+            <CreatorMiniMap shops={shops} creatorId={creator.id} />
           </section>
           <section className="rounded-lg border border-line bg-white p-4">
             <h3 className="text-sm font-semibold">覆盖城市</h3>
             <ul className="mt-2 flex flex-wrap gap-1.5">
-              {Array.from(new Set(shops.map((s) => s.city ?? "未知"))).map((city) => (
-                <li
-                  key={city}
-                  className="rounded-full bg-[#eef7ed] px-2.5 py-0.5 text-[11px] font-medium text-[#2d6330]"
-                >
-                  {city}
-                </li>
-              ))}
-              {!shops.length ? <li className="text-xs text-muted">暂无</li> : null}
+              {Array.from(new Set(shops.map((s) => s.city ?? "未知"))).map(
+                (city) => (
+                  <li
+                    key={city}
+                    className="rounded-full bg-[#eef7ed] px-2.5 py-0.5 text-[11px] font-medium text-[#2d6330]"
+                  >
+                    {city}
+                  </li>
+                ),
+              )}
+              {!shops.length ? (
+                <li className="text-xs text-muted">暂无</li>
+              ) : null}
             </ul>
           </section>
         </aside>
@@ -254,10 +273,28 @@ export function CreatorPageClient({ initialId, initialDetail, initialSelector }:
   );
 }
 
-function Stat({ label, value, hint }: { label: string; value: number; hint: string }) {
+function Stat({
+  label,
+  value,
+  hint,
+  text = false,
+}: {
+  label: string;
+  value: number | string;
+  hint: string;
+  text?: boolean;
+}) {
   return (
-    <div className="rounded-lg border border-line px-4 py-3 text-center">
-      <div className="text-2xl font-semibold">{value}</div>
+    <div className="rounded-lg border border-line px-3 py-3 text-center">
+      <div
+        className={
+          text
+            ? "text-base font-semibold"
+            : "text-2xl font-semibold tabular-nums"
+        }
+      >
+        {value}
+      </div>
       <div className="mt-1 text-xs text-muted">{label}</div>
       <div className="mt-0.5 text-[10px] text-muted">{hint}</div>
     </div>
@@ -271,5 +308,16 @@ function formatTime(value: string) {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+  });
+}
+
+function formatShortDate(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
   });
 }

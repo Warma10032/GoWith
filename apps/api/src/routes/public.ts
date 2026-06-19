@@ -15,7 +15,10 @@ type SourceVideo = {
   creator_name: string;
 };
 
-async function getSourceVideosByShopIds(app: Parameters<FastifyPluginAsync>[0], shopIds: string[]) {
+async function getSourceVideosByShopIds(
+  app: Parameters<FastifyPluginAsync>[0],
+  shopIds: string[],
+) {
   if (!shopIds.length) return new Map<string, SourceVideo[]>();
   const rows = await app.db
     .selectFrom("shop_video_mentions")
@@ -52,34 +55,83 @@ async function getSourceVideosByShopIds(app: Parameters<FastifyPluginAsync>[0], 
   return videosByShop;
 }
 
-function attachSourceVideos<T extends { id: string }>(shops: T[], videosByShop: Map<string, SourceVideo[]>) {
-  return shops.map((shop) => ({ ...shop, source_videos: videosByShop.get(shop.id) ?? [] }));
+function attachSourceVideos<T extends { id: string }>(
+  shops: T[],
+  videosByShop: Map<string, SourceVideo[]>,
+) {
+  return shops.map((shop) => ({
+    ...shop,
+    source_videos: videosByShop.get(shop.id) ?? [],
+  }));
 }
 
 export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
   app.get("/creators", async () => {
     const creators = await app.db
       .selectFrom("creators")
-      .select(["id", "bilibili_uid", "name", "avatar_url", "profile_url", "bio", "follower_count", "status"])
-      .where("status", "=", "active")
-      .orderBy("created_at", "desc")
+      .leftJoin(
+        "shop_video_mentions",
+        "shop_video_mentions.creator_id",
+        "creators.id",
+      )
+      .leftJoin("shops", (join) =>
+        join
+          .onRef("shops.id", "=", "shop_video_mentions.shop_id")
+          .on("shops.status", "=", "published"),
+      )
+      .select([
+        "creators.id",
+        "creators.bilibili_uid",
+        "creators.name",
+        "creators.avatar_url",
+        "creators.profile_url",
+        "creators.bio",
+        "creators.follower_count",
+        "creators.status",
+        "creators.last_synced_at",
+        (eb) => eb.fn.count<number>("shops.id").distinct().as("shop_count"),
+      ])
+      .where("creators.status", "=", "active")
+      .groupBy("creators.id")
+      .orderBy("creators.created_at", "desc")
       .limit(100)
       .execute();
-    return { creators };
+    return {
+      creators: creators.map((creator) => ({
+        ...creator,
+        shop_count: Number(creator.shop_count ?? 0),
+      })),
+    };
   });
 
   app.get("/creators/:id", async (request) => {
-    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
-    if (!params.success) throw new HttpError(400, "invalid_creator_id", "Creator id must be a uuid");
-    const creator = await app.db.selectFrom("creators").selectAll().where("id", "=", params.data.id).executeTakeFirst();
-    if (!creator) throw new HttpError(404, "creator_not_found", "Creator not found");
+    const params = z
+      .object({ id: z.string().uuid() })
+      .safeParse(request.params);
+    if (!params.success)
+      throw new HttpError(
+        400,
+        "invalid_creator_id",
+        "Creator id must be a uuid",
+      );
+    const creator = await app.db
+      .selectFrom("creators")
+      .selectAll()
+      .where("id", "=", params.data.id)
+      .executeTakeFirst();
+    if (!creator)
+      throw new HttpError(404, "creator_not_found", "Creator not found");
     // Sort shops by the latest video that mentioned them. DISTINCT ON
     // collapses the inner-join fan-out (one shop can have many mentions)
     // and keeps only the most recent mention per shop, which is what
     // the public creator page renders as the sort key.
     const shops = await app.db
       .selectFrom("shops")
-      .innerJoin("shop_video_mentions", "shop_video_mentions.shop_id", "shops.id")
+      .innerJoin(
+        "shop_video_mentions",
+        "shop_video_mentions.shop_id",
+        "shops.id",
+      )
       .innerJoin("videos", "videos.id", "shop_video_mentions.video_id")
       .select([
         "shops.id",
@@ -101,7 +153,10 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
       .orderBy("videos.published_at", "desc")
       .limit(100)
       .execute();
-    const videosByShop = await getSourceVideosByShopIds(app, shops.map((shop) => shop.id));
+    const videosByShop = await getSourceVideosByShopIds(
+      app,
+      shops.map((shop) => shop.id),
+    );
     return {
       creator,
       shops: attachSourceVideos(shops, videosByShop).map((shop) => ({
@@ -117,6 +172,47 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
+  app.get("/stats", async () => {
+    const [shops, creators, videos, candidates, distinctCities] =
+      await Promise.all([
+        app.db
+          .selectFrom("shops")
+          .where("status", "=", "published")
+          .select((eb) => eb.fn.countAll<string>().as("count"))
+          .executeTakeFirst(),
+        app.db
+          .selectFrom("creators")
+          .where("status", "=", "active")
+          .select((eb) => eb.fn.countAll<string>().as("count"))
+          .executeTakeFirst(),
+        app.db
+          .selectFrom("videos")
+          .select((eb) => eb.fn.countAll<string>().as("count"))
+          .executeTakeFirst(),
+        app.db
+          .selectFrom("shop_candidates")
+          .select((eb) => eb.fn.countAll<string>().as("count"))
+          .executeTakeFirst(),
+        sql<{
+          count: string;
+        }>`SELECT COUNT(DISTINCT city) AS count FROM shops WHERE status = 'published' AND city IS NOT NULL`.execute(
+          app.db,
+        ),
+      ]);
+    const citiesRow = (distinctCities as { rows?: Array<{ count: string }> })
+      .rows?.[0];
+    return {
+      counts: {
+        shops_published: Number(shops?.count ?? 0),
+        creators_active: Number(creators?.count ?? 0),
+        videos_total: Number(videos?.count ?? 0),
+        shops_in_review: Number(candidates?.count ?? 0),
+        cities_covered: Number(citiesRow?.count ?? 0),
+      },
+      last_updated_at: new Date().toISOString(),
+    };
+  });
+
   app.get("/shops/recommended", async (request) => {
     const user = await getUserFromRequest(app.db, request);
     const requestId = crypto.randomUUID();
@@ -125,7 +221,8 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
       .values({
         id: requestId,
         user_id: user?.id ?? null,
-        anonymous_id: (request.query as { anonymous_id?: string }).anonymous_id ?? null,
+        anonymous_id:
+          (request.query as { anonymous_id?: string }).anonymous_id ?? null,
         surface: "home",
         request_context: request.query as never,
         algorithm: "rule_v0",
@@ -156,7 +253,9 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
           score,
           reason_codes: ["published_recently", "rule_v0"],
           feature_snapshot: {
-            shop_confidence: (shop.quality as Record<string, unknown>)?.shop_confidence ?? null,
+            shop_confidence:
+              (shop.quality as Record<string, unknown>)?.shop_confidence ??
+              null,
             published_at: shop.published_at,
           },
           created_at: new Date(),
@@ -165,8 +264,14 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
       items.push({ ...shop, recommendation_item_id: itemId, score });
     }
 
-    const videosByShop = await getSourceVideosByShopIds(app, items.map((shop) => shop.id));
-    return { recommendation_request_id: requestId, shops: attachSourceVideos(items, videosByShop) };
+    const videosByShop = await getSourceVideosByShopIds(
+      app,
+      items.map((shop) => shop.id),
+    );
+    return {
+      recommendation_request_id: requestId,
+      shops: attachSourceVideos(items, videosByShop),
+    };
   });
 
   app.get("/shops/map", async (request) => {
@@ -192,7 +297,10 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
       LIMIT ${limit}
     `.execute(app.db);
     const mapShops = shops.rows as Array<{ id: string }>;
-    const videosByShop = await getSourceVideosByShopIds(app, mapShops.map((shop) => shop.id));
+    const videosByShop = await getSourceVideosByShopIds(
+      app,
+      mapShops.map((shop) => shop.id),
+    );
     return { shops: attachSourceVideos(mapShops, videosByShop) };
   });
 
@@ -222,24 +330,53 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
       LIMIT ${limit}
     `.execute(app.db);
     const searchShops = shops.rows as Array<{ id: string }>;
-    const videosByShop = await getSourceVideosByShopIds(app, searchShops.map((shop) => shop.id));
+    const videosByShop = await getSourceVideosByShopIds(
+      app,
+      searchShops.map((shop) => shop.id),
+    );
     return { shops: attachSourceVideos(searchShops, videosByShop) };
   });
 
   app.get("/shops/:id", async (request) => {
-    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
-    if (!params.success) throw new HttpError(400, "invalid_shop_id", "Shop id must be a uuid");
-    const shop = await app.db.selectFrom("shops").selectAll().where("id", "=", params.data.id).where("status", "=", "published").executeTakeFirst();
+    const params = z
+      .object({ id: z.string().uuid() })
+      .safeParse(request.params);
+    if (!params.success)
+      throw new HttpError(400, "invalid_shop_id", "Shop id must be a uuid");
+    const shop = await app.db
+      .selectFrom("shops")
+      .selectAll()
+      .where("id", "=", params.data.id)
+      .where("status", "=", "published")
+      .executeTakeFirst();
     if (!shop) throw new HttpError(404, "shop_not_found", "Shop not found");
     const [mentions, evidence] = await Promise.all([
       app.db
         .selectFrom("shop_video_mentions")
         .innerJoin("videos", "videos.id", "shop_video_mentions.video_id")
         .innerJoin("creators", "creators.id", "shop_video_mentions.creator_id")
-        .select(["videos.id as video_id", "videos.title", "videos.source_url", "videos.bvid", "videos.cover_url", "creators.name as creator_name"])
+        .select([
+          "videos.id as video_id",
+          "videos.title",
+          "videos.source_url",
+          "videos.bvid",
+          "videos.cover_url",
+          "creators.name as creator_name",
+        ])
         .where("shop_video_mentions.shop_id", "=", params.data.id)
         .execute(),
-      app.db.selectFrom("evidence").select(["source", "text_excerpt", "start_sec", "end_sec", "confidence"]).where("shop_id", "=", params.data.id).limit(20).execute(),
+      app.db
+        .selectFrom("evidence")
+        .select([
+          "source",
+          "text_excerpt",
+          "start_sec",
+          "end_sec",
+          "confidence",
+        ])
+        .where("shop_id", "=", params.data.id)
+        .limit(20)
+        .execute(),
     ]);
     return { shop, mentions, evidence };
   });

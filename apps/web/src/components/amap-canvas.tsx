@@ -1,7 +1,24 @@
 "use client";
 
-import { AlertTriangle, ExternalLink, Loader2, LocateFixed, MapPin, MapPinned, Search } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  ExternalLink,
+  Loader2,
+  LocateFixed,
+  MapPin,
+  MapPinned,
+  RotateCcw,
+  Search,
+  X,
+} from "lucide-react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { apiBaseUrl } from "@/lib/api";
 
 type SourceVideo = {
@@ -55,9 +72,17 @@ type AMapNamespace = {
       zooms?: [number, number];
     },
   ) => AMapInstance;
-  Marker: new (options: { position: [number, number]; title?: string; offset?: unknown }) => AMapMarker;
+  Marker: new (options: {
+    position: [number, number];
+    title?: string;
+    offset?: unknown;
+  }) => AMapMarker;
   Pixel: new (x: number, y: number) => unknown;
-  InfoWindow: new (options: { content: string; offset?: unknown; closeWhenClickMap?: boolean }) => AMapInfoWindow;
+  InfoWindow: new (options: {
+    content: string;
+    offset?: unknown;
+    closeWhenClickMap?: boolean;
+  }) => AMapInfoWindow;
   Scale: new () => unknown;
   ToolBar: new (options?: { position?: "LT" | "RT" | "LB" | "RB" }) => unknown;
 };
@@ -83,7 +108,11 @@ type AMapInstance = {
 };
 
 type AMapLoaderModule = {
-  load(options: { key: string; version: string; plugins?: string[] }): Promise<AMapNamespace>;
+  load(options: {
+    key: string;
+    version: string;
+    plugins?: string[];
+  }): Promise<AMapNamespace>;
 };
 
 declare global {
@@ -121,11 +150,18 @@ function escapeHtml(value: string | null | undefined) {
 }
 
 function shopSummary(shop: MapShop) {
-  return shop.card_payload?.recommend_reason ?? shop.card_payload?.subtitle ?? "已通过审核的探店店铺";
+  return (
+    shop.card_payload?.recommend_reason ??
+    shop.card_payload?.subtitle ??
+    "已通过审核的探店店铺"
+  );
 }
 
 function shopLocation(shop: MapShop) {
-  return [shop.city, shop.district, shop.address].filter(Boolean).join(" · ") || "位置待补充";
+  return (
+    [shop.city, shop.district, shop.address].filter(Boolean).join(" · ") ||
+    "位置待补充"
+  );
 }
 
 function infoWindowHtml(shop: MapShop) {
@@ -165,7 +201,10 @@ export function AmapCanvas() {
   const [loadingPins, setLoadingPins] = useState(false);
   const [panelError, setPanelError] = useState<string | null>(null);
 
-  const selectedShop = useMemo(() => shops.find((shop) => shop.id === selectedShopId) ?? null, [selectedShopId, shops]);
+  const selectedShop = useMemo(
+    () => shops.find((shop) => shop.id === selectedShopId) ?? null,
+    [selectedShopId, shops],
+  );
 
   useEffect(() => {
     activeQueryRef.current = activeQuery;
@@ -253,18 +292,25 @@ export function AmapCanvas() {
       setLoadingPins(true);
       setPanelError(null);
       try {
-        const response = await fetch(`${apiBaseUrl}/api/shops/map?${params.toString()}`, { cache: "no-store" });
+        const response = await fetch(
+          `${apiBaseUrl}/api/shops/map?${params.toString()}`,
+          { cache: "no-store" },
+        );
         if (!response.ok) throw new Error(`shops_map_${response.status}`);
         const payload = (await response.json()) as { shops: MapShop[] };
         setShops(payload.shops);
         renderMarkers(payload.shops);
-        if (payload.shops.every((shop) => shop.id !== selectedShopIdRef.current)) {
+        if (
+          payload.shops.every((shop) => shop.id !== selectedShopIdRef.current)
+        ) {
           selectedShopIdRef.current = null;
           setSelectedShopId(null);
           infoWindowRef.current?.close();
         }
       } catch (error) {
-        setPanelError(error instanceof Error ? error.message : "地图店铺加载失败");
+        setPanelError(
+          error instanceof Error ? error.message : "地图店铺加载失败",
+        );
       } finally {
         setLoadingPins(false);
       }
@@ -335,7 +381,9 @@ export function AmapCanvas() {
       .catch((error: unknown) => {
         if (cancelled) return;
         setStatus("error");
-        setErrorMessage(error instanceof Error ? error.message : "高德地图加载失败");
+        setErrorMessage(
+          error instanceof Error ? error.message : "高德地图加载失败",
+        );
       });
 
     return () => {
@@ -362,12 +410,17 @@ export function AmapCanvas() {
     setLoadingPins(true);
     setPanelError(null);
     try {
-      const response = await fetch(`${apiBaseUrl}/api/shops/search?q=${encodeURIComponent(query)}&limit=20`, { cache: "no-store" });
+      const response = await fetch(
+        `${apiBaseUrl}/api/shops/search?q=${encodeURIComponent(query)}&limit=20`,
+        { cache: "no-store" },
+      );
       if (!response.ok) throw new Error(`shops_search_${response.status}`);
       const payload = (await response.json()) as { shops: MapShop[] };
       setShops(payload.shops);
       renderMarkers(payload.shops);
-      const first = payload.shops.find((shop) => toNumber(shop.lng) !== null && toNumber(shop.lat) !== null);
+      const first = payload.shops.find(
+        (shop) => toNumber(shop.lng) !== null && toNumber(shop.lat) !== null,
+      );
       if (first) openShop(first, true);
     } catch (error) {
       setPanelError(error instanceof Error ? error.message : "店铺搜索失败");
@@ -378,28 +431,42 @@ export function AmapCanvas() {
 
   return (
     <>
-      <div className="relative min-h-[620px] overflow-hidden rounded-lg border border-line bg-map">
-        <div ref={containerRef} className="absolute inset-0" aria-label="高德地图" />
+      <div className="relative min-h-[420px] overflow-hidden rounded-lg border border-line bg-map md:min-h-[620px]">
+        <div
+          ref={containerRef}
+          className="absolute inset-0"
+          aria-label="高德地图"
+        />
         {status !== "ready" ? (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/80 px-6 text-center backdrop-blur-sm">
             {status === "missing-key" ? (
               <div className="max-w-sm">
                 <AlertTriangle className="mx-auto text-brand" size={28} />
-                <h1 className="mt-3 text-lg font-semibold">高德地图 Key 未配置</h1>
+                <h1 className="mt-3 text-lg font-semibold">
+                  高德地图 Key 未配置
+                </h1>
                 <p className="mt-2 text-sm leading-6 text-muted">
-                  请在本地环境变量中配置 NEXT_PUBLIC_AMAP_WEB_JS_KEY 后重启 Web 服务。
+                  请在本地环境变量中配置 NEXT_PUBLIC_AMAP_WEB_JS_KEY 后重启 Web
+                  服务。
                 </p>
               </div>
             ) : status === "error" ? (
               <div className="max-w-sm">
                 <AlertTriangle className="mx-auto text-brand" size={28} />
                 <h1 className="mt-3 text-lg font-semibold">地图加载失败</h1>
-                <p className="mt-2 text-sm leading-6 text-muted">{errorMessage ?? "请检查高德 Key、域名白名单和网络状态。"}</p>
+                <p className="mt-2 text-sm leading-6 text-muted">
+                  {errorMessage ?? "请检查高德 Key、域名白名单和网络状态。"}
+                </p>
               </div>
             ) : (
               <div>
-                <Loader2 className="mx-auto animate-spin text-brand" size={28} />
-                <p className="mt-3 text-sm font-medium text-muted">正在加载高德地图</p>
+                <Loader2
+                  className="mx-auto animate-spin text-brand"
+                  size={28}
+                />
+                <p className="mt-3 text-sm font-medium text-muted">
+                  正在加载高德地图
+                </p>
               </div>
             )}
           </div>
@@ -409,28 +476,57 @@ export function AmapCanvas() {
             <MapPinned size={18} className="text-brand" />
             <h1 className="text-lg font-semibold">全国探店地图</h1>
           </div>
-          <p className="mt-1 text-sm text-muted">当前视窗 {shops.length} 家已发布店铺</p>
+          <p className="mt-1 text-sm text-muted">
+            {activeQuery
+              ? `搜索「${activeQuery}」命中 ${shops.length} 家`
+              : `当前视窗 ${shops.length} 家已发布店铺`}
+          </p>
         </div>
       </div>
 
       <aside className="rounded-lg border border-line bg-white p-4">
         <form onSubmit={handleSearch} className="flex gap-2">
-          <label className="min-w-0 flex-1">
+          <label className="relative min-w-0 flex-1">
             <span className="sr-only">搜索店铺</span>
             <input
               value={searchText}
               onChange={(event) => setSearchText(event.target.value)}
-              className="w-full rounded-lg border border-line px-3 py-2 text-sm"
+              className="w-full rounded-lg border border-line px-3 py-2 pr-9 text-sm"
               placeholder="搜索已发布店铺、地址、城区"
             />
+            {searchText ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchText("");
+                  if (activeQuery) {
+                    setActiveQuery("");
+                    void fetchViewportShops("");
+                  }
+                }}
+                className="absolute right-2 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-full text-muted hover:bg-[#f4efe7]"
+                aria-label="清除搜索"
+              >
+                <X size={13} />
+              </button>
+            ) : null}
           </label>
-          <button className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg bg-brand text-white" aria-label="搜索店铺">
-            {loadingPins ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+          <button
+            className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg bg-brand text-white"
+            aria-label="搜索店铺"
+          >
+            {loadingPins ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Search size={16} />
+            )}
           </button>
         </form>
 
         <div className="mt-4 flex items-center justify-between text-sm">
-          <div className="font-semibold">{activeQuery ? "搜索结果" : "当前视窗店铺"}</div>
+          <div className="font-semibold">
+            {activeQuery ? "搜索结果" : "当前视窗店铺"}
+          </div>
           <button
             onClick={() => void fetchViewportShops()}
             className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-xs font-medium"
@@ -441,11 +537,25 @@ export function AmapCanvas() {
           </button>
         </div>
 
-        {panelError ? <p className="mt-3 rounded-lg border border-[#f2c7bd] bg-[#fff1ee] px-3 py-2 text-xs text-[#9a341f]">{panelError}</p> : null}
+        {panelError ? (
+          <div className="mt-3 rounded-lg border border-[#f2c7bd] bg-[#fff1ee] px-3 py-2 text-xs text-[#9a341f]">
+            <p>{panelError}</p>
+            <button
+              type="button"
+              onClick={() => void fetchViewportShops()}
+              className="mt-2 inline-flex items-center gap-1 rounded-md border border-[#f2c7bd] bg-white px-2 py-1 text-[11px] font-semibold hover:border-[#d94f30]"
+            >
+              <RotateCcw size={11} />
+              重试
+            </button>
+          </div>
+        ) : null}
         {selectedShop ? (
           <div className="mt-3 rounded-lg border border-[#f0d89a] bg-[#fffaf0] p-3 text-sm">
             <div className="font-semibold">{selectedShop.display_name}</div>
-            <div className="mt-1 text-xs text-muted">{shopLocation(selectedShop)}</div>
+            <div className="mt-1 text-xs text-muted">
+              {shopLocation(selectedShop)}
+            </div>
             <div className="mt-2 text-xs text-[#9a341f]">AI 总结，仅供参考</div>
           </div>
         ) : null}
@@ -461,12 +571,22 @@ export function AmapCanvas() {
                 <div className="flex items-start gap-2">
                   <MapPin size={16} className="mt-0.5 shrink-0 text-brand" />
                   <div className="min-w-0 flex-1">
-                    <div className="line-clamp-1 font-semibold">{shop.display_name}</div>
-                    <div className="mt-1 line-clamp-1 text-xs text-muted">{shopLocation(shop)}</div>
-                    <p className="mt-2 line-clamp-2 text-xs leading-5 text-ink/80">{shopSummary(shop)}</p>
+                    <div className="line-clamp-1 font-semibold">
+                      {shop.display_name}
+                    </div>
+                    <div className="mt-1 line-clamp-1 text-xs text-muted">
+                      {shopLocation(shop)}
+                    </div>
+                    <p className="mt-2 line-clamp-2 text-xs leading-5 text-ink/80">
+                      {shopSummary(shop)}
+                    </p>
                     <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
                       <span className="text-[#9a341f]">AI 总结，仅供参考</span>
-                      <a href={`/shops/${shop.id}`} className="inline-flex items-center gap-1 font-medium text-brand" onClick={(event) => event.stopPropagation()}>
+                      <a
+                        href={`/shops/${shop.id}`}
+                        className="inline-flex items-center gap-1 font-medium text-brand"
+                        onClick={(event) => event.stopPropagation()}
+                      >
                         详情
                         <ExternalLink size={12} />
                       </a>
@@ -487,9 +607,45 @@ export function AmapCanvas() {
                 </div>
               </button>
             ))
+          ) : loadingPins ? (
+            <div className="rounded-lg border border-dashed border-line p-6 text-center text-sm text-muted">
+              <Loader2 className="mx-auto animate-spin text-brand" size={20} />
+              <p className="mt-2">正在加载店铺点位…</p>
+            </div>
           ) : (
-            <div className="rounded-lg border border-dashed border-line p-5 text-sm leading-6 text-muted">
-              {loadingPins ? "正在加载店铺点位" : "当前范围暂无已发布店铺。"}
+            <div className="rounded-lg border border-dashed border-line p-6 text-center">
+              <div className="mx-auto grid size-10 place-items-center rounded-full bg-[#f7efe8] text-brand">
+                <MapPin size={18} />
+              </div>
+              <p className="mt-3 text-sm font-semibold text-ink">
+                {activeQuery ? "没有匹配的店铺" : "当前范围暂无已发布店铺"}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-muted">
+                {activeQuery
+                  ? "试试换关键字，或清空搜索回到当前视窗。"
+                  : "试试放大地图到城市级别，或去博主列表里挑感兴趣的探店博主。"}
+              </p>
+              {activeQuery ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveQuery("");
+                    setSearchText("");
+                    void fetchViewportShops("");
+                  }}
+                  className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline"
+                >
+                  清空搜索回到视窗
+                </button>
+              ) : (
+                <a
+                  href="/creators"
+                  className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline"
+                >
+                  浏览博主列表
+                  <ExternalLink size={11} />
+                </a>
+              )}
             </div>
           )}
         </div>

@@ -30,7 +30,12 @@ const bilibiliAuthSchema = z.object({
 async function createPipelineRun(
   app: Parameters<FastifyPluginAsync>[0],
   input: {
-    runType: "creator_video_sync" | "video_processing" | "video_asr_retry" | "video_ai_retry" | "poi_match";
+    runType:
+      | "creator_video_sync"
+      | "video_processing"
+      | "video_asr_retry"
+      | "video_ai_retry"
+      | "poi_match";
     entityType: string;
     entityId: string;
     triggeredBy: string;
@@ -62,16 +67,90 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get("/dashboard", async () => {
-    const [creators, videos, candidates, reviews, shops, activeCookies, expiredCookies, riskCookies] = await Promise.all([
-      app.db.selectFrom("creators").select((eb) => eb.fn.countAll<string>().as("count")).executeTakeFirst(),
-      app.db.selectFrom("videos").select((eb) => eb.fn.countAll<string>().as("count")).executeTakeFirst(),
-      app.db.selectFrom("shop_candidates").select((eb) => eb.fn.countAll<string>().as("count")).executeTakeFirst(),
-      app.db.selectFrom("review_tasks").where("status", "=", "open").select((eb) => eb.fn.countAll<string>().as("count")).executeTakeFirst(),
-      app.db.selectFrom("shops").where("status", "=", "published").select((eb) => eb.fn.countAll<string>().as("count")).executeTakeFirst(),
-      app.db.selectFrom("bilibili_auth_accounts").where("status", "=", "active").select((eb) => eb.fn.countAll<string>().as("count")).executeTakeFirst(),
-      app.db.selectFrom("bilibili_auth_accounts").where("status", "=", "expired").select((eb) => eb.fn.countAll<string>().as("count")).executeTakeFirst(),
-      app.db.selectFrom("bilibili_auth_accounts").where("status", "=", "risk").select((eb) => eb.fn.countAll<string>().as("count")).executeTakeFirst(),
+    const [
+      creators,
+      videos,
+      candidates,
+      reviews,
+      shops,
+      activeCookies,
+      expiredCookies,
+      riskCookies,
+    ] = await Promise.all([
+      app.db
+        .selectFrom("creators")
+        .select((eb) => eb.fn.countAll<string>().as("count"))
+        .executeTakeFirst(),
+      app.db
+        .selectFrom("videos")
+        .select((eb) => eb.fn.countAll<string>().as("count"))
+        .executeTakeFirst(),
+      app.db
+        .selectFrom("shop_candidates")
+        .select((eb) => eb.fn.countAll<string>().as("count"))
+        .executeTakeFirst(),
+      app.db
+        .selectFrom("review_tasks")
+        .where("status", "=", "open")
+        .select((eb) => eb.fn.countAll<string>().as("count"))
+        .executeTakeFirst(),
+      app.db
+        .selectFrom("shops")
+        .where("status", "=", "published")
+        .select((eb) => eb.fn.countAll<string>().as("count"))
+        .executeTakeFirst(),
+      app.db
+        .selectFrom("bilibili_auth_accounts")
+        .where("status", "=", "active")
+        .select((eb) => eb.fn.countAll<string>().as("count"))
+        .executeTakeFirst(),
+      app.db
+        .selectFrom("bilibili_auth_accounts")
+        .where("status", "=", "expired")
+        .select((eb) => eb.fn.countAll<string>().as("count"))
+        .executeTakeFirst(),
+      app.db
+        .selectFrom("bilibili_auth_accounts")
+        .where("status", "=", "risk")
+        .select((eb) => eb.fn.countAll<string>().as("count"))
+        .executeTakeFirst(),
     ]);
+
+    // 最近活动：取最近 5 条 pipeline_runs + 5 条 ai_runs，合并按 created_at desc 取前 5。
+    const [pipelineRows, aiRows] = await Promise.all([
+      app.db
+        .selectFrom("pipeline_runs")
+        .select([
+          "id",
+          "run_type",
+          "entity_type",
+          "entity_id",
+          "status",
+          "created_at",
+        ])
+        .orderBy("created_at", "desc")
+        .limit(5)
+        .execute(),
+      app.db
+        .selectFrom("ai_runs")
+        .select([
+          "id",
+          "stage as run_type",
+          "entity_type",
+          "entity_id",
+          "status",
+          "created_at",
+        ])
+        .orderBy("created_at", "desc")
+        .limit(5)
+        .execute(),
+    ]);
+    const recent_runs = [...pipelineRows, ...aiRows]
+      .sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      )
+      .slice(0, 5);
 
     return {
       counts: {
@@ -84,6 +163,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         expired_bilibili_cookies: Number(expiredCookies?.count ?? 0),
         risk_bilibili_cookies: Number(riskCookies?.count ?? 0),
       },
+      recent_runs,
     };
   });
 
@@ -115,7 +195,9 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         id: crypto.randomUUID(),
         label: body.label,
         encrypted_cookie: encryptSecret(body.cookie),
-        csrf_token_encrypted: body.csrf_token ? encryptSecret(body.csrf_token) : null,
+        csrf_token_encrypted: body.csrf_token
+          ? encryptSecret(body.csrf_token)
+          : null,
         status: "active",
         last_health_check_at: null,
         last_success_at: null,
@@ -131,7 +213,12 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post("/bilibili-auth/check", async () => {
-    const job = await enqueuePipelineJob(app.db, "check_bilibili_auth_pool", "system", crypto.randomUUID());
+    const job = await enqueuePipelineJob(
+      app.db,
+      "check_bilibili_auth_pool",
+      "system",
+      crypto.randomUUID(),
+    );
     return { job_id: job.id };
   });
 
@@ -143,7 +230,8 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       .orderBy("created_at", "desc")
       .limit(query.limit)
       .offset(query.offset);
-    if (query.status) builder = builder.where("status", "=", query.status as never);
+    if (query.status)
+      builder = builder.where("status", "=", query.status as never);
     if (query.q) {
       builder = builder.where((eb) =>
         eb.or([
@@ -159,8 +247,13 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/creators/:id", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    const creator = await app.db.selectFrom("creators").selectAll().where("id", "=", params.id).executeTakeFirst();
-    if (!creator) throw new HttpError(404, "creator_not_found", "Creator not found");
+    const creator = await app.db
+      .selectFrom("creators")
+      .selectAll()
+      .where("id", "=", params.id)
+      .executeTakeFirst();
+    if (!creator)
+      throw new HttpError(404, "creator_not_found", "Creator not found");
     const [videoStats, latestRun] = await Promise.all([
       app.db
         .selectFrom("videos")
@@ -218,17 +311,28 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       )
       .returningAll()
       .executeTakeFirstOrThrow();
-    const job = await enqueuePipelineJob(app.db, "sync_creator_profile", "creator", creator.id, {
-      bilibili_uid: creator.bilibili_uid,
-    });
+    const job = await enqueuePipelineJob(
+      app.db,
+      "sync_creator_profile",
+      "creator",
+      creator.id,
+      {
+        bilibili_uid: creator.bilibili_uid,
+      },
+    );
     return { creator, profile_job_id: job.id };
   });
 
   app.post("/creators/:id/sync", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const admin = await requireAdmin(app.db, request);
-    const creator = await app.db.selectFrom("creators").selectAll().where("id", "=", params.id).executeTakeFirst();
-    if (!creator) throw new HttpError(404, "creator_not_found", "Creator not found");
+    const creator = await app.db
+      .selectFrom("creators")
+      .selectAll()
+      .where("id", "=", params.id)
+      .executeTakeFirst();
+    if (!creator)
+      throw new HttpError(404, "creator_not_found", "Creator not found");
     const run = await createPipelineRun(app, {
       runType: "creator_video_sync",
       entityType: "creator",
@@ -236,10 +340,16 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       triggeredBy: admin.id,
       summary: { bilibili_uid: creator.bilibili_uid },
     });
-    const job = await enqueuePipelineJob(app.db, "sync_creator_videos", "creator", creator.id, {
-      run_id: run.id,
-      bilibili_uid: creator.bilibili_uid,
-    });
+    const job = await enqueuePipelineJob(
+      app.db,
+      "sync_creator_videos",
+      "creator",
+      creator.id,
+      {
+        run_id: run.id,
+        bilibili_uid: creator.bilibili_uid,
+      },
+    );
     return { run_id: run.id, job_id: job.data.db_job_id ?? job.id };
   });
 
@@ -253,8 +363,10 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       .orderBy("published_at", "desc")
       .limit(query.limit)
       .offset(query.offset);
-    if (query.status) builder = builder.where("workflow_status", "=", query.status);
-    if (query.content_type) builder = builder.where("content_type", "=", query.content_type);
+    if (query.status)
+      builder = builder.where("workflow_status", "=", query.status);
+    if (query.content_type)
+      builder = builder.where("content_type", "=", query.content_type);
     if (query.q) {
       builder = builder.where((eb) =>
         eb.or([
@@ -289,9 +401,12 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       .orderBy("videos.created_at", "desc")
       .limit(query.limit)
       .offset(query.offset);
-    if (query.creator_id) builder = builder.where("videos.creator_id", "=", query.creator_id);
-    if (query.status) builder = builder.where("videos.workflow_status", "=", query.status);
-    if (query.content_type) builder = builder.where("videos.content_type", "=", query.content_type);
+    if (query.creator_id)
+      builder = builder.where("videos.creator_id", "=", query.creator_id);
+    if (query.status)
+      builder = builder.where("videos.workflow_status", "=", query.status);
+    if (query.content_type)
+      builder = builder.where("videos.content_type", "=", query.content_type);
     if (query.q) {
       builder = builder.where((eb) =>
         eb.or([
@@ -307,30 +422,82 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/videos/:id", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    const video = await app.db.selectFrom("videos").selectAll().where("id", "=", params.id).executeTakeFirst();
+    const video = await app.db
+      .selectFrom("videos")
+      .selectAll()
+      .where("id", "=", params.id)
+      .executeTakeFirst();
     if (!video) throw new HttpError(404, "video_not_found", "Video not found");
-    const [assets, segments, comments, candidates, reviews, aiRuns, latestRun] = await Promise.all([
-      app.db.selectFrom("video_text_assets").selectAll().where("video_id", "=", params.id).orderBy("created_at", "desc").execute(),
-      app.db.selectFrom("video_text_segments").selectAll().where("video_id", "=", params.id).orderBy("segment_index").limit(200).execute(),
-      app.db.selectFrom("video_comments").selectAll().where("video_id", "=", params.id).orderBy("like_count", "desc").limit(80).execute(),
-      app.db.selectFrom("shop_candidates").selectAll().where("video_id", "=", params.id).orderBy("created_at", "desc").execute(),
-      app.db.selectFrom("review_tasks").selectAll().where("entity_id", "=", params.id).orderBy("created_at", "desc").execute(),
-      app.db.selectFrom("ai_runs").selectAll().where("entity_type", "=", "video").where("entity_id", "=", params.id).orderBy("created_at", "desc").limit(20).execute(),
-      app.db
-        .selectFrom("pipeline_runs")
-        .selectAll()
-        .where("entity_type", "=", "video")
-        .where("entity_id", "=", params.id)
-        .orderBy("created_at", "desc")
-        .executeTakeFirst(),
-    ]);
-    return { video, assets, segments, comments, candidates, reviews, ai_runs: aiRuns, latest_run: latestRun ?? null };
+    const [assets, segments, comments, candidates, reviews, aiRuns, latestRun] =
+      await Promise.all([
+        app.db
+          .selectFrom("video_text_assets")
+          .selectAll()
+          .where("video_id", "=", params.id)
+          .orderBy("created_at", "desc")
+          .execute(),
+        app.db
+          .selectFrom("video_text_segments")
+          .selectAll()
+          .where("video_id", "=", params.id)
+          .orderBy("segment_index")
+          .limit(200)
+          .execute(),
+        app.db
+          .selectFrom("video_comments")
+          .selectAll()
+          .where("video_id", "=", params.id)
+          .orderBy("like_count", "desc")
+          .limit(80)
+          .execute(),
+        app.db
+          .selectFrom("shop_candidates")
+          .selectAll()
+          .where("video_id", "=", params.id)
+          .orderBy("created_at", "desc")
+          .execute(),
+        app.db
+          .selectFrom("review_tasks")
+          .selectAll()
+          .where("entity_id", "=", params.id)
+          .orderBy("created_at", "desc")
+          .execute(),
+        app.db
+          .selectFrom("ai_runs")
+          .selectAll()
+          .where("entity_type", "=", "video")
+          .where("entity_id", "=", params.id)
+          .orderBy("created_at", "desc")
+          .limit(20)
+          .execute(),
+        app.db
+          .selectFrom("pipeline_runs")
+          .selectAll()
+          .where("entity_type", "=", "video")
+          .where("entity_id", "=", params.id)
+          .orderBy("created_at", "desc")
+          .executeTakeFirst(),
+      ]);
+    return {
+      video,
+      assets,
+      segments,
+      comments,
+      candidates,
+      reviews,
+      ai_runs: aiRuns,
+      latest_run: latestRun ?? null,
+    };
   });
 
   app.post("/videos/:id/process", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const admin = await requireAdmin(app.db, request);
-    const video = await app.db.selectFrom("videos").select(["id", "title"]).where("id", "=", params.id).executeTakeFirst();
+    const video = await app.db
+      .selectFrom("videos")
+      .select(["id", "title"])
+      .where("id", "=", params.id)
+      .executeTakeFirst();
     if (!video) throw new HttpError(404, "video_not_found", "Video not found");
     const run = await createPipelineRun(app, {
       runType: "video_processing",
@@ -339,23 +506,51 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       triggeredBy: admin.id,
       summary: { title: video.title },
     });
-    const job = await enqueuePipelineJob(app.db, "process_video", "video", params.id, { run_id: run.id });
+    const job = await enqueuePipelineJob(
+      app.db,
+      "process_video",
+      "video",
+      params.id,
+      { run_id: run.id },
+    );
     return { run_id: run.id, job_id: job.data.db_job_id ?? job.id };
   });
 
   app.post("/videos/:id/retry-asr", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const admin = await requireAdmin(app.db, request);
-    const run = await createPipelineRun(app, { runType: "video_asr_retry", entityType: "video", entityId: params.id, triggeredBy: admin.id });
-    const job = await enqueuePipelineJob(app.db, "run_asr", "video", params.id, { run_id: run.id });
+    const run = await createPipelineRun(app, {
+      runType: "video_asr_retry",
+      entityType: "video",
+      entityId: params.id,
+      triggeredBy: admin.id,
+    });
+    const job = await enqueuePipelineJob(
+      app.db,
+      "run_asr",
+      "video",
+      params.id,
+      { run_id: run.id },
+    );
     return { run_id: run.id, job_id: job.data.db_job_id ?? job.id };
   });
 
   app.post("/videos/:id/retry-ai", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const admin = await requireAdmin(app.db, request);
-    const run = await createPipelineRun(app, { runType: "video_ai_retry", entityType: "video", entityId: params.id, triggeredBy: admin.id });
-    const job = await enqueuePipelineJob(app.db, "classify_video", "video", params.id, { run_id: run.id });
+    const run = await createPipelineRun(app, {
+      runType: "video_ai_retry",
+      entityType: "video",
+      entityId: params.id,
+      triggeredBy: admin.id,
+    });
+    const job = await enqueuePipelineJob(
+      app.db,
+      "classify_video",
+      "video",
+      params.id,
+      { run_id: run.id },
+    );
     return { run_id: run.id, job_id: job.data.db_job_id ?? job.id };
   });
 
@@ -363,7 +558,11 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     await app.db
       .updateTable("videos")
-      .set({ is_shop_visit: false, content_type: "non_shop_visit", workflow_status: "non_shop_visit" })
+      .set({
+        is_shop_visit: false,
+        content_type: "non_shop_visit",
+        workflow_status: "non_shop_visit",
+      })
       .where("id", "=", params.id)
       .execute();
     return { ok: true };
@@ -371,11 +570,19 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/pipeline-runs", async (request) => {
     const query = listQuerySchema.parse(request.query);
-    let builder = app.db.selectFrom("pipeline_runs").selectAll().orderBy("created_at", "desc").limit(query.limit).offset(query.offset);
-    if (query.status) builder = builder.where("status", "=", query.status as never);
+    let builder = app.db
+      .selectFrom("pipeline_runs")
+      .selectAll()
+      .orderBy("created_at", "desc")
+      .limit(query.limit)
+      .offset(query.offset);
+    if (query.status)
+      builder = builder.where("status", "=", query.status as never);
     const rawQuery = request.query as Record<string, string | undefined>;
-    if (rawQuery.entity_type) builder = builder.where("entity_type", "=", rawQuery.entity_type);
-    if (rawQuery.entity_id) builder = builder.where("entity_id", "=", rawQuery.entity_id);
+    if (rawQuery.entity_type)
+      builder = builder.where("entity_type", "=", rawQuery.entity_type);
+    if (rawQuery.entity_id)
+      builder = builder.where("entity_id", "=", rawQuery.entity_id);
     const runs = await builder.execute();
     return { runs };
   });
@@ -383,21 +590,77 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
   app.get("/pipeline-runs/:id/events", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const [run, events] = await Promise.all([
-      app.db.selectFrom("pipeline_runs").selectAll().where("id", "=", params.id).executeTakeFirst(),
-      app.db.selectFrom("pipeline_events").selectAll().where("run_id", "=", params.id).orderBy("created_at", "asc").execute(),
+      app.db
+        .selectFrom("pipeline_runs")
+        .selectAll()
+        .where("id", "=", params.id)
+        .executeTakeFirst(),
+      app.db
+        .selectFrom("pipeline_events")
+        .selectAll()
+        .where("run_id", "=", params.id)
+        .orderBy("created_at", "asc")
+        .execute(),
     ]);
-    if (!run) throw new HttpError(404, "run_not_found", "Pipeline run not found");
+    if (!run)
+      throw new HttpError(404, "run_not_found", "Pipeline run not found");
     return { run, events };
+  });
+
+  /**
+   * 统一 run 详情端点：先按 pipeline_run 查，再按 ai_run 查。
+   * 返回的 type 让前端知道渲染哪个分支；events 始终来自 pipeline_events
+   * （ai_run_id 字段关联）。
+   */
+  app.get("/runs/:id", async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const pipelineRun = await app.db
+      .selectFrom("pipeline_runs")
+      .selectAll()
+      .where("id", "=", params.id)
+      .executeTakeFirst();
+    if (pipelineRun) {
+      const events = await app.db
+        .selectFrom("pipeline_events")
+        .selectAll()
+        .where("run_id", "=", pipelineRun.id)
+        .orderBy("created_at", "asc")
+        .execute();
+      return { type: "pipeline" as const, run: pipelineRun, events };
+    }
+    const aiRun = await app.db
+      .selectFrom("ai_runs")
+      .selectAll()
+      .where("id", "=", params.id)
+      .executeTakeFirst();
+    if (aiRun) {
+      const events = await app.db
+        .selectFrom("pipeline_events")
+        .selectAll()
+        .where("ai_run_id", "=", aiRun.id)
+        .orderBy("created_at", "asc")
+        .execute();
+      return { type: "ai" as const, run: aiRun, events };
+    }
+    throw new HttpError(404, "run_not_found", "Run not found");
   });
 
   app.get("/ai-runs", async (request) => {
     const query = listQuerySchema.parse(request.query);
-    let builder = app.db.selectFrom("ai_runs").selectAll().orderBy("created_at", "desc").limit(query.limit).offset(query.offset);
+    let builder = app.db
+      .selectFrom("ai_runs")
+      .selectAll()
+      .orderBy("created_at", "desc")
+      .limit(query.limit)
+      .offset(query.offset);
     const rawQuery = request.query as Record<string, string | undefined>;
-    if (query.status) builder = builder.where("status", "=", query.status as never);
+    if (query.status)
+      builder = builder.where("status", "=", query.status as never);
     if (query.stage) builder = builder.where("stage", "=", query.stage);
-    if (rawQuery.entity_type) builder = builder.where("entity_type", "=", rawQuery.entity_type);
-    if (rawQuery.entity_id) builder = builder.where("entity_id", "=", rawQuery.entity_id);
+    if (rawQuery.entity_type)
+      builder = builder.where("entity_type", "=", rawQuery.entity_type);
+    if (rawQuery.entity_id)
+      builder = builder.where("entity_id", "=", rawQuery.entity_id);
     const runs = await builder.execute();
     return { ai_runs: runs };
   });
@@ -432,10 +695,23 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/shop-candidates/:id", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    const candidate = await app.db.selectFrom("shop_candidates").selectAll().where("id", "=", params.id).executeTakeFirst();
-    if (!candidate) throw new HttpError(404, "candidate_not_found", "Shop candidate not found");
+    const candidate = await app.db
+      .selectFrom("shop_candidates")
+      .selectAll()
+      .where("id", "=", params.id)
+      .executeTakeFirst();
+    if (!candidate)
+      throw new HttpError(
+        404,
+        "candidate_not_found",
+        "Shop candidate not found",
+      );
     const [evidence, poiCandidates] = await Promise.all([
-      app.db.selectFrom("evidence").selectAll().where("shop_candidate_id", "=", params.id).execute(),
+      app.db
+        .selectFrom("evidence")
+        .selectAll()
+        .where("shop_candidate_id", "=", params.id)
+        .execute(),
       app.db
         .selectFrom("poi_match_candidates")
         .innerJoin("pois", "pois.id", "poi_match_candidates.poi_id")
@@ -499,7 +775,13 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       })
       .partial()
       .parse(request.body ?? {});
-    const job = await enqueuePipelineJob(app.db, "match_poi", "shop_candidate", params.id, body);
+    const job = await enqueuePipelineJob(
+      app.db,
+      "match_poi",
+      "shop_candidate",
+      params.id,
+      body,
+    );
     return { job_id: job.id };
   });
 
@@ -508,9 +790,22 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     const body = z.object({ poi_id: z.string().uuid() }).parse(request.body);
     const admin = await requireAdmin(app.db, request);
     const result = await app.db.transaction().execute(async (trx) => {
-      const before = await trx.selectFrom("shop_candidates").selectAll().where("id", "=", params.id).executeTakeFirst();
-      if (!before) throw new HttpError(404, "candidate_not_found", "Shop candidate not found");
-      const poi = await trx.selectFrom("pois").selectAll().where("id", "=", body.poi_id).executeTakeFirst();
+      const before = await trx
+        .selectFrom("shop_candidates")
+        .selectAll()
+        .where("id", "=", params.id)
+        .executeTakeFirst();
+      if (!before)
+        throw new HttpError(
+          404,
+          "candidate_not_found",
+          "Shop candidate not found",
+        );
+      const poi = await trx
+        .selectFrom("pois")
+        .selectAll()
+        .where("id", "=", body.poi_id)
+        .executeTakeFirst();
       if (!poi) throw new HttpError(404, "poi_not_found", "POI not found");
       const openReview = await trx
         .selectFrom("review_tasks")
@@ -522,7 +817,11 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         .executeTakeFirst();
       const updated = await trx
         .updateTable("shop_candidates")
-        .set({ selected_poi_id: body.poi_id, status: "poi_matched", updated_at: new Date() })
+        .set({
+          selected_poi_id: body.poi_id,
+          status: "poi_matched",
+          updated_at: new Date(),
+        })
         .where("id", "=", params.id)
         .returningAll()
         .executeTakeFirstOrThrow();
@@ -541,7 +840,12 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       if (openReview) {
         await trx
           .updateTable("review_tasks")
-          .set({ status: "resolved", resolved_by: admin.id, resolved_at: new Date(), updated_at: new Date() })
+          .set({
+            status: "resolved",
+            resolved_by: admin.id,
+            resolved_at: new Date(),
+            updated_at: new Date(),
+          })
           .where("id", "=", openReview.id)
           .execute();
       }
@@ -553,8 +857,15 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
           entity_type: "shop_candidate",
           entity_id: params.id,
           action: "select_poi",
-          before_json: { selected_poi_id: before.selected_poi_id, status: before.status },
-          after_json: { selected_poi_id: body.poi_id, status: "poi_matched", poi_name: poi.name },
+          before_json: {
+            selected_poi_id: before.selected_poi_id,
+            status: before.status,
+          },
+          after_json: {
+            selected_poi_id: body.poi_id,
+            status: "poi_matched",
+            poi_name: poi.name,
+          },
           reason: "Admin selected POI candidate",
           reviewer_id: admin.id,
           created_at: new Date(),
@@ -574,7 +885,12 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         .selectAll()
         .where("id", "=", params.id)
         .executeTakeFirst();
-      if (!candidate) throw new HttpError(404, "candidate_not_found", "Shop candidate not found");
+      if (!candidate)
+        throw new HttpError(
+          404,
+          "candidate_not_found",
+          "Shop candidate not found",
+        );
       if (candidate.status !== "poi_matched" || !candidate.selected_poi_id) {
         throw new HttpError(
           409,
@@ -587,21 +903,38 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         .selectAll()
         .where("id", "=", candidate.selected_poi_id)
         .executeTakeFirst();
-      if (!poi) throw new HttpError(404, "poi_not_found", "Selected POI no longer exists");
+      if (!poi)
+        throw new HttpError(
+          404,
+          "poi_not_found",
+          "Selected POI no longer exists",
+        );
 
       // Confidence: average of name / location / summary, fall back to 0 if null.
-      const confidences = [candidate.name_confidence, candidate.location_confidence, candidate.summary_confidence]
-        .filter((value): value is number => typeof value === "number");
+      const confidences = [
+        candidate.name_confidence,
+        candidate.location_confidence,
+        candidate.summary_confidence,
+      ].filter((value): value is number => typeof value === "number");
       const shopConfidence =
-        confidences.length > 0 ? confidences.reduce((sum, value) => sum + value, 0) / confidences.length : 0;
+        confidences.length > 0
+          ? confidences.reduce((sum, value) => sum + value, 0) /
+            confidences.length
+          : 0;
 
       const shop = await trx
         .insertInto("shops")
         .values({
           id: crypto.randomUUID(),
           primary_poi_id: poi.id,
-          canonical_name: candidate.normalized_name ?? candidate.candidate_name ?? "未命名店铺",
-          display_name: candidate.candidate_name ?? candidate.normalized_name ?? "未命名店铺",
+          canonical_name:
+            candidate.normalized_name ??
+            candidate.candidate_name ??
+            "未命名店铺",
+          display_name:
+            candidate.candidate_name ??
+            candidate.normalized_name ??
+            "未命名店铺",
           category_primary: candidate.category_primary,
           category_secondary: candidate.category_secondary,
           province: poi.province ?? candidate.province,
@@ -616,7 +949,11 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
           card_payload: candidate.card_payload,
           aggregated_review: candidate.review_dimensions,
           quality: { shop_confidence: shopConfidence },
-          source_stats: { creator_count: 1, video_count: 1, comment_signal_count: 0 },
+          source_stats: {
+            creator_count: 1,
+            video_count: 1,
+            comment_signal_count: 0,
+          },
           status: "draft",
           published_at: null,
           last_reviewed_at: new Date(),
@@ -651,7 +988,11 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
 
       const updated = await trx
         .updateTable("shop_candidates")
-        .set({ status: "merged", merged_shop_id: shop.id, updated_at: new Date() })
+        .set({
+          status: "merged",
+          merged_shop_id: shop.id,
+          updated_at: new Date(),
+        })
         .where("id", "=", params.id)
         .returningAll()
         .executeTakeFirstOrThrow();
@@ -664,8 +1005,15 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
           entity_type: "shop_candidate",
           entity_id: params.id,
           action: "promote",
-          before_json: { status: candidate.status, selected_poi_id: candidate.selected_poi_id },
-          after_json: { status: "merged", shop_id: shop.id, display_name: shop.display_name },
+          before_json: {
+            status: candidate.status,
+            selected_poi_id: candidate.selected_poi_id,
+          },
+          after_json: {
+            status: "merged",
+            shop_id: shop.id,
+            display_name: shop.display_name,
+          },
           reason: "Admin promoted candidate to shop",
           reviewer_id: admin.id,
           created_at: new Date(),
@@ -679,17 +1027,27 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/shop-candidates/:id/reject", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    await app.db.updateTable("shop_candidates").set({ status: "rejected" }).where("id", "=", params.id).execute();
+    await app.db
+      .updateTable("shop_candidates")
+      .set({ status: "rejected" })
+      .where("id", "=", params.id)
+      .execute();
     return { ok: true };
   });
 
   app.get("/shops", async (request) => {
-    const query = paginationSchema.extend({
-      status: z.string().trim().optional(),
-    }).parse(request.query);
+    const query = paginationSchema
+      .extend({
+        status: z.string().trim().optional(),
+      })
+      .parse(request.query);
     let qb = app.db.selectFrom("shops").selectAll();
     if (query.status) qb = qb.where("status", "=", query.status);
-    const shops = await qb.orderBy("created_at", "desc").limit(query.limit).offset(query.offset).execute();
+    const shops = await qb
+      .orderBy("created_at", "desc")
+      .limit(query.limit)
+      .offset(query.offset)
+      .execute();
     return { shops };
   });
 
@@ -710,7 +1068,15 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     const videos = mentions.length
       ? await app.db
           .selectFrom("videos")
-          .select(["id", "bvid", "title", "cover_url", "source_url", "published_at", "creator_id"])
+          .select([
+            "id",
+            "bvid",
+            "title",
+            "cover_url",
+            "source_url",
+            "published_at",
+            "creator_id",
+          ])
           .where(
             "id",
             "in",
@@ -741,14 +1107,26 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const admin = await requireAdmin(app.db, request);
     const result = await app.db.transaction().execute(async (trx) => {
-      const shop = await trx.selectFrom("shops").selectAll().where("id", "=", params.id).executeTakeFirst();
+      const shop = await trx
+        .selectFrom("shops")
+        .selectAll()
+        .where("id", "=", params.id)
+        .executeTakeFirst();
       if (!shop) throw new HttpError(404, "shop_not_found", "Shop not found");
       if (shop.status !== "draft") {
-        throw new HttpError(409, "shop_not_ready_for_approve", `Shop is in status='${shop.status}'; expected 'draft'`);
+        throw new HttpError(
+          409,
+          "shop_not_ready_for_approve",
+          `Shop is in status='${shop.status}'; expected 'draft'`,
+        );
       }
       const updated = await trx
         .updateTable("shops")
-        .set({ status: "approved", last_reviewed_at: new Date(), updated_at: new Date() })
+        .set({
+          status: "approved",
+          last_reviewed_at: new Date(),
+          updated_at: new Date(),
+        })
         .where("id", "=", params.id)
         .returningAll()
         .executeTakeFirstOrThrow();
@@ -782,7 +1160,12 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         card_payload: z.record(z.unknown()).optional(),
       })
       .parse(request.body);
-    const [shop] = await app.db.updateTable("shops").set({ ...body, updated_at: new Date() }).where("id", "=", params.id).returningAll().execute();
+    const [shop] = await app.db
+      .updateTable("shops")
+      .set({ ...body, updated_at: new Date() })
+      .where("id", "=", params.id)
+      .returningAll()
+      .execute();
     return { shop };
   });
 
@@ -790,11 +1173,19 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const admin = await requireAdmin(app.db, request);
     const result = await app.db.transaction().execute(async (trx) => {
-      const shop = await trx.selectFrom("shops").selectAll().where("id", "=", params.id).executeTakeFirst();
+      const shop = await trx
+        .selectFrom("shops")
+        .selectAll()
+        .where("id", "=", params.id)
+        .executeTakeFirst();
       if (!shop) throw new HttpError(404, "shop_not_found", "Shop not found");
       // Per AGENTS.md §3.5: publish must follow an explicit approve step.
       if (shop.status !== "approved") {
-        throw new HttpError(409, "shop_not_approved", `Shop is in status='${shop.status}'; call /approve before /publish`);
+        throw new HttpError(
+          409,
+          "shop_not_approved",
+          `Shop is in status='${shop.status}'; call /approve before /publish`,
+        );
       }
       const current = await trx
         .selectFrom("published_shop_snapshots")
@@ -802,7 +1193,11 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         .where("shop_id", "=", params.id)
         .executeTakeFirst();
       const version = Number(current?.version ?? 0) + 1;
-      await trx.updateTable("published_shop_snapshots").set({ is_current: false }).where("shop_id", "=", params.id).execute();
+      await trx
+        .updateTable("published_shop_snapshots")
+        .set({ is_current: false })
+        .where("shop_id", "=", params.id)
+        .execute();
       await trx
         .insertInto("published_shop_snapshots")
         .values({
@@ -823,7 +1218,11 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         .execute();
       const [published] = await trx
         .updateTable("shops")
-        .set({ status: "published", published_at: new Date(), updated_at: new Date() })
+        .set({
+          status: "published",
+          published_at: new Date(),
+          updated_at: new Date(),
+        })
         .where("id", "=", params.id)
         .returningAll()
         .execute();
@@ -833,6 +1232,9 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post("/shops/merge", async () => {
-    return { ok: true, message: "Merge task placeholder created for MVP skeleton" };
+    return {
+      ok: true,
+      message: "Merge task placeholder created for MVP skeleton",
+    };
   });
 };

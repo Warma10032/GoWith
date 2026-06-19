@@ -26,7 +26,13 @@ type BilibiliAuthAccount = {
   last_success_at?: string | null;
   last_error_code?: string | null;
 };
-type Creator = { id: string; bilibili_uid: string; name: string; status: string; last_synced_at?: string | null };
+type Creator = {
+  id: string;
+  bilibili_uid: string;
+  name: string;
+  status: string;
+  last_synced_at?: string | null;
+};
 type VideoRow = {
   id: string;
   bvid: string;
@@ -83,11 +89,21 @@ export function AdminWorkbenchPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const pendingRuns = useMemo(() => runs.filter((run) => ["queued", "running"].includes(run.status)).length, [runs]);
+  const pendingRuns = useMemo(
+    () =>
+      runs.filter((run) => ["queued", "running"].includes(run.status)).length,
+    [runs],
+  );
 
   useEffect(() => {
     void bootstrap();
   }, []);
+
+  useEffect(() => {
+    if (!message) return undefined;
+    const timer = setTimeout(() => setMessage(null), 4000);
+    return () => clearTimeout(timer);
+  }, [message]);
 
   async function bootstrap() {
     setLoading(true);
@@ -103,12 +119,19 @@ export function AdminWorkbenchPage() {
   }
 
   async function loadData() {
-    const [creatorPayload, videoPayload, authPayload, runPayload] = await Promise.all([
-      adminFetch<{ creators: Creator[] }>(`/api/admin/creators?limit=12${creatorQuery.trim() ? `&q=${encodeURIComponent(creatorQuery.trim())}` : ""}`),
-      adminFetch<{ videos: VideoRow[] }>(`/api/admin/videos?limit=12${videoQuery.trim() ? `&q=${encodeURIComponent(videoQuery.trim())}` : ""}`),
-      adminFetch<{ accounts: BilibiliAuthAccount[] }>("/api/admin/bilibili-auth"),
-      adminFetch<{ runs: PipelineRun[] }>("/api/admin/pipeline-runs?limit=8"),
-    ]);
+    const [creatorPayload, videoPayload, authPayload, runPayload] =
+      await Promise.all([
+        adminFetch<{ creators: Creator[] }>(
+          `/api/admin/creators?limit=12${creatorQuery.trim() ? `&q=${encodeURIComponent(creatorQuery.trim())}` : ""}`,
+        ),
+        adminFetch<{ videos: VideoRow[] }>(
+          `/api/admin/videos?limit=12${videoQuery.trim() ? `&q=${encodeURIComponent(videoQuery.trim())}` : ""}`,
+        ),
+        adminFetch<{ accounts: BilibiliAuthAccount[] }>(
+          "/api/admin/bilibili-auth",
+        ),
+        adminFetch<{ runs: PipelineRun[] }>("/api/admin/pipeline-runs?limit=8"),
+      ]);
     setCreators(creatorPayload.creators);
     setVideos(videoPayload.videos);
     setAccounts(authPayload.accounts);
@@ -144,7 +167,10 @@ export function AdminWorkbenchPage() {
   async function handleCreatorCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await run("新增博主", async () => {
-      await adminFetch("/api/admin/creators", { method: "POST", body: JSON.stringify({ bilibili_uid: creatorUid }) });
+      await adminFetch("/api/admin/creators", {
+        method: "POST",
+        body: JSON.stringify({ bilibili_uid: creatorUid }),
+      });
       setCreatorUid("");
     });
   }
@@ -177,20 +203,43 @@ export function AdminWorkbenchPage() {
   if (!user || user.role !== "admin") {
     return (
       <section className="grid min-h-[calc(100vh-64px)] place-items-center bg-[#eef1f4] px-4">
-        <form onSubmit={handleLogin} className="w-full max-w-sm rounded-lg border border-[#d7dde5] bg-white p-5 shadow-card">
-          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#6b7785]">Admin Access</div>
-          <h1 className="mt-1 text-2xl font-semibold text-[#16202b]">GoWith 数据中台</h1>
+        <form
+          onSubmit={handleLogin}
+          className="w-full max-w-sm rounded-lg border border-[#d7dde5] bg-white p-5 shadow-card"
+        >
+          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[#6b7785]">
+            Admin Access
+          </div>
+          <h1 className="mt-1 text-2xl font-semibold text-[#16202b]">
+            GoWith 数据中台
+          </h1>
           <label className="mt-5 block text-sm">
             <span className="mb-1 block font-medium">邮箱</span>
-            <input value={email} onChange={(event) => setEmail(event.target.value)} className="w-full rounded-md border border-[#d7dde5] px-3 py-2" />
+            <input
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              className="w-full rounded-md border border-[#d7dde5] px-3 py-2"
+            />
           </label>
           <label className="mt-3 block text-sm">
             <span className="mb-1 block font-medium">密码</span>
-            <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" className="w-full rounded-md border border-[#d7dde5] px-3 py-2" />
+            <input
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              type="password"
+              className="w-full rounded-md border border-[#d7dde5] px-3 py-2"
+            />
           </label>
           {error ? <Notice tone="error" text={error} /> : null}
-          <button className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white" disabled={!!busy}>
-            {busy === "登录" ? <LoaderCircle size={16} className="animate-spin" /> : <KeyRound size={16} />}
+          <button
+            className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white"
+            disabled={!!busy}
+          >
+            {busy === "登录" ? (
+              <LoaderCircle size={16} className="animate-spin" />
+            ) : (
+              <KeyRound size={16} />
+            )}
             登录
           </button>
         </form>
@@ -199,7 +248,11 @@ export function AdminWorkbenchPage() {
   }
 
   return (
-    <AdminShell title="数据中台" description="从这里完成数据新增、检索、审核、发布与下一步流程触发。">
+    <AdminShell
+      title="数据中台"
+      description="从这里完成数据新增、检索、审核、发布与下一步流程触发。"
+      showActivity
+    >
       {message ? <Notice tone="success" text={message} /> : null}
       {error ? <Notice tone="error" text={error} /> : null}
 
@@ -207,16 +260,43 @@ export function AdminWorkbenchPage() {
         <div className="space-y-4">
           <WorkbenchPanel title="快速新增" icon={<Plus size={17} />}>
             <form onSubmit={handleCreatorCreate} className="space-y-2">
-              <input value={creatorUid} onChange={(event) => setCreatorUid(event.target.value.replace(/\D/g, ""))} inputMode="numeric" className="w-full rounded-md border border-[#d7dde5] px-3 py-2 text-sm" placeholder="B站 UID" />
-              <button className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white" disabled={!creatorUid || !!busy}>
+              <input
+                value={creatorUid}
+                onChange={(event) =>
+                  setCreatorUid(event.target.value.replace(/\D/g, ""))
+                }
+                inputMode="numeric"
+                className="w-full rounded-md border border-[#d7dde5] px-3 py-2 text-sm"
+                placeholder="B站 UID"
+              />
+              <button
+                className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white"
+                disabled={!creatorUid || !!busy}
+              >
                 <Plus size={15} />
                 新增博主并获取资料
               </button>
             </form>
-            <form onSubmit={handleCookieSave} className="mt-4 space-y-2 border-t border-[#e3e8ef] pt-4">
-              <input value={cookieLabel} onChange={(event) => setCookieLabel(event.target.value)} className="w-full rounded-md border border-[#d7dde5] px-3 py-2 text-sm" placeholder="Cookie 标签" />
-              <textarea value={cookieValue} onChange={(event) => setCookieValue(event.target.value)} className="min-h-24 w-full rounded-md border border-[#d7dde5] px-3 py-2 text-sm" placeholder="粘贴 B站 Cookie" />
-              <button className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-[#17202b] px-3 py-2 text-sm font-semibold text-white" disabled={!cookieValue || !!busy}>
+            <form
+              onSubmit={handleCookieSave}
+              className="mt-4 space-y-2 border-t border-[#e3e8ef] pt-4"
+            >
+              <input
+                value={cookieLabel}
+                onChange={(event) => setCookieLabel(event.target.value)}
+                className="w-full rounded-md border border-[#d7dde5] px-3 py-2 text-sm"
+                placeholder="Cookie 标签"
+              />
+              <textarea
+                value={cookieValue}
+                onChange={(event) => setCookieValue(event.target.value)}
+                className="min-h-24 w-full rounded-md border border-[#d7dde5] px-3 py-2 text-sm"
+                placeholder="粘贴 B站 Cookie"
+              />
+              <button
+                className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-[#17202b] px-3 py-2 text-sm font-semibold text-white"
+                disabled={!cookieValue || !!busy}
+              >
                 <Database size={15} />
                 加密保存 Cookie
               </button>
@@ -225,18 +305,27 @@ export function AdminWorkbenchPage() {
 
           <WorkbenchPanel title="任务运行" icon={<Workflow size={17} />}>
             <div className="mb-3 rounded-md border border-[#d7dde5] bg-[#f8fafc] px-3 py-2 text-sm">
-              <span className="font-semibold">{pendingRuns}</span> 个运行中 / 入队任务
+              <span className="font-semibold">{pendingRuns}</span> 个运行中 /
+              入队任务
             </div>
             <CompactRows
               rows={runs.map((runItem) => ({
                 id: runItem.id,
                 title: runItem.run_type,
                 meta: `${runItem.entity_type}:${runItem.entity_id.slice(0, 8)} · ${runItem.status}`,
-                href: runItem.entity_type === "video" ? `/admin/videos/${runItem.entity_id}` : undefined,
+                href:
+                  runItem.entity_type === "video"
+                    ? `/admin/videos/${runItem.entity_id}`
+                    : undefined,
               }))}
               empty="暂无处理任务"
             />
-            <Link href="/admin/runs" className="mt-3 inline-flex rounded-md border border-[#d7dde5] px-2 py-1 text-xs font-medium">查看全部任务</Link>
+            <Link
+              href="/admin/runs"
+              className="mt-3 inline-flex rounded-md border border-[#d7dde5] px-2 py-1 text-xs font-medium"
+            >
+              查看全部任务
+            </Link>
           </WorkbenchPanel>
 
           <WorkbenchPanel title="Cookie 池" icon={<KeyRound size={17} />}>
@@ -249,9 +338,13 @@ export function AdminWorkbenchPage() {
               empty="暂无 Cookie"
             />
             <button
-              onClick={() => void run("检查 Cookie 池", async () => {
-                await adminFetch("/api/admin/bilibili-auth/check", { method: "POST" });
-              })}
+              onClick={() =>
+                void run("检查 Cookie 池", async () => {
+                  await adminFetch("/api/admin/bilibili-auth/check", {
+                    method: "POST",
+                  });
+                })
+              }
               className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md border border-[#d7dde5] px-2 py-2 text-xs font-medium"
               disabled={!!busy}
             >
@@ -267,20 +360,48 @@ export function AdminWorkbenchPage() {
             searchValue={creatorQuery}
             onSearchChange={setCreatorQuery}
             onSearch={() => void run("搜索博主", loadData)}
-            action={<Link href="/admin/creators" className="rounded-md bg-[#17202b] px-3 py-2 text-xs font-semibold text-white">进入博主管理</Link>}
+            action={
+              <Link
+                href="/admin/creators"
+                className="rounded-md bg-[#17202b] px-3 py-2 text-xs font-semibold text-white"
+              >
+                进入博主管理
+              </Link>
+            }
           >
             <OpsTable
               columns={["名称", "UID", "状态", "动作"]}
               rows={creators.map((creator) => [
-                <Link key="name" href={`/admin/creators/${creator.id}`} className="font-semibold text-[#16202b] hover:text-brand">{creator.name}</Link>,
+                <Link
+                  key="name"
+                  href={`/admin/creators/${creator.id}`}
+                  className="font-semibold text-[#16202b] hover:text-brand"
+                >
+                  {creator.name}
+                </Link>,
                 creator.bilibili_uid,
                 creator.status,
                 <div key="actions" className="flex flex-wrap gap-2">
-                  <button onClick={() => void run("同步基础视频", async () => adminFetch(`/api/admin/creators/${creator.id}/sync`, { method: "POST" }))} className="op-btn" disabled={!!busy}>
+                  <button
+                    onClick={() =>
+                      void run("同步基础视频", async () =>
+                        adminFetch(`/api/admin/creators/${creator.id}/sync`, {
+                          method: "POST",
+                        }),
+                      )
+                    }
+                    className="op-btn"
+                    disabled={!!busy}
+                  >
                     <Play size={13} />
                     同步
                   </button>
-                  <Link href={`/admin/creators/${creator.id}`} className="op-btn">查看</Link>
+                  <Link
+                    href={`/admin/creators/${creator.id}`}
+                    className="op-btn"
+                  >
+                    查看
+                  </Link>
                 </div>,
               ])}
               empty="暂无博主"
@@ -292,14 +413,31 @@ export function AdminWorkbenchPage() {
             searchValue={videoQuery}
             onSearchChange={setVideoQuery}
             onSearch={() => void run("搜索视频", loadData)}
-            action={<Link href="/admin/videos" className="rounded-md bg-[#17202b] px-3 py-2 text-xs font-semibold text-white">进入视频库</Link>}
+            action={
+              <Link
+                href="/admin/videos"
+                className="rounded-md bg-[#17202b] px-3 py-2 text-xs font-semibold text-white"
+              >
+                进入视频库
+              </Link>
+            }
           >
             <OpsTable
               columns={["标题", "博主", "状态", "动作"]}
               rows={videos.map((video) => [
                 <div key="title" className="min-w-0">
-                  <Link href={`/admin/videos/${video.id}`} className="line-clamp-1 font-semibold text-[#16202b] hover:text-brand">{video.title}</Link>
-                  <a href={video.source_url} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-brand">
+                  <Link
+                    href={`/admin/videos/${video.id}`}
+                    className="line-clamp-1 font-semibold text-[#16202b] hover:text-brand"
+                  >
+                    {video.title}
+                  </Link>
+                  <a
+                    href={video.source_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1 inline-flex items-center gap-1 text-xs text-brand"
+                  >
                     <ExternalLink size={12} />
                     {video.bvid}
                   </a>
@@ -307,11 +445,23 @@ export function AdminWorkbenchPage() {
                 video.creator_name,
                 video.workflow_status,
                 <div key="actions" className="flex flex-wrap gap-2">
-                  <button onClick={() => void run("开始处理", async () => adminFetch(`/api/admin/videos/${video.id}/process`, { method: "POST" }))} className="op-btn" disabled={!!busy}>
+                  <button
+                    onClick={() =>
+                      void run("开始处理", async () =>
+                        adminFetch(`/api/admin/videos/${video.id}/process`, {
+                          method: "POST",
+                        }),
+                      )
+                    }
+                    className="op-btn"
+                    disabled={!!busy}
+                  >
                     <Play size={13} />
                     处理
                   </button>
-                  <Link href={`/admin/videos/${video.id}`} className="op-btn">控制台</Link>
+                  <Link href={`/admin/videos/${video.id}`} className="op-btn">
+                    控制台
+                  </Link>
                 </div>,
               ])}
               empty="暂无视频"
@@ -323,7 +473,15 @@ export function AdminWorkbenchPage() {
   );
 }
 
-function WorkbenchPanel({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
+function WorkbenchPanel({
+  title,
+  icon,
+  children,
+}: {
+  title: string;
+  icon: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <section className="rounded-lg border border-[#d7dde5] bg-white p-4 shadow-[0_12px_32px_rgba(26,34,43,0.05)]">
       <div className="mb-3 flex items-center gap-2 font-semibold text-[#16202b]">
@@ -363,7 +521,12 @@ function DataSection({
               }}
               className="flex gap-2"
             >
-              <input value={searchValue ?? ""} onChange={(event) => onSearchChange(event.target.value)} className="w-56 rounded-md border border-[#d7dde5] px-3 py-2 text-sm" placeholder="搜索当前数据" />
+              <input
+                value={searchValue ?? ""}
+                onChange={(event) => onSearchChange(event.target.value)}
+                className="w-56 rounded-md border border-[#d7dde5] px-3 py-2 text-sm"
+                placeholder="搜索当前数据"
+              />
               <button className="inline-flex items-center gap-1 rounded-md border border-[#d7dde5] px-3 py-2 text-xs font-semibold">
                 <Search size={13} />
                 查询
@@ -378,23 +541,44 @@ function DataSection({
   );
 }
 
-function OpsTable({ columns, rows, empty }: { columns: string[]; rows: ReactNode[][]; empty: string }) {
-  if (!rows.length) return <div className="rounded-md border border-dashed border-[#d7dde5] p-5 text-sm text-[#6b7785]">{empty}</div>;
+function OpsTable({
+  columns,
+  rows,
+  empty,
+}: {
+  columns: string[];
+  rows: ReactNode[][];
+  empty: string;
+}) {
+  if (!rows.length)
+    return (
+      <div className="rounded-md border border-dashed border-[#d7dde5] p-5 text-sm text-[#6b7785]">
+        {empty}
+      </div>
+    );
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[760px] text-left text-sm">
         <thead>
           <tr className="border-b border-[#e3e8ef] text-xs uppercase tracking-wide text-[#6b7785]">
             {columns.map((column) => (
-              <th key={column} className="px-3 py-2 font-semibold">{column}</th>
+              <th key={column} className="px-3 py-2 font-semibold">
+                {column}
+              </th>
             ))}
           </tr>
         </thead>
         <tbody>
           {rows.map((row, rowIndex) => (
-            <tr key={rowIndex} className="border-b border-[#eef2f6] last:border-0 hover:bg-[#f8fafc]">
+            <tr
+              key={rowIndex}
+              className="border-b border-[#eef2f6] last:border-0 hover:bg-[#f8fafc]"
+            >
               {row.map((cell, cellIndex) => (
-                <td key={cellIndex} className="max-w-[320px] px-3 py-3 align-top">
+                <td
+                  key={cellIndex}
+                  className="max-w-[320px] px-3 py-3 align-top"
+                >
                   {cell}
                 </td>
               ))}
@@ -406,18 +590,37 @@ function OpsTable({ columns, rows, empty }: { columns: string[]; rows: ReactNode
   );
 }
 
-function CompactRows({ rows, empty }: { rows: Array<{ id: string; title: string; meta: string; href?: string }>; empty: string }) {
-  if (!rows.length) return <div className="rounded-md border border-dashed border-[#d7dde5] p-3 text-sm text-[#6b7785]">{empty}</div>;
+function CompactRows({
+  rows,
+  empty,
+}: {
+  rows: Array<{ id: string; title: string; meta: string; href?: string }>;
+  empty: string;
+}) {
+  if (!rows.length)
+    return (
+      <div className="rounded-md border border-dashed border-[#d7dde5] p-3 text-sm text-[#6b7785]">
+        {empty}
+      </div>
+    );
   return (
     <div className="space-y-2">
       {rows.map((row) => {
         const body = (
           <div className="rounded-md border border-[#e3e8ef] bg-[#f8fafc] px-3 py-2">
-            <div className="line-clamp-1 text-sm font-semibold text-[#16202b]">{row.title}</div>
+            <div className="line-clamp-1 text-sm font-semibold text-[#16202b]">
+              {row.title}
+            </div>
             <div className="mt-1 text-xs text-[#6b7785]">{row.meta}</div>
           </div>
         );
-        return row.href ? <Link key={row.id} href={row.href}>{body}</Link> : <div key={row.id}>{body}</div>;
+        return row.href ? (
+          <Link key={row.id} href={row.href}>
+            {body}
+          </Link>
+        ) : (
+          <div key={row.id}>{body}</div>
+        );
       })}
     </div>
   );
@@ -425,13 +628,28 @@ function CompactRows({ rows, empty }: { rows: Array<{ id: string; title: string;
 
 function Notice({ tone, text }: { tone: "success" | "error"; text: string }) {
   return (
-    <div className={`mb-4 rounded-md border px-3 py-2 text-sm ${tone === "success" ? "border-[#b8d6b4] bg-[#eef7ed] text-[#2d6330]" : "border-[#f2c7bd] bg-[#fff1ee] text-[#9a341f]"}`}>
-      {text}
+    <div
+      role="status"
+      aria-live="polite"
+      className={`mb-4 flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${tone === "success" ? "border-[#b8d6b4] bg-[#eef7ed] text-[#2d6330]" : "border-[#f2c7bd] bg-[#fff1ee] text-[#9a341f]"}`}
+    >
+      <span
+        className={`grid size-5 shrink-0 place-items-center rounded-full text-[10px] font-semibold ${tone === "success" ? "bg-white/70 text-[#2d6330]" : "bg-white/70 text-[#9a341f]"}`}
+        aria-hidden="true"
+      >
+        {tone === "success" ? "✓" : "!"}
+      </span>
+      <span>{text}</span>
     </div>
   );
 }
 
 function formatTime(value?: string | null) {
   if (!value) return "未记录";
-  return new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return new Date(value).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
