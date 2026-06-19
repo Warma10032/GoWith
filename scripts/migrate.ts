@@ -1,4 +1,5 @@
 import { readdir, readFile } from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -9,7 +10,23 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 const migrationsDir = path.join(rootDir, "db", "migrations");
 
+function loadDotEnv() {
+  const envPath = path.join(rootDir, ".env");
+  if (!existsSync(envPath)) return;
+  const lines = readFileSync(envPath, "utf8").split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const separator = trimmed.indexOf("=");
+    if (separator <= 0) continue;
+    const key = trimmed.slice(0, separator).trim();
+    const value = trimmed.slice(separator + 1).trim();
+    process.env[key] ??= value.replace(/^["']|["']$/g, "");
+  }
+}
+
 async function main() {
+  loadDotEnv();
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     throw new Error("DATABASE_URL is required");
@@ -58,4 +75,3 @@ main().catch((error) => {
   console.error(error);
   process.exit(1);
 });
-
