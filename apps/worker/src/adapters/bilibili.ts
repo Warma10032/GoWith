@@ -93,9 +93,10 @@ const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 const BILIBILI_API_BASE = "https://api.bilibili.com";
 const MIXIN_KEY_ENC_TAB = [
-  46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19, 29,
-  28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4, 22,
-  25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52,
+  46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
+  33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61,
+  26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36,
+  20, 34, 44, 52,
 ] as const;
 
 const MOCK_CREATORS: Record<string, string> = {
@@ -209,7 +210,9 @@ function sleep(ms: number): Promise<void> {
 }
 
 function asRecord(value: unknown): JsonRecord {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : {};
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonRecord)
+    : {};
 }
 
 function asArray(value: unknown): unknown[] {
@@ -245,7 +248,9 @@ function uniqueStrings(values: string[]): string[] {
 
 function publishedAtFromSeconds(value: unknown): string {
   const seconds = asNumber(value);
-  return seconds ? new Date(seconds * 1000).toISOString() : new Date().toISOString();
+  return seconds
+    ? new Date(seconds * 1000).toISOString()
+    : new Date().toISOString();
 }
 
 function parseDurationSeconds(value: unknown): number | null {
@@ -254,7 +259,8 @@ function parseDurationSeconds(value: unknown): number | null {
   const text = asString(value);
   if (!text) return null;
   const parts = text.split(":").map((part) => Number(part));
-  if (!parts.length || parts.some((part) => !Number.isFinite(part))) return null;
+  if (!parts.length || parts.some((part) => !Number.isFinite(part)))
+    return null;
   return parts.reduce((total, part) => total * 60 + part, 0);
 }
 
@@ -266,27 +272,51 @@ function normalizeUrl(value: string | null): string | null {
 
 function normalizeAudioMimeType(value: string | null): string {
   const mimeType = value?.split(";")[0]?.trim().toLowerCase();
-  if (!mimeType || mimeType === "audio/m4s" || mimeType === "application/octet-stream") {
+  if (
+    !mimeType ||
+    mimeType === "audio/m4s" ||
+    mimeType === "application/octet-stream"
+  ) {
     return "audio/m4a";
   }
   return mimeType;
 }
 
-function accountStatusFromNavPayload(value: unknown): { status: "active" | "expired" | "risk"; code: string | null; message: string | null } {
+function accountStatusFromNavPayload(value: unknown): {
+  status: "active" | "expired" | "risk";
+  code: string | null;
+  message: string | null;
+} {
   const record = asRecord(value);
   const code = asNumber(record.code);
   const message = firstString(record.message) ?? null;
   const data = asRecord(record.data);
-  if (firstString(data.v_voucher) || /风控|risk|验证码|v_voucher/i.test(message ?? "")) {
-    return { status: "risk", code: "risk_control", message: message ?? "Bilibili returned risk control" };
+  if (
+    firstString(data.v_voucher) ||
+    /风控|risk|验证码|v_voucher/i.test(message ?? "")
+  ) {
+    return {
+      status: "risk",
+      code: "risk_control",
+      message: message ?? "Bilibili returned risk control",
+    };
   }
   if (code === -101 || code === -102 || data.isLogin === false) {
-    return { status: "expired", code: "login_expired", message: message ?? "Bilibili cookie is not logged in" };
+    return {
+      status: "expired",
+      code: "login_expired",
+      message: message ?? "Bilibili cookie is not logged in",
+    };
   }
   if (code !== null && code !== 0) {
     const classified = classifyBilibiliCode(code, message ?? "");
     return {
-      status: classified === "risk_control" ? "risk" : classified === "login_expired" ? "expired" : "active",
+      status:
+        classified === "risk_control"
+          ? "risk"
+          : classified === "login_expired"
+            ? "expired"
+            : "active",
       code: classified,
       message: message ?? `Bilibili API error ${code}`,
     };
@@ -299,13 +329,16 @@ function removeWbiUnsafeChars(value: string): string {
 }
 
 export function encodeWbiComponent(value: string): string {
-  return encodeURIComponent(value).replace(/[!'()*]/g, (char) =>
-    `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+  return encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
   );
 }
 
 function mixinKey(rawKey: string): string {
-  return MIXIN_KEY_ENC_TAB.map((index) => rawKey[index] ?? "").join("").slice(0, 32);
+  return MIXIN_KEY_ENC_TAB.map((index) => rawKey[index] ?? "")
+    .join("")
+    .slice(0, 32);
 }
 
 export function signWbiParams(
@@ -322,15 +355,26 @@ export function signWbiParams(
   unsigned.wts = String(timestampSeconds);
   const sortedQuery = Object.keys(unsigned)
     .sort()
-    .map((key) => `${encodeWbiComponent(key)}=${encodeWbiComponent(unsigned[key] ?? "")}`)
+    .map(
+      (key) =>
+        `${encodeWbiComponent(key)}=${encodeWbiComponent(unsigned[key] ?? "")}`,
+    )
     .join("&");
-  return { ...unsigned, w_rid: md5(`${sortedQuery}${mixinKey(`${imgKey}${subKey}`)}`) };
+  return {
+    ...unsigned,
+    w_rid: md5(`${sortedQuery}${mixinKey(`${imgKey}${subKey}`)}`),
+  };
 }
 
-function buildQuery(params: Record<string, string | number | boolean | null | undefined>): string {
+function buildQuery(
+  params: Record<string, string | number | boolean | null | undefined>,
+): string {
   return Object.entries(params)
     .filter(([, value]) => value !== null && value !== undefined)
-    .map(([key, value]) => `${encodeWbiComponent(key)}=${encodeWbiComponent(String(value))}`)
+    .map(
+      ([key, value]) =>
+        `${encodeWbiComponent(key)}=${encodeWbiComponent(String(value))}`,
+    )
     .join("&");
 }
 
@@ -344,20 +388,29 @@ function keyFromWbiUrl(value: unknown): string | null {
 function classifyBilibiliCode(code: number, message: string): string {
   if (code === -101 || code === -102) return "login_expired";
   if (code === -403) return "wbi_signature_failed";
-  if (code === -404 || code === 62002 || code === 62004 || code === 62012) return "video_unavailable";
-  if (code === -412 || /风控|risk|验证码|v_voucher/i.test(message)) return "risk_control";
+  if (code === -404 || code === 62002 || code === 62004 || code === 62012)
+    return "video_unavailable";
+  if (code === -412 || /风控|risk|验证码|v_voucher/i.test(message))
+    return "risk_control";
   if (code === -509 || /限流|频繁|rate/i.test(message)) return "rate_limited";
   if (code === -400 || code === -401) return "permission_denied";
   return "network_error";
 }
 
-function sanitizeBilibiliPayload(resourceType: string, value: unknown): unknown {
-  if (Array.isArray(value)) return value.map((item) => sanitizeBilibiliPayload(resourceType, item));
+function sanitizeBilibiliPayload(
+  resourceType: string,
+  value: unknown,
+): unknown {
+  if (Array.isArray(value))
+    return value.map((item) => sanitizeBilibiliPayload(resourceType, item));
   if (!value || typeof value !== "object") return value;
 
   const result: JsonRecord = {};
   for (const [key, child] of Object.entries(value as JsonRecord)) {
-    if (resourceType === "playurl" && ["baseUrl", "base_url", "backupUrl", "backup_url", "url"].includes(key)) {
+    if (
+      resourceType === "playurl" &&
+      ["baseUrl", "base_url", "backupUrl", "backup_url", "url"].includes(key)
+    ) {
       result[key] = "[redacted_play_url]";
       continue;
     }
@@ -419,10 +472,15 @@ function decryptSecret(encoded: string): string {
   const iv = raw.subarray(0, 12);
   const tag = raw.subarray(12, 28);
   const encrypted = raw.subarray(28);
-  const key = crypto.createHash("sha256").update(env.cookieEncryptionKey).digest();
+  const key = crypto
+    .createHash("sha256")
+    .update(env.cookieEncryptionKey)
+    .digest();
   const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
   decipher.setAuthTag(tag);
-  return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
+  return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString(
+    "utf8",
+  );
 }
 
 export function normalizeSubtitleBody(value: unknown): TranscriptSegment[] {
@@ -439,7 +497,11 @@ export function normalizeSubtitleBody(value: unknown): TranscriptSegment[] {
     .filter((segment): segment is TranscriptSegment => segment !== null);
 }
 
-export function mapViewDetailToVideoMetadata(bvid: string, detail: unknown, rawPayloadId: string | null): FetchedVideo {
+export function mapViewDetailToVideoMetadata(
+  bvid: string,
+  detail: unknown,
+  rawPayloadId: string | null,
+): FetchedVideo {
   const data = asRecord(asRecord(detail).data);
   const view = asRecord(data.View ?? data.view ?? data);
   const stats = asRecord(view.stat);
@@ -480,7 +542,8 @@ class LiveBilibiliClient {
   private cookie: string | null = null;
   private accountId: string | null = null;
   private lastRequestAt = 0;
-  private wbi: { imgKey: string; subKey: string; expiresAt: number } | null = null;
+  private wbi: { imgKey: string; subKey: string; expiresAt: number } | null =
+    null;
 
   constructor(private readonly db: Kysely<DB>) {}
 
@@ -489,7 +552,8 @@ class LiveBilibiliClient {
       try {
         await this.loadAccount();
       } catch (error) {
-        if (!(error instanceof BilibiliError) || error.code !== "login_expired") throw error;
+        if (!(error instanceof BilibiliError) || error.code !== "login_expired")
+          throw error;
       }
       const creatorInfo = await this.fetchCreatorInfo(uid);
       await this.markAccountSuccess();
@@ -513,12 +577,15 @@ class LiveBilibiliClient {
       const videos = await this.fetchVideoList(uid);
       const enrichedVideos: FetchedVideo[] = [];
       const maxVideos = env.bilibiliMaxVideosPerCreator;
-      const selectedVideos = maxVideos > 0 ? videos.slice(0, maxVideos) : videos;
+      const selectedVideos =
+        maxVideos > 0 ? videos.slice(0, maxVideos) : videos;
 
       for (const listVideo of selectedVideos) {
         const detailVideo = await this.fetchVideoDetail(listVideo.bvid);
         const video = { ...listVideo, ...detailVideo };
-        const subtitle = video.cid ? await this.fetchSubtitle(video.bvid, video.cid) : null;
+        const subtitle = video.cid
+          ? await this.fetchSubtitle(video.bvid, video.cid)
+          : null;
         const comments = video.aid ? await this.fetchComments(video.aid) : [];
         enrichedVideos.push({
           ...video,
@@ -545,21 +612,38 @@ class LiveBilibiliClient {
     }
   }
 
-  async fetchAudio(video: { bvid: string; cid: string | null }): Promise<AudioDownload> {
+  async fetchAudio(video: {
+    bvid: string;
+    cid: string | null;
+  }): Promise<AudioDownload> {
     try {
-      if (!video.cid) throw new BilibiliError("video_unavailable", "Video cid is required before ASR");
+      if (!video.cid)
+        throw new BilibiliError(
+          "video_unavailable",
+          "Video cid is required before ASR",
+        );
       await this.loadAccount();
-      const { json, rawPayloadId } = await this.fetchPlayUrl(video.bvid, video.cid);
+      const { json, rawPayloadId } = await this.fetchPlayUrl(
+        video.bvid,
+        video.cid,
+      );
       const audio = this.pickAudioStream(json);
       const response = await this.fetchWithRateLimit(audio.url, {
         headers: this.headers(`https://www.bilibili.com/video/${video.bvid}`),
       });
       if (!response.ok) {
-        throw new BilibiliError(response.status === 403 ? "permission_denied" : "network_error", `Audio download failed: ${response.status}`);
+        throw new BilibiliError(
+          response.status === 403 ? "permission_denied" : "network_error",
+          `Audio download failed: ${response.status}`,
+        );
       }
       const buffer = Buffer.from(await response.arrayBuffer());
-      const mimeType = normalizeAudioMimeType(response.headers.get("content-type") ?? audio.mimeType);
-      const directory = await mkdtemp(path.join(tmpdir(), "gowith-bilibili-asr-"));
+      const mimeType = normalizeAudioMimeType(
+        response.headers.get("content-type") ?? audio.mimeType,
+      );
+      const directory = await mkdtemp(
+        path.join(tmpdir(), "gowith-bilibili-asr-"),
+      );
       const fileName = `${video.bvid}-${video.cid}.m4a`;
       const filePath = path.join(directory, fileName);
       await writeFile(filePath, buffer);
@@ -579,7 +663,10 @@ class LiveBilibiliClient {
     }
   }
 
-  private async fetchPlayUrl(bvid: string, cid: string): Promise<{ json: unknown; rawPayloadId: string | null }> {
+  private async fetchPlayUrl(
+    bvid: string,
+    cid: string,
+  ): Promise<{ json: unknown; rawPayloadId: string | null }> {
     const params = { bvid, cid, fnval: 16 };
     try {
       return await this.requestJson("/x/player/wbi/playurl", params, {
@@ -589,7 +676,8 @@ class LiveBilibiliClient {
         referer: `https://www.bilibili.com/video/${bvid}`,
       });
     } catch (error) {
-      if (!(error instanceof BilibiliError) || error.code !== "risk_control") throw error;
+      if (!(error instanceof BilibiliError) || error.code !== "risk_control")
+        throw error;
       return this.requestJson("/x/player/playurl", params, {
         wbi: false,
         resourceType: "playurl_public_fallback",
@@ -638,7 +726,8 @@ class LiveBilibiliClient {
         rawPayloadId,
       };
     } catch (error) {
-      if (error instanceof BilibiliError && error.code === "video_unavailable") throw error;
+      if (error instanceof BilibiliError && error.code === "video_unavailable")
+        throw error;
       return this.fetchCreatorCardInfo(uid);
     }
   }
@@ -689,7 +778,12 @@ class LiveBilibiliClient {
           platform: "web",
           web_location: 1550101,
         },
-        { wbi: true, resourceType: "creator_video_page", resourceKey: `${uid}:${page}`, referer: `https://space.bilibili.com/${uid}` },
+        {
+          wbi: true,
+          resourceType: "creator_video_page",
+          resourceKey: `${uid}:${page}`,
+          referer: `https://space.bilibili.com/${uid}`,
+        },
       );
       const data = asRecord(asRecord(json).data);
       const list = asRecord(data.list);
@@ -708,7 +802,9 @@ class LiveBilibiliClient {
           cover_url: normalizeUrl(firstString(record.pic)),
           source_url: `https://www.bilibili.com/video/${bvid}`,
           duration_sec: parseDurationSeconds(record.length ?? record.duration),
-          published_at: publishedAtFromSeconds(record.created ?? record.pubdate),
+          published_at: publishedAtFromSeconds(
+            record.created ?? record.pubdate,
+          ),
           tags: [],
           category: null,
           stats: {
@@ -727,7 +823,11 @@ class LiveBilibiliClient {
       }
       const total = asNumber(asRecord(data.page).count);
       if (total !== null && videos.length >= total) break;
-      if (env.bilibiliMaxVideosPerCreator > 0 && videos.length >= env.bilibiliMaxVideosPerCreator) break;
+      if (
+        env.bilibiliMaxVideosPerCreator > 0 &&
+        videos.length >= env.bilibiliMaxVideosPerCreator
+      )
+        break;
       page += 1;
     }
     return videos;
@@ -737,7 +837,12 @@ class LiveBilibiliClient {
     const { json, rawPayloadId } = await this.requestJson(
       "/x/web-interface/wbi/view/detail",
       { bvid, need_elec: 0 },
-      { wbi: true, resourceType: "video_detail", resourceKey: bvid, referer: `https://www.bilibili.com/video/${bvid}` },
+      {
+        wbi: true,
+        resourceType: "video_detail",
+        resourceKey: bvid,
+        referer: `https://www.bilibili.com/video/${bvid}`,
+      },
     );
     return mapViewDetailToVideoMetadata(bvid, json, rawPayloadId);
   }
@@ -745,25 +850,48 @@ class LiveBilibiliClient {
   private async fetchSubtitle(
     bvid: string,
     cid: string,
-  ): Promise<{ segments: TranscriptSegment[]; language: string | null; rawPayloadId: string | null } | null> {
+  ): Promise<{
+    segments: TranscriptSegment[];
+    language: string | null;
+    rawPayloadId: string | null;
+  } | null> {
     const { json } = await this.requestJson(
       "/x/player/wbi/v2",
       { bvid, cid },
-      { wbi: true, resourceType: "player_v2", resourceKey: `${bvid}:${cid}`, referer: `https://www.bilibili.com/video/${bvid}` },
+      {
+        wbi: true,
+        resourceType: "player_v2",
+        resourceKey: `${bvid}:${cid}`,
+        referer: `https://www.bilibili.com/video/${bvid}`,
+      },
     );
     const data = asRecord(asRecord(json).data);
     const subtitle = asRecord(data.subtitle);
-    const candidates = [...asArray(subtitle.subtitles), ...asArray(subtitle.list)];
+    const candidates = [
+      ...asArray(subtitle.subtitles),
+      ...asArray(subtitle.list),
+    ];
     const selected = this.selectSubtitle(candidates);
     if (!selected) return null;
-    const subtitleUrl = normalizeUrl(firstString(selected.subtitle_url, selected.url));
+    const subtitleUrl = normalizeUrl(
+      firstString(selected.subtitle_url, selected.url),
+    );
     if (!subtitleUrl) return null;
     const response = await this.fetchWithRateLimit(subtitleUrl, {
       headers: this.headers(`https://www.bilibili.com/video/${bvid}`),
     });
-    if (!response.ok) throw new BilibiliError("network_error", `Subtitle body fetch failed: ${response.status}`);
+    if (!response.ok)
+      throw new BilibiliError(
+        "network_error",
+        `Subtitle body fetch failed: ${response.status}`,
+      );
     const body = (await response.json()) as unknown;
-    const rawPayloadId = await saveRawPayload(this.db, "subtitle_body", `${bvid}:${cid}:${firstString(selected.id) ?? "default"}`, body);
+    const rawPayloadId = await saveRawPayload(
+      this.db,
+      "subtitle_body",
+      `${bvid}:${cid}:${firstString(selected.id) ?? "default"}`,
+      body,
+    );
     const segments = normalizeSubtitleBody(body);
     return {
       segments,
@@ -779,7 +907,13 @@ class LiveBilibiliClient {
     const comments = new Map<string, FetchedComment>();
     await this.fetchCommentsByMode(aid, "hot", 3, perModeLimit, comments);
     if (comments.size < totalLimit) {
-      await this.fetchCommentsByMode(aid, "latest", 2, totalLimit - comments.size, comments);
+      await this.fetchCommentsByMode(
+        aid,
+        "latest",
+        2,
+        totalLimit - comments.size,
+        comments,
+      );
     }
     return [...comments.values()].slice(0, totalLimit);
   }
@@ -793,7 +927,11 @@ class LiveBilibiliClient {
   ): Promise<void> {
     let offset = "";
     let page = 0;
-    while (comments.size < env.bilibiliCommentsLimitPerVideo && limit > 0 && page < 6) {
+    while (
+      comments.size < env.bilibiliCommentsLimitPerVideo &&
+      limit > 0 &&
+      page < 6
+    ) {
       const params: Record<string, string | number> = {
         oid: aid,
         type: 1,
@@ -804,7 +942,11 @@ class LiveBilibiliClient {
       const { json, rawPayloadId } = await this.requestJson(
         "/x/v2/reply/wbi/main",
         params,
-        { wbi: true, resourceType: "comments_page", resourceKey: `${aid}:${sampleType}:${page}:${offset || "first"}` },
+        {
+          wbi: true,
+          resourceType: "comments_page",
+          resourceKey: `${aid}:${sampleType}:${page}:${offset || "first"}`,
+        },
       );
       const data = asRecord(asRecord(json).data);
       const replies = [...asArray(data.top_replies), ...asArray(data.replies)];
@@ -816,14 +958,20 @@ class LiveBilibiliClient {
         limit -= 1;
         if (limit <= 0) break;
       }
-      const nextOffset = firstString(asRecord(asRecord(data.cursor).pagination_reply).next_offset);
+      const nextOffset = firstString(
+        asRecord(asRecord(data.cursor).pagination_reply).next_offset,
+      );
       if (!nextOffset || nextOffset === offset) break;
       offset = nextOffset;
       page += 1;
     }
   }
 
-  private mapReply(value: unknown, sampleType: "hot" | "latest", rawPayloadId: string): FetchedComment | null {
+  private mapReply(
+    value: unknown,
+    sampleType: "hot" | "latest",
+    rawPayloadId: string,
+  ): FetchedComment | null {
     const reply = asRecord(value);
     const id = firstString(reply.rpid, reply.rpid_str);
     const content = firstString(asRecord(reply.content).message);
@@ -843,9 +991,15 @@ class LiveBilibiliClient {
   }
 
   private selectSubtitle(candidates: unknown[]): JsonRecord | null {
-    const records = candidates.map(asRecord).filter((record) => firstString(record.subtitle_url, record.url));
+    const records = candidates
+      .map(asRecord)
+      .filter((record) => firstString(record.subtitle_url, record.url));
     return (
-      records.find((record) => /zh|cn|中文|简体|繁体/i.test(`${firstString(record.lan, record.lang, record.lan_doc) ?? ""}`)) ??
+      records.find((record) =>
+        /zh|cn|中文|简体|繁体/i.test(
+          `${firstString(record.lan, record.lang, record.lan_doc) ?? ""}`,
+        ),
+      ) ??
       records[0] ??
       null
     );
@@ -861,29 +1015,69 @@ class LiveBilibiliClient {
         mimeType: firstString(audio.mimeType, audio.mime_type) ?? "audio/mp4",
         bandwidth: asNumber(audio.bandwidth) ?? Number.MAX_SAFE_INTEGER,
       }))
-      .filter((audio): audio is { url: string; mimeType: string; bandwidth: number } => Boolean(audio.url))
+      .filter(
+        (
+          audio,
+        ): audio is { url: string; mimeType: string; bandwidth: number } =>
+          Boolean(audio.url),
+      )
       .sort((left, right) => left.bandwidth - right.bandwidth);
     const selected = sorted[0];
-    if (!selected) throw new BilibiliError("video_unavailable", "No audio stream found for ASR");
+    if (!selected)
+      throw new BilibiliError(
+        "video_unavailable",
+        "No audio stream found for ASR",
+      );
     return selected;
   }
 
   private async requestJson(
     endpoint: string,
     params: Record<string, string | number | boolean | null | undefined>,
-    options: { wbi: boolean; resourceType: string; resourceKey: string; referer?: string; requireLogin?: boolean },
+    options: {
+      wbi: boolean;
+      resourceType: string;
+      resourceKey: string;
+      referer?: string;
+      requireLogin?: boolean;
+    },
     retried = false,
   ): Promise<{ json: unknown; rawPayloadId: string }> {
-    const signed = options.wbi ? signWbiParams(params, ...(await this.ensureWbiKeys(options.requireLogin ?? true))) : params;
+    const signed = options.wbi
+      ? signWbiParams(
+          params,
+          ...(await this.ensureWbiKeys(options.requireLogin ?? true)),
+        )
+      : params;
     const query = buildQuery(signed);
     const url = `${BILIBILI_API_BASE}${endpoint}${query ? `?${query}` : ""}`;
-    const response = await this.fetchWithRateLimit(url, { headers: this.headers(options.referer) });
-    if (response.status === 429) throw new BilibiliError("rate_limited", "Bilibili returned HTTP 429");
-    if (response.status === 412) throw new BilibiliError("risk_control", "Bilibili returned HTTP 412 risk control");
-    if (response.status === 403) throw new BilibiliError("permission_denied", "Bilibili returned HTTP 403");
-    if (!response.ok) throw new BilibiliError("network_error", `Bilibili request failed: ${response.status}`);
+    const response = await this.fetchWithRateLimit(url, {
+      headers: this.headers(options.referer),
+    });
+    if (response.status === 429)
+      throw new BilibiliError("rate_limited", "Bilibili returned HTTP 429");
+    if (response.status === 412)
+      throw new BilibiliError(
+        "risk_control",
+        "Bilibili returned HTTP 412 risk control",
+      );
+    if (response.status === 403)
+      throw new BilibiliError(
+        "permission_denied",
+        "Bilibili returned HTTP 403",
+      );
+    if (!response.ok)
+      throw new BilibiliError(
+        "network_error",
+        `Bilibili request failed: ${response.status}`,
+      );
     const json = (await response.json()) as unknown;
-    const rawPayloadId = await saveRawPayload(this.db, options.resourceType, options.resourceKey, json);
+    const rawPayloadId = await saveRawPayload(
+      this.db,
+      options.resourceType,
+      options.resourceKey,
+      json,
+    );
     const record = asRecord(json);
     const code = asNumber(record.code);
     const message = firstString(record.message) ?? "";
@@ -893,28 +1087,50 @@ class LiveBilibiliClient {
         this.wbi = null;
         return this.requestJson(endpoint, params, options, true);
       }
-      throw new BilibiliError("wbi_signature_failed", "Bilibili returned v_voucher for signed request");
+      throw new BilibiliError(
+        "wbi_signature_failed",
+        "Bilibili returned v_voucher for signed request",
+      );
     }
     if (code !== null && code !== 0) {
-      throw new BilibiliError(classifyBilibiliCode(code, message), `Bilibili API error ${code}: ${message}`);
+      throw new BilibiliError(
+        classifyBilibiliCode(code, message),
+        `Bilibili API error ${code}: ${message}`,
+      );
     }
     return { json, rawPayloadId };
   }
 
   private async ensureWbiKeys(requireLogin = true): Promise<[string, string]> {
-    if (this.wbi && this.wbi.expiresAt > Date.now()) return [this.wbi.imgKey, this.wbi.subKey];
-    const response = await this.fetchWithRateLimit(`${BILIBILI_API_BASE}/x/web-interface/nav`, {
-      headers: this.headers("https://www.bilibili.com"),
-    });
-    if (!response.ok) throw new BilibiliError("network_error", `Bilibili nav failed: ${response.status}`);
+    if (this.wbi && this.wbi.expiresAt > Date.now())
+      return [this.wbi.imgKey, this.wbi.subKey];
+    const response = await this.fetchWithRateLimit(
+      `${BILIBILI_API_BASE}/x/web-interface/nav`,
+      {
+        headers: this.headers("https://www.bilibili.com"),
+      },
+    );
+    if (!response.ok)
+      throw new BilibiliError(
+        "network_error",
+        `Bilibili nav failed: ${response.status}`,
+      );
     const json = (await response.json()) as unknown;
     await saveRawPayload(this.db, "nav", "current", json);
     const data = asRecord(asRecord(json).data);
-    if (requireLogin && data.isLogin === false) throw new BilibiliError("login_expired", "Bilibili cookie is not logged in");
+    if (requireLogin && data.isLogin === false)
+      throw new BilibiliError(
+        "login_expired",
+        "Bilibili cookie is not logged in",
+      );
     const wbiImg = asRecord(data.wbi_img);
     const imgKey = keyFromWbiUrl(wbiImg.img_url);
     const subKey = keyFromWbiUrl(wbiImg.sub_url);
-    if (!imgKey || !subKey) throw new BilibiliError("wbi_signature_failed", "Unable to read Bilibili WBI keys");
+    if (!imgKey || !subKey)
+      throw new BilibiliError(
+        "wbi_signature_failed",
+        "Unable to read Bilibili WBI keys",
+      );
     this.wbi = { imgKey, subKey, expiresAt: Date.now() + 6 * 60 * 60 * 1000 };
     return [imgKey, subKey];
   }
@@ -928,9 +1144,13 @@ class LiveBilibiliClient {
     };
   }
 
-  private async fetchWithRateLimit(input: string, init: RequestInit): Promise<Response> {
+  private async fetchWithRateLimit(
+    input: string,
+    init: RequestInit,
+  ): Promise<Response> {
     const elapsed = Date.now() - this.lastRequestAt;
-    if (elapsed < env.bilibiliRequestIntervalMs) await sleep(env.bilibiliRequestIntervalMs - elapsed);
+    if (elapsed < env.bilibiliRequestIntervalMs)
+      await sleep(env.bilibiliRequestIntervalMs - elapsed);
     this.lastRequestAt = Date.now();
     return fetch(input, init);
   }
@@ -944,7 +1164,11 @@ class LiveBilibiliClient {
       .orderBy("last_success_at", "asc")
       .orderBy("created_at", "asc")
       .executeTakeFirst();
-    if (!account) throw new BilibiliError("login_expired", "No active Bilibili cookie account configured");
+    if (!account)
+      throw new BilibiliError(
+        "login_expired",
+        "No active Bilibili cookie account configured",
+      );
     this.cookie = decryptSecret(account.encrypted_cookie);
     this.accountId = account.id;
   }
@@ -971,10 +1195,18 @@ class LiveBilibiliClient {
     await this.db
       .updateTable("bilibili_auth_accounts")
       .set({
-        status: code === "login_expired" ? "expired" : code === "risk_control" ? "risk" : "active",
+        status:
+          code === "login_expired"
+            ? "expired"
+            : code === "risk_control"
+              ? "risk"
+              : "active",
         last_health_check_at: new Date(),
         last_error_code: code,
-        last_error_message: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500),
+        last_error_message:
+          error instanceof Error
+            ? error.message.slice(0, 500)
+            : String(error).slice(0, 500),
         updated_at: new Date(),
       })
       .where("id", "=", this.accountId)
@@ -982,12 +1214,17 @@ class LiveBilibiliClient {
   }
 }
 
-export async function fetchCreatorVideos(db: Kysely<DB>, uid: string): Promise<CreatorPayload> {
+export async function fetchCreatorVideos(
+  db: Kysely<DB>,
+  uid: string,
+): Promise<CreatorPayload> {
   if (!env.isExternalLive) return mockPayload(uid);
   return new LiveBilibiliClient(db).fetchCreatorVideos(uid);
 }
 
-export async function checkBilibiliCookiePool(db: Kysely<DB>): Promise<BilibiliCookiePoolCheckResult> {
+export async function checkBilibiliCookiePool(
+  db: Kysely<DB>,
+): Promise<BilibiliCookiePoolCheckResult> {
   const now = new Date();
   const accounts = await db
     .selectFrom("bilibili_auth_accounts")
@@ -1010,7 +1247,9 @@ export async function checkBilibiliCookiePool(db: Kysely<DB>): Promise<BilibiliC
           Accept: "application/json, text/plain, */*",
         },
       });
-      const json = response.ok ? ((await response.json()) as unknown) : { code: response.status, message: `HTTP ${response.status}` };
+      const json = response.ok
+        ? ((await response.json()) as unknown)
+        : { code: response.status, message: `HTTP ${response.status}` };
       const result = accountStatusFromNavPayload(json);
       if (result.status === "active") active += 1;
       if (result.status === "expired") expired += 1;
@@ -1035,7 +1274,10 @@ export async function checkBilibiliCookiePool(db: Kysely<DB>): Promise<BilibiliC
           status: "risk",
           last_health_check_at: now,
           last_error_code: "network_error",
-          last_error_message: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500),
+          last_error_message:
+            error instanceof Error
+              ? error.message.slice(0, 500)
+              : String(error).slice(0, 500),
           updated_at: now,
         })
         .where("id", "=", account.id)
@@ -1043,7 +1285,8 @@ export async function checkBilibiliCookiePool(db: Kysely<DB>): Promise<BilibiliC
     }
   }
 
-  const retentionMs = Math.max(1, env.bilibiliCookieExpiredRetentionDays) * 24 * 60 * 60 * 1000;
+  const retentionMs =
+    Math.max(1, env.bilibiliCookieExpiredRetentionDays) * 24 * 60 * 60 * 1000;
   const deleteBefore = new Date(Date.now() - retentionMs);
   const deleted = await db
     .deleteFrom("bilibili_auth_accounts")
@@ -1060,7 +1303,10 @@ export async function checkBilibiliCookiePool(db: Kysely<DB>): Promise<BilibiliC
   };
 }
 
-export async function fetchCreatorProfile(db: Kysely<DB>, uid: string): Promise<CreatorProfilePayload> {
+export async function fetchCreatorProfile(
+  db: Kysely<DB>,
+  uid: string,
+): Promise<CreatorProfilePayload> {
   if (!env.isExternalLive) return mockProfilePayload(uid);
   return new LiveBilibiliClient(db).fetchCreatorProfile(uid);
 }
@@ -1087,6 +1333,8 @@ export async function fetchVideoAudioForAsr(
   return new LiveBilibiliClient(db).fetchAudio(video);
 }
 
-export async function readAudioDownload(download: AudioDownload): Promise<Buffer> {
+export async function readAudioDownload(
+  download: AudioDownload,
+): Promise<Buffer> {
   return readFile(download.filePath);
 }
