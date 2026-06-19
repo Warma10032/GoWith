@@ -29,18 +29,18 @@
 
 AI 与数据管线中建议保留这些中间产物：
 
-| 产物 | 说明 | 是否持久化 |
-| --- | --- | --- |
-| `VideoMetadata` | B站视频元信息 | 是 |
-| `TranscriptAsset` | 字幕或 ASR 文本，含时间戳 | 是 |
-| `CommentSample` | 评论样本与评论线索 | 是 |
-| `VideoClassificationResult` | 是否探店视频 | 是 |
-| `ShopCandidateExtraction` | 视频级候选店铺抽取 | 是 |
-| `CommentSignalExtraction` | 评论区店铺线索增强 | 是 |
-| `VideoStructuredAnalysis` | 可支撑前台卡片的完整视频级结构化结果 | 是 |
-| `PoiMatchResult` | 高德 POI 候选和匹配分 | 是 |
-| `ReviewDecision` | 后台人工审核结果 | 是 |
-| `PublishedShopSnapshot` | 前台展示用店铺快照 | 是 |
+| 产物                        | 说明                                 | 是否持久化 |
+| --------------------------- | ------------------------------------ | ---------- |
+| `VideoMetadata`             | B站视频元信息                        | 是         |
+| `TranscriptAsset`           | 字幕或 ASR 文本，含时间戳            | 是         |
+| `CommentSample`             | 评论样本与评论线索                   | 是         |
+| `VideoClassificationResult` | 是否探店视频                         | 是         |
+| `ShopCandidateExtraction`   | 视频级候选店铺抽取                   | 是         |
+| `CommentSignalExtraction`   | 评论区店铺线索增强                   | 是         |
+| `VideoStructuredAnalysis`   | 可支撑前台卡片的完整视频级结构化结果 | 是         |
+| `PoiMatchResult`            | 高德 POI 候选和匹配分                | 是         |
+| `ReviewDecision`            | 后台人工审核结果                     | 是         |
+| `PublishedShopSnapshot`     | 前台展示用店铺快照                   | 是         |
 
 ## 3. 通用枚举
 
@@ -149,16 +149,16 @@ reservation
 
 字段说明：
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | string | 内部证据 ID |
-| `source` | enum | 证据来源 |
-| `source_id` | string | 字幕资产、评论、视频等来源 ID |
-| `text` | string | 证据片段，避免过长 |
-| `start_sec` | number/null | 视频内开始秒数 |
-| `end_sec` | number/null | 视频内结束秒数 |
-| `comment_id` | string/null | 评论证据 ID |
-| `confidence` | number | 证据与结论的相关性 |
+| 字段         | 类型        | 说明                          |
+| ------------ | ----------- | ----------------------------- |
+| `id`         | string      | 内部证据 ID                   |
+| `source`     | enum        | 证据来源                      |
+| `source_id`  | string      | 字幕资产、评论、视频等来源 ID |
+| `text`       | string      | 证据片段，避免过长            |
+| `start_sec`  | number/null | 视频内开始秒数                |
+| `end_sec`    | number/null | 视频内结束秒数                |
+| `comment_id` | string/null | 评论证据 ID                   |
+| `confidence` | number      | 证据与结论的相关性            |
 
 约束：
 
@@ -305,8 +305,8 @@ MVP 建议混合抽样：
   "alias_names": ["某某面馆"],
   "candidate_type": "physical_shop",
   "category": {
-    "primary": "restaurant",
-    "secondary": "noodle_shop",
+    "primary": "粉面粥",
+    "secondary": "西北菜",
     "confidence": 0.81
   },
   "location_hints": {
@@ -326,10 +326,10 @@ MVP 建议混合抽样：
   "card_payload": {
     "display_title": "某某牛肉面",
     "subtitle": "适合一人食的日常面馆",
-    "recommend_reason": "视频里重点提到牛肉分量足，评论区也有用户认可性价比。",
+    "recommend_reason": "博主推荐牛肉面，认为牛肉分量足、汤底浓郁，适合一人食。",
     "avg_price_hint": "约30元",
     "cover_source": "video_cover",
-    "tags": ["牛肉多", "一人食", "排队"],
+    "tags": [],
     "recommended_dishes": [
       {
         "name": "牛肉面",
@@ -393,19 +393,23 @@ MVP 建议混合抽样：
 }
 ```
 
+`category.primary` 只允许：`中餐`、`地方特色菜`、`火锅`、`烧烤`、`海鲜`、`自助餐`、`小吃快餐`、`粉面粥`、`甜品饮品`、`咖啡烘焙`、`西餐`、`日本料理`、`韩国料理`、`东南亚菜`、`素食`、`其他餐饮`。`category.secondary` 只允许项目约定的菜系词表（如粤菜、潮汕菜、川菜、湘菜）；无证据时为 `null`。MVP 暂不生成或展示 `tags`。
+
+`recommend_reason` 必须来自字幕中的博主结论，至少表达“是否推荐、推荐或不推荐什么菜、具体原因”中的可确认部分。评论只能进入 `comment_summary` / `aggregated_review`，不得替代博主推荐结论。
+
 ### 7.3 字段要求
 
-| 字段 | 要求 |
-| --- | --- |
-| `candidate_name` | 不能确定时为 `null`，并添加 `shop_name_missing` |
-| `normalized_name` | 清洗后的名称，不能凭空补充分店名 |
-| `location_hints.city` | 能判断城市就必须输出；不能判断则为 `null` |
-| `time_range` | 多店铺视频必须尽量输出 |
-| `card_payload.recommend_reason` | 必须适合首页卡片，控制在 60 字以内 |
-| `review_dimensions` | 信息不足时使用 `unknown` |
-| `evidence_ids` | 重要结论必须非空 |
-| `missing_fields` | 缺什么写什么，不能沉默 |
-| `risk_flags` | 触发审核的重要依据 |
+| 字段                            | 要求                                            |
+| ------------------------------- | ----------------------------------------------- |
+| `candidate_name`                | 不能确定时为 `null`，并添加 `shop_name_missing` |
+| `normalized_name`               | 清洗后的名称，不能凭空补充分店名                |
+| `location_hints.city`           | 能判断城市就必须输出；不能判断则为 `null`       |
+| `time_range`                    | 多店铺视频必须尽量输出                          |
+| `card_payload.recommend_reason` | 必须适合首页卡片，控制在 60 字以内              |
+| `review_dimensions`             | 信息不足时使用 `unknown`                        |
+| `evidence_ids`                  | 重要结论必须非空                                |
+| `missing_fields`                | 缺什么写什么，不能沉默                          |
+| `risk_flags`                    | 触发审核的重要依据                              |
 
 ## 8. POI 匹配 Schema
 
@@ -489,12 +493,12 @@ manual_rejected
 
 阈值建议：
 
-| 条件 | 状态 |
-| --- | --- |
-| `match_score >= 0.9` 且无风险 | `auto_matched` |
-| `0.65 <= match_score < 0.9` | `need_review` |
-| `match_score < 0.65` | `low_confidence` |
-| 无候选 | `no_candidate` |
+| 条件                           | 状态               |
+| ------------------------------ | ------------------ |
+| `match_score >= 0.9` 且无风险  | `auto_matched`     |
+| `0.65 <= match_score < 0.9`    | `need_review`      |
+| `match_score < 0.65`           | `low_confidence`   |
+| 无候选                         | `no_candidate`     |
 | 店名缺失、同名分店多、搬迁风险 | 强制 `need_review` |
 
 ## 9. 发布店铺聚合 Schema
@@ -517,15 +521,15 @@ manual_rejected
     }
   },
   "category": {
-    "primary": "restaurant",
-    "secondary": "noodle_shop"
+    "primary": "粉面粥",
+    "secondary": "西北菜"
   },
   "card": {
     "title": "某某牛肉面",
     "subtitle": "适合一人食的日常面馆",
     "recommend_reason": "多条视频和评论提到牛肉分量足，适合顺路吃一顿。",
     "avg_price_hint": "约30元",
-    "tags": ["一人食", "分量足", "排队"],
+    "tags": [],
     "cover_url": "https://...",
     "source_creator_avatars": ["https://..."]
   },
@@ -619,17 +623,17 @@ MVP 可以先实现：工作台、博主管理、视频任务、店铺候选、P
 
 ### 11.2 工作台队列
 
-| 队列 | 说明 | 优先级 |
-| --- | --- | --- |
-| 采集失败 | B站接口、登录态、字幕、评论失败 | 高 |
-| ASR 失败 | 无字幕且 ASR 失败 | 中 |
-| 非探店待确认 | 分类置信度低 | 中 |
-| 店名缺失 | 有探店迹象但无明确店名 | 高 |
-| 多店铺拆分 | 一个视频多个店铺 | 高 |
-| POI 待确认 | 候选 POI 不够确定 | 高 |
-| 店铺待合并 | 疑似同店铺 | 中 |
-| AI 摘要待修正 | 卡片文案或结构化信息不足 | 中 |
-| 待发布 | 已审核但未发布 | 中 |
+| 队列          | 说明                            | 优先级 |
+| ------------- | ------------------------------- | ------ |
+| 采集失败      | B站接口、登录态、字幕、评论失败 | 高     |
+| ASR 失败      | 无字幕且 ASR 失败               | 中     |
+| 非探店待确认  | 分类置信度低                    | 中     |
+| 店名缺失      | 有探店迹象但无明确店名          | 高     |
+| 多店铺拆分    | 一个视频多个店铺                | 高     |
+| POI 待确认    | 候选 POI 不够确定               | 高     |
+| 店铺待合并    | 疑似同店铺                      | 中     |
+| AI 摘要待修正 | 卡片文案或结构化信息不足        | 中     |
+| 待发布        | 已审核但未发布                  | 中     |
 
 ## 12. 后台页面字段
 
@@ -637,18 +641,18 @@ MVP 可以先实现：工作台、博主管理、视频任务、店铺候选、P
 
 列表字段：
 
-| 字段 | 说明 |
-| --- | --- |
-| UID | B站 UID |
-| 昵称 | 博主名称 |
-| 头像 | 头像 |
-| 状态 | active / paused / error |
-| 视频总数 | 已同步视频数 |
-| 探店视频数 | AI 或人工确认探店视频 |
-| 候选店铺数 | 抽取出的候选店铺 |
-| 已发布店铺数 | 前台可见店铺 |
-| 最近同步 | 最近一次同步时间 |
-| 错误 | 最近错误摘要 |
+| 字段         | 说明                    |
+| ------------ | ----------------------- |
+| UID          | B站 UID                 |
+| 昵称         | 博主名称                |
+| 头像         | 头像                    |
+| 状态         | active / paused / error |
+| 视频总数     | 已同步视频数            |
+| 探店视频数   | AI 或人工确认探店视频   |
+| 候选店铺数   | 抽取出的候选店铺        |
+| 已发布店铺数 | 前台可见店铺            |
+| 最近同步     | 最近一次同步时间        |
+| 错误         | 最近错误摘要            |
 
 操作：
 
@@ -662,19 +666,19 @@ MVP 可以先实现：工作台、博主管理、视频任务、店铺候选、P
 
 列表字段：
 
-| 字段 | 说明 |
-| --- | --- |
-| 封面 | 视频封面 |
-| 标题 | B站标题 |
-| 博主 | 来源博主 |
-| BV号 | 视频标识 |
-| 发布时间 | 视频发布时间 |
-| 任务状态 | 当前 workflow 状态 |
-| 文本来源 | subtitle / asr / none |
-| 是否探店 | true / false / unknown |
-| 候选店铺数 | AI 抽取数量 |
-| 风险 | risk_flags 摘要 |
-| 最近处理 | 最近任务更新时间 |
+| 字段       | 说明                   |
+| ---------- | ---------------------- |
+| 封面       | 视频封面               |
+| 标题       | B站标题                |
+| 博主       | 来源博主               |
+| BV号       | 视频标识               |
+| 发布时间   | 视频发布时间           |
+| 任务状态   | 当前 workflow 状态     |
+| 文本来源   | subtitle / asr / none  |
+| 是否探店   | true / false / unknown |
+| 候选店铺数 | AI 抽取数量            |
+| 风险       | risk_flags 摘要        |
+| 最近处理   | 最近任务更新时间       |
 
 操作：
 
@@ -696,47 +700,47 @@ MVP 可以先实现：工作台、博主管理、视频任务、店铺候选、P
 
 字段：
 
-| 区域 | 字段 |
-| --- | --- |
-| 视频信息 | 标题、简介、标签、发布时间、播放数据 |
+| 区域     | 字段                                         |
+| -------- | -------------------------------------------- |
+| 视频信息 | 标题、简介、标签、发布时间、播放数据         |
 | 文本资产 | 字幕状态、ASR 状态、文本长度、ASR 模型、语言 |
-| 分类结果 | 是否探店、内容类型、置信度、原因、证据 |
-| 评论线索 | 店名提及、地址提及、排队/闭店/搬迁线索 |
-| 店铺候选 | 候选名、城市、商圈、菜品、时间段、风险 |
-| 操作 | 通过分类、标记非探店、拆分店铺、重跑 AI |
+| 分类结果 | 是否探店、内容类型、置信度、原因、证据       |
+| 评论线索 | 店名提及、地址提及、排队/闭店/搬迁线索       |
+| 店铺候选 | 候选名、城市、商圈、菜品、时间段、风险       |
+| 操作     | 通过分类、标记非探店、拆分店铺、重跑 AI      |
 
 ### 12.4 店铺候选审核页
 
 列表字段：
 
-| 字段 | 说明 |
-| --- | --- |
-| 候选店名 | AI 抽取名称 |
-| 博主 | 来源博主 |
-| 视频 | 来源视频 |
-| 城市线索 | AI/评论推断城市 |
-| 地址线索 | 商圈、地标、评论地址 |
-| 推荐菜 | AI 抽取 |
-| 置信度 | name/location/summary |
-| 风险标记 | 店名缺失、地址缺失等 |
+| 字段     | 说明                                 |
+| -------- | ------------------------------------ |
+| 候选店名 | AI 抽取名称                          |
+| 博主     | 来源博主                             |
+| 视频     | 来源视频                             |
+| 城市线索 | AI/评论推断城市                      |
+| 地址线索 | 商圈、地标、评论地址                 |
+| 推荐菜   | AI 抽取                              |
+| 置信度   | name/location/summary                |
+| 风险标记 | 店名缺失、地址缺失等                 |
 | POI 状态 | no_candidate / need_review / matched |
 
 详情字段：
 
-| 字段 | 可编辑 | 说明 |
-| --- | --- | --- |
-| 候选店名 | 是 | 人工可修正 |
-| 别名 | 是 | 方便后续合并 |
-| 城市 | 是 | POI 搜索关键字段 |
-| 区县 | 是 | POI 搜索关键字段 |
-| 商圈 | 是 | 辅助匹配 |
-| 地址线索 | 是 | 可从评论补充 |
-| 品类 | 是 | 用于前台和 POI 类型 |
-| 推荐菜 | 是 | 可删除无证据菜品 |
-| 推荐理由 | 是 | 卡片展示核心文案 |
-| 避雷点 | 是 | 高风险负面可删改 |
-| 证据 | 否 | 可查看，不直接编辑 |
-| 风险标记 | 是 | 可人工清除或新增 |
+| 字段     | 可编辑 | 说明                |
+| -------- | ------ | ------------------- |
+| 候选店名 | 是     | 人工可修正          |
+| 别名     | 是     | 方便后续合并        |
+| 城市     | 是     | POI 搜索关键字段    |
+| 区县     | 是     | POI 搜索关键字段    |
+| 商圈     | 是     | 辅助匹配            |
+| 地址线索 | 是     | 可从评论补充        |
+| 品类     | 是     | 用于前台和 POI 类型 |
+| 推荐菜   | 是     | 可删除无证据菜品    |
+| 推荐理由 | 是     | 卡片展示核心文案    |
+| 避雷点   | 是     | 高风险负面可删改    |
+| 证据     | 否     | 可查看，不直接编辑  |
+| 风险标记 | 是     | 可人工清除或新增    |
 
 操作：
 
@@ -754,28 +758,28 @@ MVP 可以先实现：工作台、博主管理、视频任务、店铺候选、P
 
 展示字段：
 
-| 区域 | 字段 |
-| --- | --- |
+| 区域     | 字段                                 |
+| -------- | ------------------------------------ |
 | 候选信息 | 候选店名、城市、商圈、地址线索、品类 |
-| 视频证据 | 相关字幕/ASR 片段、时间戳、视频链接 |
-| 评论证据 | 店名/地址/搬迁/排队线索 |
-| 高德候选 | 名称、地址、区县、类型、距离/匹配分 |
-| 地图预览 | 候选 POI pin、附近地标 |
-| 历史店铺 | 系统内疑似同店 |
+| 视频证据 | 相关字幕/ASR 片段、时间戳、视频链接  |
+| 评论证据 | 店名/地址/搬迁/排队线索              |
+| 高德候选 | 名称、地址、区县、类型、距离/匹配分  |
+| 地图预览 | 候选 POI pin、附近地标               |
+| 历史店铺 | 系统内疑似同店                       |
 
 高德候选列表字段：
 
-| 字段 | 说明 |
-| --- | --- |
-| POI 名称 | 高德返回名 |
-| 地址 | 高德地址 |
-| 区县 | 高德行政区 |
-| 类型 | 高德类型 |
-| 坐标 | GCJ-02 |
-| 名称相似度 | 本地计算 |
-| 地址匹配度 | 本地计算 |
-| 品类匹配度 | 本地计算 |
-| 综合分 | `match_score` |
+| 字段       | 说明          |
+| ---------- | ------------- |
+| POI 名称   | 高德返回名    |
+| 地址       | 高德地址      |
+| 区县       | 高德行政区    |
+| 类型       | 高德类型      |
+| 坐标       | GCJ-02        |
+| 名称相似度 | 本地计算      |
+| 地址匹配度 | 本地计算      |
+| 品类匹配度 | 本地计算      |
+| 综合分     | `match_score` |
 
 操作：
 
@@ -796,16 +800,16 @@ MVP 可以先实现：工作台、博主管理、视频任务、店铺候选、P
 
 展示字段：
 
-| 字段 | 说明 |
-| --- | --- |
-| 主店铺 | 合并后的保留店铺 |
-| 待合并店铺 | 将被合并的候选 |
-| POI 信息 | provider_poi_id、地址、坐标 |
-| 来源视频 | 涉及视频列表 |
-| 来源博主 | 涉及博主列表 |
-| 卡片文案 | 哪个版本作为主展示 |
-| 推荐菜 | 合并后保留列表 |
-| 负面/争议点 | 合并后保留列表 |
+| 字段        | 说明                        |
+| ----------- | --------------------------- |
+| 主店铺      | 合并后的保留店铺            |
+| 待合并店铺  | 将被合并的候选              |
+| POI 信息    | provider_poi_id、地址、坐标 |
+| 来源视频    | 涉及视频列表                |
+| 来源博主    | 涉及博主列表                |
+| 卡片文案    | 哪个版本作为主展示          |
+| 推荐菜      | 合并后保留列表              |
+| 负面/争议点 | 合并后保留列表              |
 
 操作：
 
@@ -819,22 +823,22 @@ MVP 可以先实现：工作台、博主管理、视频任务、店铺候选、P
 
 字段：
 
-| 字段 | 可编辑 | 前台展示 |
-| --- | --- | --- |
-| 展示店名 | 是 | 是 |
-| 品类 | 是 | 是 |
-| 地址 | 通过 POI 修改 | 是 |
-| 坐标 | 通过 POI 修改 | 是 |
-| 推荐理由 | 是 | 是 |
-| 副标题 | 是 | 是 |
-| 推荐菜 | 是 | 是 |
-| 避雷点 | 是 | 是 |
-| 适合场景 | 是 | 是 |
-| 人均提示 | 是 | 是 |
-| 博主来源 | 否 | 是 |
-| 视频来源 | 否 | 是 |
-| 证据链 | 否 | 可选展示 |
-| 发布状态 | 是 | 是 |
+| 字段     | 可编辑        | 前台展示 |
+| -------- | ------------- | -------- |
+| 展示店名 | 是            | 是       |
+| 品类     | 是            | 是       |
+| 地址     | 通过 POI 修改 | 是       |
+| 坐标     | 通过 POI 修改 | 是       |
+| 推荐理由 | 是            | 是       |
+| 副标题   | 是            | 是       |
+| 推荐菜   | 是            | 是       |
+| 避雷点   | 是            | 是       |
+| 适合场景 | 是            | 是       |
+| 人均提示 | 是            | 是       |
+| 博主来源 | 否            | 是       |
+| 视频来源 | 否            | 是       |
+| 证据链   | 否            | 可选展示 |
+| 发布状态 | 是            | 是       |
 
 状态：
 
@@ -850,26 +854,26 @@ rejected
 
 ### 13.1 视频级动作
 
-| 动作 | 前置状态 | 后置状态 |
-| --- | --- | --- |
-| 标记探店 | `classified` | `shop_candidates_extracted` |
-| 标记非探店 | 任意未发布状态 | `non_shop_visit` |
-| 重跑 ASR | `asr_ready` / `text_unavailable` | `asr_ready` 或 `text_unavailable` |
-| 重跑 AI | `ai_structured` / `need_review` | `ai_structured` |
-| 驳回视频 | 任意未发布状态 | `rejected` |
+| 动作       | 前置状态                         | 后置状态                          |
+| ---------- | -------------------------------- | --------------------------------- |
+| 标记探店   | `classified`                     | `shop_candidates_extracted`       |
+| 标记非探店 | 任意未发布状态                   | `non_shop_visit`                  |
+| 重跑 ASR   | `asr_ready` / `text_unavailable` | `asr_ready` 或 `text_unavailable` |
+| 重跑 AI    | `ai_structured` / `need_review`  | `ai_structured`                   |
+| 驳回视频   | 任意未发布状态                   | `rejected`                        |
 
 ### 13.2 店铺候选动作
 
-| 动作 | 后置状态 |
-| --- | --- |
-| 修改候选信息 | `need_review` |
-| 搜索 POI | `poi_candidates_found` |
-| 选择 POI | `poi_matched` |
-| 合并到已有店铺 | `merged` |
-| 驳回候选 | `rejected` |
+| 动作                          | 后置状态                               |
+| ----------------------------- | -------------------------------------- |
+| 修改候选信息                  | `need_review`                          |
+| 搜索 POI                      | `poi_candidates_found`                 |
+| 选择 POI                      | `poi_matched`                          |
+| 合并到已有店铺                | `merged`                               |
+| 驳回候选                      | `rejected`                             |
 | 晋升为店铺（创建 `shops` 行） | `merged`（candidate）/ `draft`（shop） |
-| 审核通过 | `approved`（shop） |
-| 发布 | `published`（shop） |
+| 审核通过                      | `approved`（shop）                     |
+| 发布                          | `published`（shop）                    |
 
 候选级动作（修改 / 搜索 POI / 选 POI / 晋升 / 驳回）现在挂在 `/admin/videos/[id]` 视频处理控制台内，而不是工作台。审核通过与发布动作挂在 `/admin/shops/[id]` 店铺详情页。状态机如下：
 
@@ -995,19 +999,19 @@ POST /api/users/favorites
 
 仓库当前处于 **M0 完成 / M1 起步**。本规范对应的代码位置：
 
-| 规范章节 | 实现位置 | 状态 |
-| --- | --- | --- |
-| §5 视频分类 Schema | `apps/ai-worker/app/schemas.py:42-54`（Pydantic）+ `packages/shared/src/schemas.ts:25-38`（Zod） | ✅ mock 返回 |
-| §6 评论线索 Schema | `apps/ai-worker/app/main.py:75-95`（FastAPI 端点）+ `packages/shared/src/schemas.ts:40-87` | ✅ mock 返回 |
-| §7 视频结构化分析 Schema | `apps/ai-worker/app/main.py:98-167` + `packages/shared/src/schemas.ts:104-175` | ✅ mock 返回 |
-| §8 POI 匹配 Schema | `apps/worker/src/adapters/poi.ts` + `packages/shared/src/schemas.ts:177-212` | ✅ mock 返回 |
-| §9 发布快照 Schema | `apps/api/src/routes/admin.ts` `POST /api/admin/shops/:id/publish` 事务 + `published_shop_snapshots` | ✅ 实现 |
-| §10 校验 | `packages/shared/src/validation.ts` `findStructuredAnalysisIssues` + `evaluateClassificationReviewNeed` | ✅ 实现 |
-| §11 后台信息架构 | `apps/web/src/app/admin/page.tsx`（`AdminConsole`） | ✅ 实现 |
-| §12 后台页面字段 | `AdminConsole` 内嵌 Form + DataTable，按 11.1 一级菜单简化 | 🟡 MVP 简化 |
-| §13 状态流转 | `apps/worker/src/jobs/pipeline.ts` 推动 `videos.workflow_status` 与 `shop_candidates.status` | ✅ 实现（POI / merge 流转除外） |
-| §14 Prompt 契约 | `apps/worker/src/jobs/pipeline.ts` 每次写 `ai_runs` 带 `stage`、`provider='mock'`、`model='mock-*'`、`prompt_version='*.v1'`、`input_hash` | ✅ 实现 |
-| §15 API 草案 | `apps/api/src/routes/{public,admin,auth}.ts` + `docs/openapi.yaml` | ✅ 实现（合并接口占位） |
+| 规范章节                 | 实现位置                                                                                                                                   | 状态                            |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------- |
+| §5 视频分类 Schema       | `apps/ai-worker/app/schemas.py:42-54`（Pydantic）+ `packages/shared/src/schemas.ts:25-38`（Zod）                                           | ✅ mock 返回                    |
+| §6 评论线索 Schema       | `apps/ai-worker/app/main.py:75-95`（FastAPI 端点）+ `packages/shared/src/schemas.ts:40-87`                                                 | ✅ mock 返回                    |
+| §7 视频结构化分析 Schema | `apps/ai-worker/app/main.py:98-167` + `packages/shared/src/schemas.ts:104-175`                                                             | ✅ mock 返回                    |
+| §8 POI 匹配 Schema       | `apps/worker/src/adapters/poi.ts` + `packages/shared/src/schemas.ts:177-212`                                                               | ✅ mock 返回                    |
+| §9 发布快照 Schema       | `apps/api/src/routes/admin.ts` `POST /api/admin/shops/:id/publish` 事务 + `published_shop_snapshots`                                       | ✅ 实现                         |
+| §10 校验                 | `packages/shared/src/validation.ts` `findStructuredAnalysisIssues` + `evaluateClassificationReviewNeed`                                    | ✅ 实现                         |
+| §11 后台信息架构         | `apps/web/src/app/admin/page.tsx`（`AdminConsole`）                                                                                        | ✅ 实现                         |
+| §12 后台页面字段         | `AdminConsole` 内嵌 Form + DataTable，按 11.1 一级菜单简化                                                                                 | 🟡 MVP 简化                     |
+| §13 状态流转             | `apps/worker/src/jobs/pipeline.ts` 推动 `videos.workflow_status` 与 `shop_candidates.status`                                               | ✅ 实现（POI / merge 流转除外） |
+| §14 Prompt 契约          | `apps/worker/src/jobs/pipeline.ts` 每次写 `ai_runs` 带 `stage`、`provider='mock'`、`model='mock-*'`、`prompt_version='*.v1'`、`input_hash` | ✅ 实现                         |
+| §15 API 草案             | `apps/api/src/routes/{public,admin,auth}.ts` + `docs/openapi.yaml`                                                                         | ✅ 实现（合并接口占位）         |
 
 落地策略与规范的差异：
 

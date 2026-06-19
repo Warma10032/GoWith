@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/OAI/OpenAPI-Specification/main/schemas/v3.1/schema.yaml
 openapi: 3.1.0
 info:
   title: GoWith API
@@ -81,6 +82,8 @@ paths:
       responses:
         "200":
           description: Cookie pool health-check job enqueued.
+        "409":
+          description: task_already_running (same health-check task is already queued or running).
   /api/admin/creators:
     get:
       summary: List managed creators with optional search
@@ -109,6 +112,8 @@ paths:
       responses:
         "200":
           description: Creator upserted. A lightweight `sync_creator_profile` job is enqueued to fetch Bilibili username, avatar, bio, and follower count.
+        "409":
+          description: task_already_running (same creator profile sync task is already queued or running).
   /api/admin/creators/{id}/sync:
     post:
       summary: Enqueue creator video metadata sync and create observable run
@@ -119,6 +124,8 @@ paths:
       responses:
         "200":
           description: Pipeline run and job enqueued.
+        "409":
+          description: task_already_running (same creator sync run is already queued or running).
   /api/admin/creators/{id}:
     get:
       summary: Get creator detail, stats, and latest observable run
@@ -189,6 +196,8 @@ paths:
       responses:
         "200":
           description: Pipeline run and first job enqueued.
+        "409":
+          description: task_already_running (same video processing run is already queued or running).
   /api/admin/videos/{id}/retry-asr:
     post:
       summary: Retry ASR for a video
@@ -199,6 +208,8 @@ paths:
       responses:
         "200":
           description: ASR run and job enqueued.
+        "409":
+          description: task_already_running (same ASR retry run is already queued or running).
   /api/admin/videos/{id}/retry-ai:
     post:
       summary: Retry AI classification and extraction for a video
@@ -209,6 +220,8 @@ paths:
       responses:
         "200":
           description: AI run and job enqueued.
+        "409":
+          description: task_already_running (same AI retry run is already queued or running).
   /api/admin/pipeline-runs:
     get:
       summary: List observable pipeline runs
@@ -321,6 +334,8 @@ paths:
       responses:
         "200":
           description: POI match job enqueued.
+        "409":
+          description: task_already_running (same POI match task is already queued or running).
   /api/admin/shop-candidates/{id}/select-poi:
     post:
       summary: Select POI for a candidate and write review event
@@ -342,14 +357,18 @@ paths:
       responses:
         "200":
           description: Candidate matched.
+        "409":
+          description: task_already_running (same POI selection action is currently running).
   /api/admin/shop-candidates/{id}/promote:
     post:
       summary: Promote a poi_matched shop candidate into a draft shop
       description: |
-        Creates a `shops` row from the candidate's `card_payload` / POI fields
-        and a `shop_video_mentions` row linking it back to the source video.
+        Creates a `shops` row from the candidate's `card_payload` / POI fields,
+        or refreshes an existing draft shop with the same POI. Approved and
+        published shops are linked but never overwritten by a later AI result.
+        Upserts a `shop_video_mentions` row linking it back to the source video.
         Sets `shop_candidates.status = 'merged'` and `merged_shop_id` to the
-        new shop. Writes a `review_events` audit row. Only valid when the
+        resulting shop. Writes a `review_events` audit row. Only valid when the
         candidate is in `status='poi_matched'` with a `selected_poi_id`.
       security:
         - cookieAuth: []
@@ -357,7 +376,7 @@ paths:
         - $ref: "#/components/parameters/UuidId"
       responses:
         "200":
-          description: Candidate promoted; new shop available for review/publish.
+          description: Candidate promoted; draft shop available for review/publish.
           content:
             application/json:
               schema:
@@ -369,7 +388,7 @@ paths:
         "404":
           description: candidate_not_found or poi_not_found
         "409":
-          description: candidate_not_ready (status not 'poi_matched' or selected_poi_id missing)
+          description: candidate_not_ready (status not 'poi_matched' or selected_poi_id missing) or task_already_running.
   /api/admin/shop-candidates/{id}/reject:
     post:
       summary: Reject a shop candidate
@@ -380,6 +399,8 @@ paths:
       responses:
         "200":
           description: Candidate rejected.
+        "409":
+          description: task_already_running (same candidate reject action is currently running).
   /api/admin/shops:
     get:
       summary: List shops
@@ -439,7 +460,8 @@ paths:
           description: shop_not_found
         "409":
           description: |
-            shop_not_ready_for_approve (current status is not 'draft').
+            shop_not_ready_for_approve, shop_missing_recommend_reason,
+            shop_confidence_too_low, shop_has_unresolved_risks, or task_already_running.
   /api/admin/shops/{id}/publish:
     post:
       summary: Publish shop and create immutable snapshot
@@ -459,7 +481,8 @@ paths:
           description: shop_not_found
         "409":
           description: |
-            shop_not_approved (current status is not 'approved'; call /approve first).
+            shop_not_approved, shop_missing_recommend_reason,
+            shop_confidence_too_low, shop_has_unresolved_risks, or task_already_running.
   /api/admin/shops/merge:
     post:
       summary: Merge shops placeholder
