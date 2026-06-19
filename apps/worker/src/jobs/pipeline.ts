@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
 import type { Job } from "bullmq";
-import type { Kysely } from "kysely";
-import type { DB, Json } from "@gowith/db";
+import type { ExpressionBuilder, ExpressionWrapper, Kysely } from "kysely";
+import type { SqlBool } from "kysely";
+import { findActiveTaskWithLock, type DB, type Json } from "@gowith/db";
 import {
   commentSignalExtractionSchema,
   videoClassificationResultSchema,
@@ -26,7 +27,6 @@ import {
 } from "../adapters/ai";
 import { searchAmapPoi } from "../adapters/poi";
 import { env } from "../env";
-import { downloadImage } from "../services/image-downloader";
 import { pipelineQueue } from "../queue";
 
 export async function handlePipelineJob(db: Kysely<DB>, job: Job) {
@@ -67,7 +67,16 @@ async function emitPipelineEvent(
   job: Job,
   input: {
     stage?: string;
-    eventType: "queued" | "started" | "progress" | "ai_request_prepared" | "ai_response_validated" | "saved" | "skipped" | "failed" | "completed";
+    eventType:
+      | "queued"
+      | "started"
+      | "progress"
+      | "ai_request_prepared"
+      | "ai_response_validated"
+      | "saved"
+      | "skipped"
+      | "failed"
+      | "completed";
     level?: "info" | "success" | "warning" | "error";
     title: string;
     message?: string | null;
@@ -80,8 +89,16 @@ async function emitPipelineEvent(
 ) {
   const runId = runIdFromJob(job);
   if (!runId) return;
-  const entityType = input.entityType ?? (typeof job.data?.entityType === "string" ? job.data.entityType : "unknown");
-  const entityId = input.entityId ?? (typeof job.data?.entityId === "string" ? job.data.entityId : crypto.randomUUID());
+  const entityType =
+    input.entityType ??
+    (typeof job.data?.entityType === "string"
+      ? job.data.entityType
+      : "unknown");
+  const entityId =
+    input.entityId ??
+    (typeof job.data?.entityId === "string"
+      ? job.data.entityId
+      : crypto.randomUUID());
   await db
     .insertInto("pipeline_events")
     .values({
@@ -110,28 +127,52 @@ async function enqueueWorkerPipelineJob(
   payload: Record<string, unknown>,
 ) {
   const runId = typeof payload.run_id === "string" ? payload.run_id : null;
-  const [dbJob] = await db
-    .insertInto("jobs")
-    .values({
-      job_type: jobName,
-      entity_type: entityType,
-      entity_id: entityId,
-      run_id: runId,
-      payload: payload as Json,
-      status: "queued",
-      priority: 0,
-      attempts: 0,
-      max_attempts: 3,
-      scheduled_at: new Date(),
-      started_at: null,
-      finished_at: null,
-      error_code: null,
-      error_message: null,
-      created_at: new Date(),
-      updated_at: new Date(),
-    })
-    .returning(["id"])
-    .execute();
+  const dbJob = await db.transaction().execute(async (trx) => {
+    const active = await findActiveTaskWithLock(trx, {
+      jobType: jobName,
+      entityType,
+      entityId,
+    });
+    if (active) return null;
+
+    return trx
+      .insertInto("jobs")
+      .values({
+        job_type: jobName,
+        entity_type: entityType,
+        entity_id: entityId,
+        run_id: runId,
+        payload: payload as Json,
+        status: "queued",
+        priority: 0,
+        attempts: 0,
+        max_attempts: 3,
+        scheduled_at: new Date(),
+        started_at: null,
+        finished_at: null,
+        error_code: null,
+        error_message: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      })
+      .returning(["id"])
+      .executeTakeFirstOrThrow();
+  });
+  if (!dbJob) {
+    await emitPipelineEvent(
+      db,
+      { name: jobName, data: { run_id: runId } } as Job,
+      {
+        stage: jobName,
+        eventType: "skipped",
+        level: "warning",
+        title: `任务已在运行中，跳过重复入队：${jobName}`,
+        entityType,
+        entityId,
+      },
+    );
+    return;
+  }
   if (runId && dbJob?.id) {
     await db
       .insertInto("pipeline_events")
@@ -152,39 +193,50 @@ async function enqueueWorkerPipelineJob(
       })
       .execute();
   }
-  await pipelineQueue.add(jobName, { entityType, entityId, db_job_id: dbJob?.id, ...payload }, { attempts: 3, backoff: { type: "exponential", delay: 1000 } });
+  await pipelineQueue.add(
+    jobName,
+    { entityType, entityId, db_job_id: dbJob?.id, ...payload },
+    { attempts: 3, backoff: { type: "exponential", delay: 1000 } },
+  );
 }
 
-async function finishRunIfTerminal(db: Kysely<DB>, job: Job, summary: Record<string, unknown>) {
+async function finishRunIfTerminal(
+  db: Kysely<DB>,
+  job: Job,
+  summary: Record<string, unknown>,
+) {
   const runId = runIdFromJob(job);
   if (!runId) return;
   await db
     .updateTable("pipeline_runs")
-    .set({ status: "success", finished_at: new Date(), summary_json: summary as Json })
+    .set({
+      status: "success",
+      finished_at: new Date(),
+      summary_json: summary as Json,
+    })
     .where("id", "=", runId)
     .execute();
 }
 
 async function syncCreatorProfile(db: Kysely<DB>, job: Job) {
-  const { entityId, bilibili_uid } = job.data as { entityId: string; bilibili_uid: string };
+  const { entityId, bilibili_uid } = job.data as {
+    entityId: string;
+    bilibili_uid: string;
+  };
   const payload = await fetchCreatorProfile(db, bilibili_uid);
   const refreshedAt = new Date();
 
-  // 下载头像到本地：第三方 URL（如 hdslb.com）有 Referer 防盗链，
-  // 落本地后 DB 存 /uploads/creators/<id>.<ext>，原 URL 留 avatar_source_url。
-  const downloaded = await downloadImage(
-    payload.avatar_url,
-    "creators",
-    entityId,
-    { uploadsDir: env.uploadsDir },
-  );
+  // 头像保持原始 B站 URL（与 videos.cover_url 一致的存储模式）。
+  // 前端 SafeImage 的 referrerPolicy="no-referrer" 已绕过 hdslb.com CDN 防盗链，
+  // 不需要再 downloadImage 到本地。原始 URL 同时写到 avatar_url 和
+  // avatar_source_url，前者给前端展示，后者给后台审计。
 
   await db
     .updateTable("creators")
     .set({
       name: payload.name,
-      avatar_url: downloaded?.url ?? payload.avatar_url,
-      avatar_source_url: downloaded?.sourceUrl ?? payload.avatar_url,
+      avatar_url: payload.avatar_url,
+      avatar_source_url: payload.avatar_url,
       bio: payload.bio,
       follower_count: payload.follower_count,
       raw_payload_id: payload.raw_payload_id,
@@ -203,7 +255,10 @@ async function syncCreatorProfile(db: Kysely<DB>, job: Job) {
 }
 
 async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
-  const { entityId, bilibili_uid } = job.data as { entityId: string; bilibili_uid: string };
+  const { entityId, bilibili_uid } = job.data as {
+    entityId: string;
+    bilibili_uid: string;
+  };
   await emitPipelineEvent(db, job, {
     eventType: "progress",
     title: "开始同步博主视频基础信息",
@@ -212,20 +267,14 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
   });
   const payload = await fetchCreatorVideos(db, bilibili_uid);
 
-  // 先下载博主头像（同样的 Referer 防盗链原因）
-  const avatarDownloaded = await downloadImage(
-    payload.avatar_url,
-    "creators",
-    entityId,
-    { uploadsDir: env.uploadsDir },
-  );
+  // 头像保持原始 B站 URL（与 creator 同步逻辑一致 + videos.cover_url 同样的模式）
 
   await db
     .updateTable("creators")
     .set({
       name: payload.name,
-      avatar_url: avatarDownloaded?.url ?? payload.avatar_url,
-      avatar_source_url: avatarDownloaded?.sourceUrl ?? payload.avatar_url,
+      avatar_url: payload.avatar_url,
+      avatar_source_url: payload.avatar_url,
       bio: payload.bio,
       follower_count: payload.follower_count,
       raw_payload_id: payload.raw_payload_id,
@@ -236,14 +285,8 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
     .execute();
 
   for (const video of payload.videos) {
-    // 每个视频封面单独下载到 /uploads/videos/<videoId>.<ext>
-    const coverDownloaded = await downloadImage(
-      video.cover_url,
-      "videos",
-      // 首次插入还没拿到 row.id 时，用 bvid 占位文件名，等拿到 id 后再 rename。
-      video.bvid,
-      { uploadsDir: env.uploadsDir },
-    );
+    // 视频封面也保持原始 B站 URL，不再下载到 /uploads/videos/。前端 SafeImage 的
+    // referrerPolicy="no-referrer" 已绕过防盗链。
     const row = await db
       .insertInto("videos")
       .values({
@@ -254,8 +297,8 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
         cid: video.cid,
         title: video.title,
         description: video.description,
-        cover_url: coverDownloaded?.url ?? video.cover_url,
-        cover_source_url: coverDownloaded?.sourceUrl ?? video.cover_url,
+        cover_url: video.cover_url,
+        cover_source_url: video.cover_url,
         source_url: video.source_url,
         duration_sec: video.duration_sec,
         published_at: new Date(video.published_at),
@@ -276,8 +319,8 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
         oc.column("bvid").doUpdateSet({
           title: video.title,
           description: video.description,
-          cover_url: coverDownloaded?.url ?? video.cover_url,
-          cover_source_url: coverDownloaded?.sourceUrl ?? video.cover_url,
+          cover_url: video.cover_url,
+          cover_source_url: video.cover_url,
           aid: video.aid,
           cid: video.cid,
           source_url: video.source_url,
@@ -305,7 +348,11 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
         modelProvider: null,
         modelName: null,
       });
-      await db.updateTable("videos").set({ workflow_status: "subtitle_ready", updated_at: new Date() }).where("id", "=", row.id).execute();
+      await db
+        .updateTable("videos")
+        .set({ workflow_status: "subtitle_ready", updated_at: new Date() })
+        .where("id", "=", row.id)
+        .execute();
     }
 
     for (const comment of video.comments) {
@@ -317,13 +364,20 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
           platform_comment_id: comment.id,
           parent_comment_id: null,
           content: comment.content,
-          content_sha256: crypto.createHash("sha256").update(comment.content).digest("hex"),
+          content_sha256: crypto
+            .createHash("sha256")
+            .update(comment.content)
+            .digest("hex"),
           user_hash: comment.user_hash,
           like_count: comment.like_count,
           reply_count: comment.reply_count,
-          published_at: comment.published_at ? new Date(comment.published_at) : null,
+          published_at: comment.published_at
+            ? new Date(comment.published_at)
+            : null,
           sample_type: comment.sample_type,
-          contains_location_signal: /哪|路|地址|附近|搬|闭/.test(comment.content),
+          contains_location_signal: /哪|路|地址|附近|搬|闭/.test(
+            comment.content,
+          ),
           contains_shop_signal: /店|面|餐|咖啡|火锅|牛肉/.test(comment.content),
           raw_payload_id: comment.raw_payload_id,
           created_at: new Date(),
@@ -360,7 +414,11 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
 
 async function processVideoJob(db: Kysely<DB>, job: Job) {
   const { entityId } = job.data as { entityId: string };
-  const video = await db.selectFrom("videos").selectAll().where("id", "=", entityId).executeTakeFirstOrThrow();
+  const video = await db
+    .selectFrom("videos")
+    .selectAll()
+    .where("id", "=", entityId)
+    .executeTakeFirstOrThrow();
   const textAsset = await db
     .selectFrom("video_text_assets")
     .select(["id", "source"])
@@ -371,7 +429,9 @@ async function processVideoJob(db: Kysely<DB>, job: Job) {
   await emitPipelineEvent(db, job, {
     eventType: "progress",
     title: "视频处理入口检查完成",
-    message: textAsset ? `已有 ${textAsset.source} 文本，准备进入 AI 分析。` : "未发现可用字幕或 ASR，准备转写音频。",
+    message: textAsset
+      ? `已有 ${textAsset.source} 文本，准备进入 AI 分析。`
+      : "未发现可用字幕或 ASR，准备转写音频。",
     progressPercent: 10,
     detail: {
       bvid: video.bvid,
@@ -382,9 +442,13 @@ async function processVideoJob(db: Kysely<DB>, job: Job) {
   });
 
   if (textAsset) {
-    await enqueueWorkerPipelineJob(db, "classify_video", "video", entityId, { run_id: runIdFromJob(job) });
+    await enqueueWorkerPipelineJob(db, "classify_video", "video", entityId, {
+      run_id: runIdFromJob(job),
+    });
   } else if (env.bilibiliAsrEnabled) {
-    await enqueueWorkerPipelineJob(db, "run_asr", "video", entityId, { run_id: runIdFromJob(job) });
+    await enqueueWorkerPipelineJob(db, "run_asr", "video", entityId, {
+      run_id: runIdFromJob(job),
+    });
   } else {
     await db
       .updateTable("videos")
@@ -414,7 +478,9 @@ async function saveTextAsset(
     modelName: string | null;
   },
 ) {
-  const text = input.contentText ?? input.segments.map((segment) => segment.text).join("\n");
+  const text =
+    input.contentText ??
+    input.segments.map((segment) => segment.text).join("\n");
   if (!text.trim()) return null;
   const hash = crypto.createHash("sha256").update(text).digest("hex");
   const [asset] = await db
@@ -435,7 +501,9 @@ async function saveTextAsset(
       created_at: new Date(),
       updated_at: new Date(),
     })
-    .onConflict((oc) => oc.columns(["video_id", "source", "content_sha256"]).doNothing())
+    .onConflict((oc) =>
+      oc.columns(["video_id", "source", "content_sha256"]).doNothing(),
+    )
     .returningAll()
     .execute();
 
@@ -452,7 +520,10 @@ async function saveTextAsset(
         start_sec: segment.start_sec,
         end_sec: segment.end_sec,
         text: segment.text,
-        confidence: normalizeSegmentConfidence(segment.confidence, input.source),
+        confidence: normalizeSegmentConfidence(
+          segment.confidence,
+          input.source,
+        ),
         created_at: new Date(),
       })
       .execute();
@@ -460,7 +531,10 @@ async function saveTextAsset(
   return asset;
 }
 
-function normalizeSegmentConfidence(value: number | null | undefined, source: "subtitle" | "asr"): number | null {
+function normalizeSegmentConfidence(
+  value: number | null | undefined,
+  source: "subtitle" | "asr",
+): number | null {
   if (source === "subtitle") return 1;
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return Math.min(1, Math.max(0, value));
@@ -488,7 +562,9 @@ async function buildAnalysisInput(
   } = {},
 ): Promise<AnalysisInput> {
   const evidenceIds = new Set<string>();
-  const transcriptSegments: Array<TranscriptSegment & { segment_id: string; confidence?: number | null }> = [];
+  const transcriptSegments: Array<
+    TranscriptSegment & { segment_id: string; confidence?: number | null }
+  > = [];
   const commentSamples: CommentSample[] = [];
 
   await addTextEvidence(db, evidenceIds, {
@@ -516,7 +592,11 @@ async function buildAnalysisInput(
 
   const textRows = await db
     .selectFrom("video_text_segments")
-    .innerJoin("video_text_assets", "video_text_assets.id", "video_text_segments.asset_id")
+    .innerJoin(
+      "video_text_assets",
+      "video_text_assets.id",
+      "video_text_segments.asset_id",
+    )
     .select([
       "video_text_segments.id",
       "video_text_segments.start_sec",
@@ -531,8 +611,12 @@ async function buildAnalysisInput(
     .limit(240)
     .execute();
 
-  const preferredSource = textRows.some((row) => row.source === "subtitle") ? "subtitle" : "asr";
-  for (const row of textRows.filter((item) => item.source === preferredSource).slice(0, 180)) {
+  const preferredSource = textRows.some((row) => row.source === "subtitle")
+    ? "subtitle"
+    : "asr";
+  for (const row of textRows
+    .filter((item) => item.source === preferredSource)
+    .slice(0, 180)) {
     const evidenceId = await addTextEvidence(db, evidenceIds, {
       videoId: video.id,
       source: row.source,
@@ -661,7 +745,11 @@ function aiRunValues(
 
 async function runAsrJob(db: Kysely<DB>, job: Job) {
   const { entityId } = job.data as { entityId: string };
-  const video = await db.selectFrom("videos").selectAll().where("id", "=", entityId).executeTakeFirstOrThrow();
+  const video = await db
+    .selectFrom("videos")
+    .selectAll()
+    .where("id", "=", entityId)
+    .executeTakeFirstOrThrow();
   await emitPipelineEvent(db, job, {
     eventType: "progress",
     title: "准备进行 ASR 转写",
@@ -669,7 +757,10 @@ async function runAsrJob(db: Kysely<DB>, job: Job) {
     progressPercent: 20,
     detail: { bvid: video.bvid, cid: video.cid },
   });
-  const audio = await fetchVideoAudioForAsr(db, { bvid: video.bvid, cid: video.cid });
+  const audio = await fetchVideoAudioForAsr(db, {
+    bvid: video.bvid,
+    cid: video.cid,
+  });
   try {
     const result = await transcribeAudioFile(audio);
     await saveTextAsset(db, {
@@ -703,14 +794,20 @@ async function runAsrJob(db: Kysely<DB>, job: Job) {
         model_name: result.model_name,
       },
     });
-    await enqueueWorkerPipelineJob(db, "classify_video", "video", video.id, { run_id: runIdFromJob(job) });
+    await enqueueWorkerPipelineJob(db, "classify_video", "video", video.id, {
+      run_id: runIdFromJob(job),
+    });
     return result;
   } catch (error) {
     await db
       .updateTable("videos")
       .set({
         workflow_status: "text_unavailable",
-        risk_flags: [...video.risk_flags, "subtitle_missing", "asr_low_quality"],
+        risk_flags: [
+          ...video.risk_flags,
+          "subtitle_missing",
+          "asr_low_quality",
+        ],
         updated_at: new Date(),
       })
       .where("id", "=", video.id)
@@ -723,7 +820,11 @@ async function runAsrJob(db: Kysely<DB>, job: Job) {
 
 async function classifyVideoJob(db: Kysely<DB>, job: Job) {
   const { entityId } = job.data as { entityId: string };
-  const video = await db.selectFrom("videos").selectAll().where("id", "=", entityId).executeTakeFirstOrThrow();
+  const video = await db
+    .selectFrom("videos")
+    .selectAll()
+    .where("id", "=", entityId)
+    .executeTakeFirstOrThrow();
   const analysisInput = await buildAnalysisInput(db, video);
   await emitPipelineEvent(db, job, {
     eventType: "ai_request_prepared",
@@ -738,14 +839,20 @@ async function classifyVideoJob(db: Kysely<DB>, job: Job) {
   });
   const envelope = await classifyVideo(analysisInput.request);
   const result = videoClassificationResultSchema.parse(envelope.output);
-  result.evidence_ids = validEvidenceIds(result.evidence_ids, analysisInput.evidenceIds);
+  result.evidence_ids = validEvidenceIds(
+    result.evidence_ids,
+    analysisInput.evidenceIds,
+  );
   const aiRun = await db
     .insertInto("ai_runs")
     .values(
       aiRunValues(
         "classify_video",
         video.id,
-        crypto.createHash("sha256").update(JSON.stringify(analysisInput.request)).digest("hex"),
+        crypto
+          .createHash("sha256")
+          .update(JSON.stringify(analysisInput.request))
+          .digest("hex"),
         { request: analysisInput.request },
         { ...envelope, output: result },
       ),
@@ -799,7 +906,13 @@ async function classifyVideoJob(db: Kysely<DB>, job: Job) {
     .execute();
 
   if (result.is_shop_visit) {
-    await enqueueWorkerPipelineJob(db, "extract_comment_signals", "video", video.id, { run_id: runIdFromJob(job) });
+    await enqueueWorkerPipelineJob(
+      db,
+      "extract_comment_signals",
+      "video",
+      video.id,
+      { run_id: runIdFromJob(job) },
+    );
   } else {
     await emitPipelineEvent(db, job, {
       eventType: "completed",
@@ -807,24 +920,37 @@ async function classifyVideoJob(db: Kysely<DB>, job: Job) {
       title: "视频被标记为非探店",
       message: "处理链已结束。",
       progressPercent: 100,
-      detail: { content_type: result.content_type, confidence: result.confidence },
+      detail: {
+        content_type: result.content_type,
+        confidence: result.confidence,
+      },
       aiRunId: aiRun.id,
     });
-    await finishRunIfTerminal(db, job, { is_shop_visit: false, content_type: result.content_type, confidence: result.confidence });
+    await finishRunIfTerminal(db, job, {
+      is_shop_visit: false,
+      content_type: result.content_type,
+      confidence: result.confidence,
+    });
   }
   return result;
 }
 
 async function commentSignalsJob(db: Kysely<DB>, job: Job) {
   const { entityId } = job.data as { entityId: string };
-  const video = await db.selectFrom("videos").selectAll().where("id", "=", entityId).executeTakeFirstOrThrow();
+  const video = await db
+    .selectFrom("videos")
+    .selectAll()
+    .where("id", "=", entityId)
+    .executeTakeFirstOrThrow();
   const classification = await db
     .selectFrom("video_classifications")
     .selectAll()
     .where("video_id", "=", entityId)
     .orderBy("created_at", "desc")
     .executeTakeFirst();
-  const analysisInput = await buildAnalysisInput(db, video, { previousStageOutputs: { classification } });
+  const analysisInput = await buildAnalysisInput(db, video, {
+    previousStageOutputs: { classification },
+  });
   await emitPipelineEvent(db, job, {
     eventType: "ai_request_prepared",
     title: "评论线索分析请求已准备",
@@ -837,11 +963,26 @@ async function commentSignalsJob(db: Kysely<DB>, job: Job) {
   });
   const envelope = await extractCommentSignals(analysisInput.request);
   const result = commentSignalExtractionSchema.parse(envelope.output);
-  for (const mention of result.shop_name_mentions) mention.evidence_ids = validEvidenceIds(mention.evidence_ids, analysisInput.evidenceIds);
-  for (const mention of result.address_mentions) mention.evidence_ids = validEvidenceIds(mention.evidence_ids, analysisInput.evidenceIds);
-  for (const question of result.location_questions) question.evidence_ids = validEvidenceIds(question.evidence_ids, analysisInput.evidenceIds);
+  for (const mention of result.shop_name_mentions)
+    mention.evidence_ids = validEvidenceIds(
+      mention.evidence_ids,
+      analysisInput.evidenceIds,
+    );
+  for (const mention of result.address_mentions)
+    mention.evidence_ids = validEvidenceIds(
+      mention.evidence_ids,
+      analysisInput.evidenceIds,
+    );
+  for (const question of result.location_questions)
+    question.evidence_ids = validEvidenceIds(
+      question.evidence_ids,
+      analysisInput.evidenceIds,
+    );
   for (const sentiment of Object.values(result.aspect_sentiments)) {
-    sentiment.evidence_ids = validEvidenceIds(sentiment.evidence_ids, analysisInput.evidenceIds);
+    sentiment.evidence_ids = validEvidenceIds(
+      sentiment.evidence_ids,
+      analysisInput.evidenceIds,
+    );
   }
   const aiRun = await db
     .insertInto("ai_runs")
@@ -849,7 +990,10 @@ async function commentSignalsJob(db: Kysely<DB>, job: Job) {
       aiRunValues(
         "comment_signal",
         entityId,
-        crypto.createHash("sha256").update(JSON.stringify(analysisInput.request)).digest("hex"),
+        crypto
+          .createHash("sha256")
+          .update(JSON.stringify(analysisInput.request))
+          .digest("hex"),
         { request: analysisInput.request },
         { ...envelope, output: result },
       ),
@@ -887,13 +1031,19 @@ async function commentSignalsJob(db: Kysely<DB>, job: Job) {
       created_at: new Date(),
     })
     .execute();
-  await enqueueWorkerPipelineJob(db, "structure_video", "video", entityId, { run_id: runIdFromJob(job) });
+  await enqueueWorkerPipelineJob(db, "structure_video", "video", entityId, {
+    run_id: runIdFromJob(job),
+  });
   return result;
 }
 
 async function structureVideoJob(db: Kysely<DB>, job: Job) {
   const { entityId } = job.data as { entityId: string };
-  const video = await db.selectFrom("videos").selectAll().where("id", "=", entityId).executeTakeFirstOrThrow();
+  const video = await db
+    .selectFrom("videos")
+    .selectAll()
+    .where("id", "=", entityId)
+    .executeTakeFirstOrThrow();
   const commentSignals = await db
     .selectFrom("comment_signal_extractions")
     .selectAll()
@@ -923,14 +1073,31 @@ async function structureVideoJob(db: Kysely<DB>, job: Job) {
   });
   const envelope = await structureVideo(analysisInput.request);
   const result = videoStructuredAnalysisSchema.parse(envelope.output);
-  result.video.evidence_ids = validEvidenceIds(result.video.evidence_ids, analysisInput.evidenceIds);
+  result.video.evidence_ids = validEvidenceIds(
+    result.video.evidence_ids,
+    analysisInput.evidenceIds,
+  );
   for (const candidate of result.shop_candidates) {
-    for (const dish of candidate.card_payload.recommended_dishes) dish.evidence_ids = validEvidenceIds(dish.evidence_ids, analysisInput.evidenceIds);
-    for (const avoidPoint of candidate.card_payload.avoid_points) avoidPoint.evidence_ids = validEvidenceIds(avoidPoint.evidence_ids, analysisInput.evidenceIds);
+    for (const dish of candidate.card_payload.recommended_dishes)
+      dish.evidence_ids = validEvidenceIds(
+        dish.evidence_ids,
+        analysisInput.evidenceIds,
+      );
+    for (const avoidPoint of candidate.card_payload.avoid_points)
+      avoidPoint.evidence_ids = validEvidenceIds(
+        avoidPoint.evidence_ids,
+        analysisInput.evidenceIds,
+      );
     for (const dimension of Object.values(candidate.review_dimensions)) {
-      dimension.evidence_ids = validEvidenceIds(dimension.evidence_ids, analysisInput.evidenceIds);
+      dimension.evidence_ids = validEvidenceIds(
+        dimension.evidence_ids,
+        analysisInput.evidenceIds,
+      );
     }
-    candidate.comment_summary.evidence_ids = validEvidenceIds(candidate.comment_summary.evidence_ids, analysisInput.evidenceIds);
+    candidate.comment_summary.evidence_ids = validEvidenceIds(
+      candidate.comment_summary.evidence_ids,
+      analysisInput.evidenceIds,
+    );
   }
   const aiRun = await db
     .insertInto("ai_runs")
@@ -938,7 +1105,10 @@ async function structureVideoJob(db: Kysely<DB>, job: Job) {
       aiRunValues(
         "structure_video",
         video.id,
-        crypto.createHash("sha256").update(JSON.stringify(analysisInput.request)).digest("hex"),
+        crypto
+          .createHash("sha256")
+          .update(JSON.stringify(analysisInput.request))
+          .digest("hex"),
         { request: analysisInput.request },
         { ...envelope, output: result },
       ),
@@ -973,7 +1143,9 @@ async function structureVideoJob(db: Kysely<DB>, job: Job) {
       analysis_confidence: result.video.analysis_confidence,
       shop_candidate_count: result.shop_candidates.length,
       risk_flags: result.video.risk_flags,
-      validation_status: result.video.risk_flags.length ? "needs_review" : "valid",
+      validation_status: result.video.risk_flags.length
+        ? "needs_review"
+        : "valid",
       validation_errors: [],
       created_at: new Date(),
     })
@@ -981,90 +1153,200 @@ async function structureVideoJob(db: Kysely<DB>, job: Job) {
     .executeTakeFirstOrThrow();
 
   for (const candidate of result.shop_candidates) {
-    const row = await db
-      .insertInto("shop_candidates")
-      .values({
-        id: crypto.randomUUID(),
-        video_id: video.id,
-        creator_id: video.creator_id,
-        ai_video_analysis_id: analysis.id,
-        candidate_name: candidate.candidate_name,
-        normalized_name: candidate.normalized_name,
-        alias_names: candidate.alias_names,
-        candidate_type: candidate.candidate_type,
-        category_primary: candidate.category.primary,
-        category_secondary: candidate.category.secondary,
-        province: candidate.location_hints.province ?? null,
-        city: candidate.location_hints.city ?? null,
-        district: candidate.location_hints.district ?? null,
-        business_area: candidate.location_hints.business_area ?? null,
-        address_hint: candidate.location_hints.address_text ?? null,
-        landmarks: candidate.location_hints.landmarks,
-        time_start_sec: candidate.time_range?.start_sec ?? null,
-        time_end_sec: candidate.time_range?.end_sec ?? null,
-        name_confidence: candidate.name_confidence,
-        location_confidence: candidate.location_hints.confidence,
-        summary_confidence: candidate.comment_summary.confidence,
-        card_payload: candidate.card_payload,
-        review_dimensions: candidate.review_dimensions,
-        comment_summary: candidate.comment_summary,
-        missing_fields: candidate.missing_fields,
-        risk_flags: candidate.risk_flags,
-        status: candidate.candidate_name ? "extracted" : "name_missing",
-        selected_poi_id: null,
-        merged_shop_id: null,
-        created_at: new Date(),
-        updated_at: new Date(),
+    // 去重：同一视频 + 同一 normalized_name（或 candidate_name 兜底）的候选，
+    // AI 重跑时覆盖写回而不是 INSERT 新行，避免一个视频下出现 N 条重复候选。
+    // 都没名字的 AI 抽取（极少见）按全新候选处理。
+    const existing = await db
+      .selectFrom("shop_candidates")
+      .select(["id", "selected_poi_id"])
+      .where("video_id", "=", video.id)
+      .where((eb) => {
+        const conds: ExpressionWrapper<DB, "shop_candidates", SqlBool>[] = [];
+        if (candidate.normalized_name) {
+          conds.push(eb("normalized_name", "=", candidate.normalized_name));
+        }
+        if (candidate.candidate_name) {
+          conds.push(eb("candidate_name", "=", candidate.candidate_name));
+        }
+        if (conds.length === 0) return eb.val(false);
+        if (conds.length === 1) return conds[0]!;
+        return eb.or(conds);
       })
-      .returningAll()
-      .executeTakeFirstOrThrow();
+      .orderBy("created_at", "asc")
+      .executeTakeFirst();
 
-    await db
-      .insertInto("review_tasks")
-      .values({
-        id: crypto.randomUUID(),
-        task_type: candidate.risk_flags.length ? "poi_review" : "shop_candidate_review",
-        entity_type: "shop_candidate",
-        entity_id: row.id,
-        title: `审核候选店铺：${candidate.candidate_name ?? "店名未知"}`,
-        reason: candidate.manual_review_reasons.join("；") || "AI 候选店铺需要审核",
-        priority: candidate.risk_flags.length ? 80 : 50,
-        status: "open",
-        risk_flags: candidate.risk_flags,
-        payload: { video_id: video.id, bvid: video.bvid },
-        assigned_to: null,
-        resolved_by: null,
-        resolved_at: null,
-        created_at: new Date(),
-        updated_at: new Date(),
-      })
-      .execute();
+    const row = existing
+      ? await db
+          .updateTable("shop_candidates")
+          .set({
+            ai_video_analysis_id: analysis.id,
+            candidate_name: candidate.candidate_name,
+            normalized_name: candidate.normalized_name,
+            alias_names: candidate.alias_names,
+            candidate_type: candidate.candidate_type,
+            category_primary: candidate.category.primary,
+            category_secondary: candidate.category.secondary,
+            province: candidate.location_hints.province ?? null,
+            city: candidate.location_hints.city ?? null,
+            district: candidate.location_hints.district ?? null,
+            business_area: candidate.location_hints.business_area ?? null,
+            address_hint: candidate.location_hints.address_text ?? null,
+            landmarks: candidate.location_hints.landmarks,
+            time_start_sec: candidate.time_range?.start_sec ?? null,
+            time_end_sec: candidate.time_range?.end_sec ?? null,
+            name_confidence: candidate.name_confidence,
+            location_confidence: candidate.location_hints.confidence,
+            summary_confidence: candidate.comment_summary.confidence,
+            card_payload: candidate.card_payload,
+            review_dimensions: candidate.review_dimensions,
+            comment_summary: candidate.comment_summary,
+            missing_fields: candidate.missing_fields,
+            risk_flags: candidate.risk_flags,
+            // 已有 POI 匹配的回写保留 selected_poi_id 和 status，避免反复重跑 match_poi
+            status: existing.selected_poi_id
+              ? undefined
+              : candidate.candidate_name
+                ? "extracted"
+                : "name_missing",
+            updated_at: new Date(),
+          })
+          .where("id", "=", existing.id)
+          .returningAll()
+          .executeTakeFirstOrThrow()
+      : await db
+          .insertInto("shop_candidates")
+          .values({
+            id: crypto.randomUUID(),
+            video_id: video.id,
+            creator_id: video.creator_id,
+            ai_video_analysis_id: analysis.id,
+            candidate_name: candidate.candidate_name,
+            normalized_name: candidate.normalized_name,
+            alias_names: candidate.alias_names,
+            candidate_type: candidate.candidate_type,
+            category_primary: candidate.category.primary,
+            category_secondary: candidate.category.secondary,
+            province: candidate.location_hints.province ?? null,
+            city: candidate.location_hints.city ?? null,
+            district: candidate.location_hints.district ?? null,
+            business_area: candidate.location_hints.business_area ?? null,
+            address_hint: candidate.location_hints.address_text ?? null,
+            landmarks: candidate.location_hints.landmarks,
+            time_start_sec: candidate.time_range?.start_sec ?? null,
+            time_end_sec: candidate.time_range?.end_sec ?? null,
+            name_confidence: candidate.name_confidence,
+            location_confidence: candidate.location_hints.confidence,
+            summary_confidence: candidate.comment_summary.confidence,
+            card_payload: candidate.card_payload,
+            review_dimensions: candidate.review_dimensions,
+            comment_summary: candidate.comment_summary,
+            missing_fields: candidate.missing_fields,
+            risk_flags: candidate.risk_flags,
+            status: candidate.candidate_name ? "extracted" : "name_missing",
+            selected_poi_id: null,
+            merged_shop_id: null,
+            created_at: new Date(),
+            updated_at: new Date(),
+          })
+          .returningAll()
+          .executeTakeFirstOrThrow();
 
-    await enqueueWorkerPipelineJob(db, "match_poi", "shop_candidate", row.id, { run_id: runIdFromJob(job) });
+    // 已选过 POI 的旧候选被覆盖后无需重跑 match_poi；新候选或未选 POI 的入队。
+    if (!existing?.selected_poi_id) {
+      await db
+        .insertInto("review_tasks")
+        .values({
+          id: crypto.randomUUID(),
+          task_type: candidate.risk_flags.length
+            ? "poi_review"
+            : "shop_candidate_review",
+          entity_type: "shop_candidate",
+          entity_id: row.id,
+          title: `审核候选店铺：${candidate.candidate_name ?? "店名未知"}`,
+          reason: candidateReviewReason(candidate),
+          priority: candidate.risk_flags.length ? 80 : 50,
+          status: "open",
+          risk_flags: candidate.risk_flags,
+          payload: { video_id: video.id, bvid: video.bvid },
+          assigned_to: null,
+          resolved_by: null,
+          resolved_at: null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        })
+        .execute();
+
+      await enqueueWorkerPipelineJob(db, "match_poi", "shop_candidate", row.id, {
+        run_id: runIdFromJob(job),
+      });
+    }
   }
 
-  await db.updateTable("videos").set({ workflow_status: "ai_structured", updated_at: new Date() }).where("id", "=", video.id).execute();
+  await db
+    .updateTable("videos")
+    .set({ workflow_status: "ai_structured", updated_at: new Date() })
+    .where("id", "=", video.id)
+    .execute();
   await emitPipelineEvent(db, job, {
     eventType: "saved",
     level: "success",
     title: "视频结构化结果已保存",
     progressPercent: result.shop_candidates.length ? 90 : 100,
-    detail: { shop_candidate_count: result.shop_candidates.length, ai_video_analysis_id: analysis.id },
+    detail: {
+      shop_candidate_count: result.shop_candidates.length,
+      ai_video_analysis_id: analysis.id,
+    },
     aiRunId: aiRun.id,
   });
   if (!result.shop_candidates.length) {
-    await finishRunIfTerminal(db, job, { shop_candidate_count: 0, analysis_id: analysis.id });
+    await finishRunIfTerminal(db, job, {
+      shop_candidate_count: 0,
+      analysis_id: analysis.id,
+    });
   }
   return result;
 }
 
+function candidateReviewReason(input: {
+  risk_flags: string[];
+  missing_fields: string[];
+  candidate_name: string | null;
+}) {
+  const parts = [
+    ...input.risk_flags.map((flag) => `风险：${flag}`),
+    ...input.missing_fields.map((field) => `缺少：${field}`),
+  ];
+  if (parts.length) return parts.slice(0, 6).join("；");
+  return input.candidate_name
+    ? `候选店铺已生成：${input.candidate_name}`
+    : "候选店铺缺少店名";
+}
+
 async function matchPoiJob(db: Kysely<DB>, job: Job) {
-  const { entityId, keywords, region, types } = job.data as { entityId: string; keywords?: string; region?: string; types?: string };
+  const { entityId, keywords, region, types } = job.data as {
+    entityId: string;
+    keywords?: string;
+    region?: string;
+    types?: string;
+  };
+  // 读候选的视频 id，用于 POI 级去重判断。
+  const selfRow = await db
+    .selectFrom("shop_candidates")
+    .select(["id", "video_id"])
+    .where("id", "=", entityId)
+    .executeTakeFirst();
+  if (!selfRow) {
+    throw new Error(`shop_candidate ${entityId} not found`);
+  }
   await emitPipelineEvent(db, job, {
     eventType: "progress",
     title: "开始匹配高德 POI",
     progressPercent: 92,
-    detail: { keywords: keywords ?? null, region: region ?? null, types: types ?? null },
+    detail: {
+      keywords: keywords ?? null,
+      region: region ?? null,
+      types: types ?? null,
+    },
   });
   const result = await searchAmapPoi(db, entityId, { keywords, region, types });
   const selected = result.selected_poi;
@@ -1088,9 +1370,12 @@ async function matchPoiJob(db: Kysely<DB>, job: Job) {
       id: crypto.randomUUID(),
       shop_candidate_id: entityId,
       provider: "amap",
-      query_strategy: result.query_payload.forced_review ? "low_confidence_keyword" : "city_name_keyword",
+      query_strategy: result.query_payload.forced_review
+        ? "low_confidence_keyword"
+        : "city_name_keyword",
       query_payload: result.query_payload as Json,
-      status: result.match_status === "no_candidate" ? "no_candidate" : "success",
+      status:
+        result.match_status === "no_candidate" ? "no_candidate" : "success",
       raw_payload_id: result.raw_payload_id,
       error_message: null,
       created_at: new Date(),
@@ -1140,7 +1425,11 @@ async function matchPoiJob(db: Kysely<DB>, job: Job) {
       .returningAll()
       .executeTakeFirstOrThrow();
 
-    const isSelected = Boolean(selected && candidate.provider_poi_id === selected.provider_poi_id && result.match_status === "auto_matched");
+    const isSelected = Boolean(
+      selected &&
+      candidate.provider_poi_id === selected.provider_poi_id &&
+      result.match_status === "auto_matched",
+    );
     if (isSelected) selectedPoiId = poi.id;
     await db
       .insertInto("poi_match_candidates")
@@ -1167,6 +1456,55 @@ async function matchPoiJob(db: Kysely<DB>, job: Job) {
           ? "extracted"
           : "poi_match_need_review";
 
+  // POI 级去重：若同视频已有其它候选也落到同一 POI，把当前候选标为 merged，
+  // 避免 promote 时再为同一物理店铺建第二个 shop 行。
+  if (selectedPoiId) {
+    const olderSamePoi = await db
+      .selectFrom("shop_candidates")
+      .select(["id"])
+      .where("video_id", "=", selfRow.video_id)
+      .where("selected_poi_id", "=", selectedPoiId)
+      .where("id", "!=", entityId)
+      .orderBy("created_at", "asc")
+      .executeTakeFirst();
+
+    if (olderSamePoi) {
+      await db
+        .updateTable("shop_candidates")
+        .set({
+          status: "merged",
+          selected_poi_id: null,
+          updated_at: new Date(),
+        })
+        .where("id", "=", entityId)
+        .execute();
+      // 关闭对应的审核任务，避免管理员重复处理已合并的候选
+      await db
+        .updateTable("review_tasks")
+        .set({
+          status: "cancelled",
+          resolved_at: new Date(),
+          updated_at: new Date(),
+        })
+        .where("entity_type", "=", "shop_candidate")
+        .where("entity_id", "=", entityId)
+        .where("status", "in", ["open", "in_progress"])
+        .execute();
+      await emitPipelineEvent(db, job, {
+        eventType: "completed",
+        level: "info",
+        title: "候选已合并到同 POI 的旧候选",
+        message: `同视频已存在 POI 相同的候选 ${olderSamePoi.id}，本候选标记 merged`,
+        progressPercent: 100,
+        detail: {
+          merged_into: olderSamePoi.id,
+          selected_poi_id: selectedPoiId,
+        },
+      });
+      return result;
+    }
+  }
+
   await db
     .updateTable("shop_candidates")
     .set({
@@ -1179,7 +1517,13 @@ async function matchPoiJob(db: Kysely<DB>, job: Job) {
 
   await emitPipelineEvent(db, job, {
     eventType: "completed",
-    level: result.match_status === "auto_matched" ? "success" : result.match_status === "no_candidate" || result.match_status === "low_confidence" ? "warning" : "info",
+    level:
+      result.match_status === "auto_matched"
+        ? "success"
+        : result.match_status === "no_candidate" ||
+            result.match_status === "low_confidence"
+          ? "warning"
+          : "info",
     title: "POI 匹配完成",
     message: `匹配状态：${result.match_status}`,
     progressPercent: 100,
