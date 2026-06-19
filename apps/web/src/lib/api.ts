@@ -38,6 +38,8 @@ export interface ShopCardData {
   city?: string | null;
   district?: string | null;
   address?: string | null;
+  category_primary?: string | null;
+  category_secondary?: string | null;
   lng?: number | string | null;
   lat?: number | string | null;
   card_payload?: {
@@ -46,11 +48,11 @@ export interface ShopCardData {
     subtitle?: string;
     recommend_reason?: string;
     avg_price_hint?: string;
-    tags?: string[];
     recommended_dishes?: Array<{ name?: string; text?: string }>;
     avoid_points?: Array<{ text?: string }>;
   };
   quality?: Record<string, unknown>;
+  aggregated_review?: Record<string, unknown>;
   source_videos?: Array<{
     video_id?: string;
     title: string;

@@ -10,7 +10,6 @@ import { formatConfidence, type ShopCardData } from "@/lib/api";
 
 export function ShopCard({ shop }: { shop: ShopCardData }) {
   const card = shop.card_payload ?? {};
-  const tags = card.tags ?? [];
   const confidence = shop.quality?.shop_confidence;
   const sourceVideo = shop.source_videos?.[0];
 
@@ -40,16 +39,6 @@ export function ShopCard({ shop }: { shop: ShopCardData }) {
           <p className="mt-3 text-sm leading-6 text-ink">
             {card.recommend_reason ?? "等待 AI 总结与人工审核。"}
           </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {tags.map((tag) => (
-              <span
-                key={tag}
-                className="rounded-md border border-line px-2 py-1 text-xs text-muted"
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
           <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-muted">
             <span className="inline-flex items-center gap-1">
               <MapPin size={14} />

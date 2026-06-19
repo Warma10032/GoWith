@@ -6,6 +6,7 @@ import {
   RotateCcw,
   ShieldCheck,
   Star,
+  MessageSquareText,
 } from "lucide-react";
 import { TopNav } from "@/components/top-nav";
 import { apiFetch, formatConfidence, type ShopCardData } from "@/lib/api";
@@ -31,6 +32,68 @@ interface ShopDetailPayload {
   shop: ShopCardData;
   mentions: ShopMention[];
   evidence: ShopEvidence[];
+}
+
+type ReviewDimension = {
+  sentiment?: string;
+  summary?: string;
+  confidence?: number | string;
+};
+
+const REVIEW_LABELS: Record<string, string> = {
+  taste: "口味",
+  dish_recommendation: "菜品推荐",
+  value_for_money: "性价比",
+  service: "服务",
+  environment: "环境",
+  queue: "排队",
+};
+const INLINE_EVIDENCE_ID_RE =
+  /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+
+function cleanReviewText(value: string) {
+  return value
+    .replace(INLINE_EVIDENCE_ID_RE, "")
+    .replace(/（[、，,\s]*）/g, "")
+    .replace(/([、，,]\s*){2,}/g, "、")
+    .trim();
+}
+
+function reviewData(value: unknown) {
+  const aggregated =
+    typeof value === "object" && value !== null
+      ? (value as Record<string, unknown>)
+      : {};
+  const dimensions = Object.entries(aggregated).flatMap(([key, item]) => {
+    if (
+      ["comment_summary", "comment_signals"].includes(key) ||
+      typeof item !== "object" ||
+      item === null
+    ) {
+      return [];
+    }
+    const dimension = item as ReviewDimension;
+    const confidence = Number(dimension.confidence ?? 0);
+    return dimension.summary &&
+      confidence > 0.4 &&
+      !dimension.summary.includes("无明确评价")
+      ? [[key, dimension] as const]
+      : [];
+  });
+  const summary =
+    typeof aggregated.comment_summary === "object" &&
+    aggregated.comment_summary !== null
+      ? (aggregated.comment_summary as Record<string, unknown>)
+      : {};
+  const points = [
+    "positive_points",
+    "negative_points",
+    "controversial_points",
+    "recent_status_points",
+  ].flatMap((key) =>
+    Array.isArray(summary[key]) ? (summary[key] as string[]) : [],
+  );
+  return { dimensions, points };
 }
 
 const UUID_RE =
@@ -78,6 +141,13 @@ export default async function ShopPage({
   const location = [data.shop.city, data.shop.district, data.shop.address]
     .filter(Boolean)
     .join(" · ");
+  const category = [data.shop.category_primary, data.shop.category_secondary]
+    .filter(Boolean)
+    .join(" · ");
+  const recommendedDishes = (card.recommended_dishes ?? [])
+    .map((dish) => dish.name ?? dish.text)
+    .filter((dish): dish is string => Boolean(dish));
+  const review = reviewData(data.shop.aggregated_review);
 
   return (
     <main>
@@ -110,12 +180,44 @@ export default async function ShopPage({
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
             <Info title="位置" icon={MapPin} value={location || "待确认"} />
             <Info title="人均" value={card.avg_price_hint ?? "待确认"} />
+            <Info title="品类" value={category || "暂无"} />
             <Info
-              title="推荐标签"
-              value={(card.tags ?? []).join(" / ") || "待生成"}
+              title="推荐菜"
+              value={recommendedDishes.join(" / ") || "暂无"}
             />
             <Info title="证据条数" value={`${data.evidence.length} 条`} />
           </div>
+          <section className="mt-6 border-t border-line pt-5">
+            <div className="flex items-center gap-2 font-semibold">
+              <MessageSquareText size={17} />
+              评论分析
+            </div>
+            {review.dimensions.length || review.points.length ? (
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {review.dimensions.map(([key, dimension]) => (
+                  <div key={key} className="rounded-lg border border-line p-3">
+                    <div className="text-xs font-semibold text-muted">
+                      {REVIEW_LABELS[key] ?? key}
+                    </div>
+                    <p className="mt-1 text-sm leading-6">
+                      {cleanReviewText(dimension.summary ?? "")}
+                    </p>
+                  </div>
+                ))}
+                {review.points.length ? (
+                  <ul className="rounded-lg border border-line p-3 pl-8 text-sm leading-6 sm:col-span-2">
+                    {review.points.map((point) => (
+                      <li key={point} className="list-disc">
+                        {cleanReviewText(point)}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-muted">暂无有效评论结论。</p>
+            )}
+          </section>
         </article>
 
         <aside className="space-y-5">

@@ -104,6 +104,7 @@ type AMapInstance = {
   getBounds(): Bounds;
   on(eventName: "complete" | "moveend" | "zoomend", handler: () => void): void;
   panTo(position: [number, number]): void;
+  resize(): void;
   setZoomAndCenter(zoom: number, center: [number, number]): void;
 };
 
@@ -114,6 +115,32 @@ type AMapLoaderModule = {
     plugins?: string[];
   }): Promise<AMapNamespace>;
 };
+
+type AMapLoaderExport = AMapLoaderModule & {
+  default?: AMapLoaderModule;
+};
+
+let amapLoaderPromise: Promise<AMapNamespace> | null = null;
+
+function loadAmapSdk(key: string) {
+  if (!amapLoaderPromise) {
+    amapLoaderPromise = import("@amap/amap-jsapi-loader")
+      .then((loaderModule: AMapLoaderExport) => {
+        const loader = loaderModule.default ?? loaderModule;
+        return loader.load({
+          key,
+          version: "2.0",
+          plugins: ["AMap.Scale", "AMap.ToolBar"],
+        });
+      })
+      .catch((error: unknown) => {
+        amapLoaderPromise = null;
+        throw error;
+      });
+  }
+
+  return amapLoaderPromise;
+}
 
 declare global {
   interface Window {
@@ -327,6 +354,8 @@ export function AmapCanvas() {
 
   useEffect(() => {
     let cancelled = false;
+    let resizeObserver: ResizeObserver | null = null;
+    let initialFetchTimer: ReturnType<typeof setTimeout> | null = null;
     const key = process.env.NEXT_PUBLIC_AMAP_WEB_JS_KEY;
     const securityJsCode = process.env.NEXT_PUBLIC_AMAP_SECURITY_JS_CODE;
 
@@ -342,15 +371,11 @@ export function AmapCanvas() {
     setStatus("loading");
     setErrorMessage(null);
 
-    import("@amap/amap-jsapi-loader")
-      .then(({ load: loadAmap }: AMapLoaderModule) =>
-        loadAmap({
-          key,
-          version: "2.0",
-          plugins: ["AMap.Scale", "AMap.ToolBar"],
-        }),
-      )
-      .then((AMap: AMapNamespace) => {
+    loadAmapSdk(key)
+      .then(async (AMap) => {
+        await new Promise<void>((resolve) =>
+          requestAnimationFrame(() => resolve()),
+        );
         if (cancelled || !containerRef.current) return;
 
         const map = new AMap.Map(containerRef.current, {
@@ -362,6 +387,7 @@ export function AmapCanvas() {
         });
 
         amapRef.current = AMap;
+        mapRef.current = map;
         map.addControl(new AMap.Scale());
         map.addControl(new AMap.ToolBar({ position: "RB" }));
         infoWindowRef.current = new AMap.InfoWindow({
@@ -369,14 +395,24 @@ export function AmapCanvas() {
           offset: new AMap.Pixel(0, -28),
           closeWhenClickMap: true,
         });
-        map.on("complete", () => {
-          if (cancelled) return;
-          setStatus("ready");
+        setStatus("ready");
+
+        let initialFetchStarted = false;
+        const fetchInitialViewport = () => {
+          if (cancelled || initialFetchStarted) return;
+          initialFetchStarted = true;
+          map.resize();
           void fetchViewportShops();
+        };
+        map.on("complete", () => {
+          fetchInitialViewport();
         });
         map.on("moveend", scheduleFetch);
         map.on("zoomend", scheduleFetch);
-        mapRef.current = map;
+
+        resizeObserver = new ResizeObserver(() => map.resize());
+        resizeObserver.observe(containerRef.current);
+        initialFetchTimer = setTimeout(fetchInitialViewport, 500);
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -388,6 +424,8 @@ export function AmapCanvas() {
 
     return () => {
       cancelled = true;
+      resizeObserver?.disconnect();
+      if (initialFetchTimer) clearTimeout(initialFetchTimer);
       if (debounceRef.current) clearTimeout(debounceRef.current);
       for (const marker of markersRef.current) marker.setMap(null);
       markersRef.current = [];
