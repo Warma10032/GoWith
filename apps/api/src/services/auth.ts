@@ -135,4 +135,3 @@ export function sanitizeUser(user: User) {
     status: user.status,
   };
 }
-

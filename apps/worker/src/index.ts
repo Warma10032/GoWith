@@ -1,7 +1,13 @@
 import { Worker } from "bullmq";
 import crypto from "node:crypto";
 import type { Kysely } from "kysely";
-import { createDb, type DB, type Json } from "@gowith/db";
+import {
+  createDb,
+  findActiveTaskWithLock,
+  SYSTEM_TASK_ENTITY_ID,
+  type DB,
+  type Json,
+} from "@gowith/db";
 import { connection, pipelineQueue } from "./queue";
 import { handlePipelineJob } from "./jobs/pipeline";
 import { env } from "./env";
@@ -18,19 +24,78 @@ async function enqueueCreatorProfileRefreshes(database: Kysely<DB>) {
     .execute();
 
   for (const creator of creators) {
-    const payload = { entityType: "creator", entityId: creator.id, bilibili_uid: creator.bilibili_uid };
-    await database
+    const payload = {
+      entityType: "creator",
+      entityId: creator.id,
+      bilibili_uid: creator.bilibili_uid,
+    };
+    const dbJob = await database.transaction().execute(async (trx) => {
+      const active = await findActiveTaskWithLock(trx, {
+        jobType: "sync_creator_profile",
+        entityType: "creator",
+        entityId: creator.id,
+      });
+      if (active) return null;
+
+      return trx
+        .insertInto("jobs")
+        .values({
+          job_type: "sync_creator_profile",
+          entity_type: "creator",
+          entity_id: creator.id,
+          run_id: null,
+          payload: { bilibili_uid: creator.bilibili_uid } as unknown as Json,
+          status: "queued",
+          priority: 0,
+          attempts: 0,
+          max_attempts: 3,
+          scheduled_at: new Date(),
+          started_at: null,
+          finished_at: null,
+          error_code: null,
+          error_message: null,
+          created_at: new Date(),
+          updated_at: new Date(),
+        })
+        .returning(["id"])
+        .executeTakeFirstOrThrow();
+    });
+    if (!dbJob) continue;
+    await pipelineQueue.add(
+      "sync_creator_profile",
+      { ...payload, db_job_id: dbJob.id },
+      {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 1000 },
+        removeOnComplete: 100,
+        removeOnFail: 100,
+      },
+    );
+  }
+  return creators.length;
+}
+
+async function enqueueBilibiliAuthPoolCheck(database: Kysely<DB>) {
+  const dbJob = await database.transaction().execute(async (trx) => {
+    const active = await findActiveTaskWithLock(trx, {
+      jobType: "check_bilibili_auth_pool",
+      entityType: "system",
+      entityId: SYSTEM_TASK_ENTITY_ID,
+    });
+    if (active) return null;
+
+    return trx
       .insertInto("jobs")
       .values({
-        job_type: "sync_creator_profile",
-        entity_type: "creator",
-        entity_id: creator.id,
+        job_type: "check_bilibili_auth_pool",
+        entity_type: "system",
+        entity_id: SYSTEM_TASK_ENTITY_ID,
         run_id: null,
-        payload: { bilibili_uid: creator.bilibili_uid } as unknown as Json,
+        payload: {} as unknown as Json,
         status: "queued",
-        priority: 0,
+        priority: 10,
         attempts: 0,
-        max_attempts: 3,
+        max_attempts: 1,
         scheduled_at: new Date(),
         started_at: null,
         finished_at: null,
@@ -39,43 +104,17 @@ async function enqueueCreatorProfileRefreshes(database: Kysely<DB>) {
         created_at: new Date(),
         updated_at: new Date(),
       })
-      .execute();
-    await pipelineQueue.add("sync_creator_profile", payload, {
-      attempts: 3,
-      backoff: { type: "exponential", delay: 1000 },
-      removeOnComplete: 100,
-      removeOnFail: 100,
-    });
-  }
-  return creators.length;
-}
-
-async function enqueueBilibiliAuthPoolCheck(database: Kysely<DB>) {
-  const entityId = crypto.randomUUID();
-  await database
-    .insertInto("jobs")
-    .values({
-      job_type: "check_bilibili_auth_pool",
-      entity_type: "system",
-      entity_id: entityId,
-      run_id: null,
-      payload: {} as unknown as Json,
-      status: "queued",
-      priority: 10,
-      attempts: 0,
-      max_attempts: 1,
-      scheduled_at: new Date(),
-      started_at: null,
-      finished_at: null,
-      error_code: null,
-      error_message: null,
-      created_at: new Date(),
-      updated_at: new Date(),
-    })
-    .execute();
+      .returning(["id"])
+      .executeTakeFirstOrThrow();
+  });
+  if (!dbJob) return;
   await pipelineQueue.add(
     "check_bilibili_auth_pool",
-    { entityType: "system", entityId },
+    {
+      entityType: "system",
+      entityId: SYSTEM_TASK_ENTITY_ID,
+      db_job_id: dbJob.id,
+    },
     { attempts: 1, removeOnComplete: 100, removeOnFail: 100 },
   );
 }
@@ -83,13 +122,27 @@ async function enqueueBilibiliAuthPoolCheck(database: Kysely<DB>) {
 function startCreatorProfileScheduler(database: Kysely<DB>) {
   if (env.bilibiliCreatorProfileRefreshMs <= 0) return null;
   void enqueueCreatorProfileRefreshes(database)
-    .then((count) => console.log(`[worker] queued ${count} creator profile refresh jobs`))
-    .catch((error) => console.error("[worker] failed to queue creator profile refresh jobs", error));
+    .then((count) =>
+      console.log(`[worker] queued ${count} creator profile refresh jobs`),
+    )
+    .catch((error) =>
+      console.error(
+        "[worker] failed to queue creator profile refresh jobs",
+        error,
+      ),
+    );
 
   return setInterval(() => {
     void enqueueCreatorProfileRefreshes(database)
-      .then((count) => console.log(`[worker] queued ${count} creator profile refresh jobs`))
-      .catch((error) => console.error("[worker] failed to queue creator profile refresh jobs", error));
+      .then((count) =>
+        console.log(`[worker] queued ${count} creator profile refresh jobs`),
+      )
+      .catch((error) =>
+        console.error(
+          "[worker] failed to queue creator profile refresh jobs",
+          error,
+        ),
+      );
   }, env.bilibiliCreatorProfileRefreshMs);
 }
 
@@ -97,9 +150,13 @@ const creatorProfileScheduler = startCreatorProfileScheduler(db);
 
 function startBilibiliAuthPoolScheduler(database: Kysely<DB>) {
   if (env.bilibiliCookieHealthCheckMs <= 0) return null;
-  void enqueueBilibiliAuthPoolCheck(database).catch((error) => console.error("[worker] failed to queue Bilibili auth pool check", error));
+  void enqueueBilibiliAuthPoolCheck(database).catch((error) =>
+    console.error("[worker] failed to queue Bilibili auth pool check", error),
+  );
   return setInterval(() => {
-    void enqueueBilibiliAuthPoolCheck(database).catch((error) => console.error("[worker] failed to queue Bilibili auth pool check", error));
+    void enqueueBilibiliAuthPoolCheck(database).catch((error) =>
+      console.error("[worker] failed to queue Bilibili auth pool check", error),
+    );
   }, env.bilibiliCookieHealthCheckMs);
 }
 
@@ -109,19 +166,34 @@ const worker = new Worker(
   "gowith-pipeline",
   async (job) => {
     console.log(`[worker] start ${job.name} ${job.id}`);
-    const dbJobId = typeof job.data?.db_job_id === "string" ? job.data.db_job_id : null;
+    const dbJobId =
+      typeof job.data?.db_job_id === "string" ? job.data.db_job_id : null;
     const runId = typeof job.data?.run_id === "string" ? job.data.run_id : null;
-    const entityType = typeof job.data?.entityType === "string" ? job.data.entityType : "unknown";
-    const entityId = typeof job.data?.entityId === "string" ? job.data.entityId : crypto.randomUUID();
+    const entityType =
+      typeof job.data?.entityType === "string"
+        ? job.data.entityType
+        : "unknown";
+    const entityId =
+      typeof job.data?.entityId === "string"
+        ? job.data.entityId
+        : crypto.randomUUID();
     if (dbJobId) {
       await db
         .updateTable("jobs")
-        .set({ status: "running", started_at: new Date(), attempts: job.attemptsMade + 1 })
+        .set({
+          status: "running",
+          started_at: new Date(),
+          attempts: job.attemptsMade + 1,
+        })
         .where("id", "=", dbJobId)
         .execute();
     }
     if (runId) {
-      await db.updateTable("pipeline_runs").set({ status: "running", started_at: new Date() }).where("id", "=", runId).execute();
+      await db
+        .updateTable("pipeline_runs")
+        .set({ status: "running", started_at: new Date() })
+        .where("id", "=", runId)
+        .execute();
       await db
         .insertInto("pipeline_events")
         .values({
@@ -144,7 +216,11 @@ const worker = new Worker(
     try {
       const result = await handlePipelineJob(db, job);
       if (dbJobId) {
-        await db.updateTable("jobs").set({ status: "success", finished_at: new Date() }).where("id", "=", dbJobId).execute();
+        await db
+          .updateTable("jobs")
+          .set({ status: "success", finished_at: new Date() })
+          .where("id", "=", dbJobId)
+          .execute();
       }
       if (runId) {
         await db
@@ -173,14 +249,23 @@ const worker = new Worker(
       if (dbJobId) {
         await db
           .updateTable("jobs")
-          .set({ status: "failed", finished_at: new Date(), error_code: "worker_error", error_message: message })
+          .set({
+            status: "failed",
+            finished_at: new Date(),
+            error_code: "worker_error",
+            error_message: message,
+          })
           .where("id", "=", dbJobId)
           .execute();
       }
       if (runId) {
         await db
           .updateTable("pipeline_runs")
-          .set({ status: "failed", finished_at: new Date(), summary_json: { error_message: message } as unknown as Json })
+          .set({
+            status: "failed",
+            finished_at: new Date(),
+            summary_json: { error_message: message } as unknown as Json,
+          })
           .where("id", "=", runId)
           .execute();
         await db
