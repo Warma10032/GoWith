@@ -222,6 +222,22 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     return { job_id: job.id };
   });
 
+  app.delete("/bilibili-auth/:id", async (request) => {
+    // 删除单个 B站登录态账号。后续 worker / pipeline 进程不再使用它；
+    // 历史 raw_ingest_payloads / jobs 仍保留以供审计。
+    const params = z
+      .object({ id: z.string().uuid() })
+      .parse(request.params);
+    const result = await app.db
+      .deleteFrom("bilibili_auth_accounts")
+      .where("id", "=", params.id)
+      .executeTakeFirst();
+    if (!result.numDeletedRows) {
+      throw new HttpError(404, "该 Cookie 账号不存在或已被删除", "not_found");
+    }
+    return { deleted: true, id: params.id };
+  });
+
   app.get("/creators", async (request) => {
     const query = listQuerySchema.parse(request.query);
     let builder = app.db
