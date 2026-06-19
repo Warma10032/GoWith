@@ -12,6 +12,7 @@
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed-admin.ts",
     "backfill:images": "tsx scripts/backfill-images.ts",
+    "dedupe:shops": "tsx scripts/dedupe-shops-by-poi.ts",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
