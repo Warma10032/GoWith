@@ -16,17 +16,12 @@ export type JobName =
   | "check_bilibili_auth_pool"
   | "sync_creator_profile"
   | "sync_creator_videos"
-  | "fetch_video_metadata"
-  | "fetch_subtitle"
-  | "fetch_comments"
   | "process_video"
   | "run_asr"
   | "classify_video"
   | "extract_comment_signals"
   | "structure_video"
-  | "match_poi"
-  | "generate_review_tasks"
-  | "publish_shop_snapshot";
+  | "match_poi";
 
 function redisConnectionOptions(redisUrl: string): ConnectionOptions {
   const url = new URL(redisUrl);
@@ -89,72 +84,6 @@ function runAlreadyRunningError(
       created_at: active.created_at,
       started_at: active.started_at,
     },
-  );
-}
-
-export async function enqueuePipelineJob(
-  db: Kysely<DB>,
-  jobName: JobName,
-  entityType: string,
-  entityId: string,
-  payload: Record<string, unknown> = {},
-) {
-  const runId = typeof payload.run_id === "string" ? payload.run_id : null;
-  const key = { jobType: jobName, entityType, entityId };
-  const dbJob = await db.transaction().execute(async (trx) => {
-    const active = await findActiveTaskWithLock(trx, key);
-    if (active) throw taskAlreadyRunningError(key, active);
-
-    return trx
-      .insertInto("jobs")
-      .values({
-        job_type: jobName,
-        entity_type: entityType,
-        entity_id: entityId,
-        run_id: runId,
-        payload: payload as Json,
-        status: "queued",
-        priority: 0,
-        attempts: 0,
-        max_attempts: 3,
-        scheduled_at: new Date(),
-        started_at: null,
-        finished_at: null,
-        error_code: null,
-        error_message: null,
-        created_at: new Date(),
-        updated_at: new Date(),
-      })
-      .returning(["id"])
-      .executeTakeFirstOrThrow();
-  });
-
-  const dbJobId = dbJob.id;
-  if (runId && dbJobId) {
-    await db
-      .insertInto("pipeline_events")
-      .values({
-        run_id: runId,
-        job_id: dbJobId,
-        entity_type: entityType,
-        entity_id: entityId,
-        stage: jobName,
-        event_type: "queued",
-        level: "info",
-        title: `任务已入队：${jobName}`,
-        message: null,
-        progress_percent: 0,
-        detail_json: { job_type: jobName, payload } as unknown as Json,
-        ai_run_id: null,
-        created_at: new Date(),
-      })
-      .execute();
-  }
-
-  return pipelineQueue.add(
-    jobName,
-    { entityType, entityId, db_job_id: dbJobId, run_id: runId, ...payload },
-    { attempts: 3, backoff: { type: "exponential", delay: 1000 } },
   );
 }
 

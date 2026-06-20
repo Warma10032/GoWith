@@ -780,31 +780,6 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     });
   });
 
-  app.get("/pipeline-runs/:id/events", async (request) => {
-    const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    const [run, events] = await Promise.all([
-      app.db
-        .selectFrom("pipeline_runs")
-        .selectAll()
-        .where("id", "=", params.id)
-        .executeTakeFirst(),
-      app.db
-        .selectFrom("pipeline_events")
-        .selectAll()
-        .where("run_id", "=", params.id)
-        .orderBy("created_at", "asc")
-        .execute(),
-    ]);
-    if (!run)
-      throw new HttpError(404, "run_not_found", "Pipeline run not found");
-    return { run, events };
-  });
-
-  /**
-   * 统一 run 详情端点：先按 pipeline_run 查，再按 ai_run 查。
-   * 返回的 type 让前端知道渲染哪个分支；events 始终来自 pipeline_events
-   * （ai_run_id 字段关联）。
-   */
   app.get("/runs/:id", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const pipelineRun = await app.db
