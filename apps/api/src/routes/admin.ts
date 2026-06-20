@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import type { FastifyPluginAsync } from "fastify";
+import type { FastifyPluginAsync, FastifyReply } from "fastify";
 import { sql, type Transaction } from "kysely";
 import { z } from "zod";
 import {
@@ -13,7 +13,7 @@ import { createCreatorRequestSchema } from "@gowith/shared";
 import { HttpError } from "../lib/http";
 import { encryptSecret } from "../services/crypto";
 import { requireAdmin } from "../services/auth";
-import { enqueuePipelineJob, enqueuePipelineRunJob } from "../services/queue";
+import { enqueuePipelineRunJob } from "../services/queue";
 
 const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
@@ -27,6 +27,44 @@ const listQuerySchema = paginationSchema.extend({
   creator_id: z.string().uuid().optional(),
   stage: z.string().trim().optional(),
 });
+
+const changesQuerySchema = z.object({
+  since: z.coerce.date(),
+});
+
+function acceptedTask(
+  reply: FastifyReply,
+  run: {
+    id: string;
+    run_type: string;
+    entity_type: string;
+    entity_id: string;
+    status: string;
+  },
+  jobId: string | undefined,
+) {
+  return reply.code(202).send(acceptedTaskPayload(run, jobId));
+}
+
+function acceptedTaskPayload(
+  run: {
+    id: string;
+    run_type: string;
+    entity_type: string;
+    entity_id: string;
+    status: string;
+  },
+  jobId: string | undefined,
+) {
+  return {
+    run_id: run.id,
+    job_id: jobId ?? null,
+    run_type: run.run_type,
+    entity_type: run.entity_type,
+    entity_id: run.entity_id,
+    status: run.status,
+  };
+}
 
 const bilibiliAuthSchema = z.object({
   label: z.string().min(1),
@@ -51,6 +89,13 @@ function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+function stringArray(value: unknown): string[] {
+  return asArray(value).filter(
+    (item): item is string =>
+      typeof item === "string" && item.trim().length > 0,
+  );
+}
+
 function toNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim()) {
@@ -72,6 +117,15 @@ function countCommentSignals(signal: unknown) {
       return typeof summary === "string" && summary.trim().length > 0;
     }).length
   );
+}
+
+function reviewEvidenceIds(review: unknown) {
+  const ids = new Set<string>();
+  for (const [key, value] of Object.entries(asRecord(review))) {
+    if (key === "comment_summary" || key === "comment_signals") continue;
+    for (const id of stringArray(asRecord(value).evidence_ids)) ids.add(id);
+  }
+  return [...ids];
 }
 
 function mergeAggregatedReview(
@@ -267,14 +321,19 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     return { account };
   });
 
-  app.post("/bilibili-auth/check", async () => {
-    const job = await enqueuePipelineJob(
+  app.post("/bilibili-auth/check", async (request, reply) => {
+    const admin = await requireAdmin(app.db, request);
+    const { run, job } = await enqueuePipelineRunJob(
       app.db,
+      {
+        runType: "bilibili_auth_check",
+        entityType: "system",
+        entityId: SYSTEM_TASK_ENTITY_ID,
+        triggeredBy: admin.id,
+      },
       "check_bilibili_auth_pool",
-      "system",
-      SYSTEM_TASK_ENTITY_ID,
     );
-    return { job_id: job.id };
+    return acceptedTask(reply, run, job.data.db_job_id ?? job.id);
   });
 
   app.delete("/bilibili-auth/:id", async (request) => {
@@ -350,8 +409,9 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
-  app.post("/creators", async (request) => {
+  app.post("/creators", async (request, reply) => {
     const body = createCreatorRequestSchema.parse(request.body);
+    const admin = await requireAdmin(app.db, request);
     const placeholderName = `B站 UID ${body.bilibili_uid}`;
     const creator = await app.db
       .insertInto("creators")
@@ -380,19 +440,27 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       )
       .returningAll()
       .executeTakeFirstOrThrow();
-    const job = await enqueuePipelineJob(
+    const { run, job } = await enqueuePipelineRunJob(
       app.db,
+      {
+        runType: "creator_profile_sync",
+        entityType: "creator",
+        entityId: creator.id,
+        triggeredBy: admin.id,
+        summary: { bilibili_uid: creator.bilibili_uid },
+      },
       "sync_creator_profile",
-      "creator",
-      creator.id,
       {
         bilibili_uid: creator.bilibili_uid,
       },
     );
-    return { creator, profile_job_id: job.id };
+    return reply.code(202).send({
+      ...acceptedTaskPayload(run, job.data.db_job_id ?? job.id),
+      creator,
+    });
   });
 
-  app.post("/creators/:id/sync", async (request) => {
+  app.post("/creators/:id/sync", async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const admin = await requireAdmin(app.db, request);
     const creator = await app.db
@@ -416,7 +484,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         bilibili_uid: creator.bilibili_uid,
       },
     );
-    return { run_id: run.id, job_id: job.data.db_job_id ?? job.id };
+    return acceptedTask(reply, run, job.data.db_job_id ?? job.id);
   });
 
   app.get("/creators/:id/videos", async (request) => {
@@ -517,9 +585,9 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
           .limit(80)
           .execute(),
         // 候选去重：相同 POI（已匹配）只保留一条；相同 (candidate_name, city) 也只保留一条
-// （防止 AI 重跑遗留的同名候选）。所有 status 默认都展示（包括 merged / rejected），
-// 让 admin 看完整历史；按 status 优先级 + created_at asc 在每组内取最早一条。
-app.db
+        // （防止 AI 重跑遗留的同名候选）。所有 status 默认都展示（包括 merged / rejected），
+        // 让 admin 看完整历史；按 status 优先级 + created_at asc 在每组内取最早一条。
+        app.db
           .selectFrom("shop_candidates")
           .selectAll()
           .where("video_id", "=", params.id)
@@ -578,7 +646,7 @@ app.db
     };
   });
 
-  app.post("/videos/:id/process", async (request) => {
+  app.post("/videos/:id/process", async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const admin = await requireAdmin(app.db, request);
     const video = await app.db
@@ -598,10 +666,10 @@ app.db
       },
       "process_video",
     );
-    return { run_id: run.id, job_id: job.data.db_job_id ?? job.id };
+    return acceptedTask(reply, run, job.data.db_job_id ?? job.id);
   });
 
-  app.post("/videos/:id/retry-asr", async (request) => {
+  app.post("/videos/:id/retry-asr", async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const admin = await requireAdmin(app.db, request);
     const { run, job } = await enqueuePipelineRunJob(
@@ -614,10 +682,10 @@ app.db
       },
       "run_asr",
     );
-    return { run_id: run.id, job_id: job.data.db_job_id ?? job.id };
+    return acceptedTask(reply, run, job.data.db_job_id ?? job.id);
   });
 
-  app.post("/videos/:id/retry-ai", async (request) => {
+  app.post("/videos/:id/retry-ai", async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const admin = await requireAdmin(app.db, request);
     const { run, job } = await enqueuePipelineRunJob(
@@ -630,7 +698,7 @@ app.db
       },
       "classify_video",
     );
-    return { run_id: run.id, job_id: job.data.db_job_id ?? job.id };
+    return acceptedTask(reply, run, job.data.db_job_id ?? job.id);
   });
 
   app.post("/videos/:id/mark-non-shop", async (request) => {
@@ -664,6 +732,52 @@ app.db
       builder = builder.where("entity_id", "=", rawQuery.entity_id);
     const runs = await builder.execute();
     return { runs };
+  });
+
+  app.get("/pipeline-runs/changes", async (request) => {
+    const { since } = changesQuerySchema.parse(request.query);
+    const boundary = new Date();
+    const [runs, events] = await Promise.all([
+      app.db
+        .selectFrom("pipeline_runs")
+        .selectAll()
+        .where("updated_at", ">", since)
+        .where("updated_at", "<=", boundary)
+        .orderBy("updated_at", "asc")
+        .execute(),
+      app.db
+        .selectFrom("pipeline_events")
+        .selectAll()
+        .where("created_at", ">", since)
+        .where("created_at", "<=", boundary)
+        .orderBy("created_at", "asc")
+        .execute(),
+    ]);
+    return { runs, events, next_cursor: boundary.toISOString() };
+  });
+
+  app.get("/task-stream", async (request, reply) => {
+    await requireAdmin(app.db, request);
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+      "Access-Control-Allow-Credentials": "true",
+      "Access-Control-Allow-Origin": String(request.headers.origin ?? "http://localhost:3000"),
+    });
+    reply.raw.write(`event: ready\ndata: ${JSON.stringify({ connected_at: new Date().toISOString() })}\n\n`);
+    const unsubscribe = app.taskEvents.subscribe((event) => {
+      reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+    });
+    const heartbeat = setInterval(() => {
+      reply.raw.write(`event: heartbeat\ndata: ${JSON.stringify({ at: new Date().toISOString() })}\n\n`);
+    }, 15_000);
+    request.raw.on("close", () => {
+      clearInterval(heartbeat);
+      unsubscribe();
+    });
   });
 
   app.get("/pipeline-runs/:id/events", async (request) => {
@@ -844,7 +958,7 @@ app.db
     return { candidate };
   });
 
-  app.post("/shop-candidates/:id/search-poi", async (request) => {
+  app.post("/shop-candidates/:id/search-poi", async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const body = z
       .object({
@@ -854,14 +968,19 @@ app.db
       })
       .partial()
       .parse(request.body ?? {});
-    const job = await enqueuePipelineJob(
+    const admin = await requireAdmin(app.db, request);
+    const { run, job } = await enqueuePipelineRunJob(
       app.db,
+      {
+        runType: "poi_match",
+        entityType: "shop_candidate",
+        entityId: params.id,
+        triggeredBy: admin.id,
+      },
       "match_poi",
-      "shop_candidate",
-      params.id,
       body,
     );
-    return { job_id: job.id };
+    return acceptedTask(reply, run, job.data.db_job_id ?? job.id);
   });
 
   app.post("/shop-candidates/:id/select-poi", async (request) => {
@@ -1216,6 +1335,43 @@ app.db
       .where("id", "=", params.id)
       .executeTakeFirst();
     if (!shop) throw new HttpError(404, "shop_not_found", "Shop not found");
+    const reviewEvidenceIdList = reviewEvidenceIds(shop.aggregated_review);
+    const reviewEvidence = reviewEvidenceIdList.length
+      ? await app.db
+          .selectFrom("evidence")
+          .select(["id", "source_ref_id"])
+          .where("id", "in", reviewEvidenceIdList)
+          .where("source", "=", "comment")
+          .execute()
+      : [];
+    const commentIds = reviewEvidence.flatMap((item) =>
+      item.source_ref_id ? [item.source_ref_id] : [],
+    );
+    const reviewCommentRows = commentIds.length
+      ? await app.db
+          .selectFrom("video_comments")
+          .select([
+            "id",
+            "content",
+            "user_hash",
+            "author_name",
+            "author_avatar_url",
+            "image_urls",
+            "like_count",
+            "reply_count",
+            "published_at",
+          ])
+          .where("id", "in", commentIds)
+          .execute()
+      : [];
+    const commentsById = new Map(
+      reviewCommentRows.map((comment) => [comment.id, comment]),
+    );
+    const reviewComments = reviewEvidence.flatMap((item) => {
+      if (!item.source_ref_id) return [];
+      const comment = commentsById.get(item.source_ref_id);
+      return comment ? [{ evidence_id: item.id, ...comment }] : [];
+    });
     const mentions = await app.db
       .selectFrom("shop_video_mentions")
       .selectAll()
@@ -1257,6 +1413,7 @@ app.db
       mentions,
       videos,
       creators,
+      review_comments: reviewComments,
     };
   });
 

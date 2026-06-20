@@ -12,12 +12,18 @@ import { sendError } from "./http";
 import { registerAuthRoutes } from "../routes/auth";
 import { registerAdminRoutes } from "../routes/admin";
 import { registerPublicRoutes } from "../routes/public";
+import { TaskEventBroker } from "../services/task-events";
 
 export function buildApp() {
   const app = Fastify({ logger: true });
   const db = createDb();
+  const taskEvents = new TaskEventBroker();
 
   app.decorate("db", db);
+  app.decorate("taskEvents", taskEvents);
+  void taskEvents.start().catch((error: unknown) => {
+    app.log.error({ error }, "task event broker failed to start");
+  });
 
   app.register(cors, {
     origin: [env.webOrigin, "http://localhost:3000"],
@@ -67,6 +73,7 @@ export function buildApp() {
   app.register(registerPublicRoutes, { prefix: "/api" });
 
   app.addHook("onClose", async () => {
+    await taskEvents.stop();
     await db.destroy();
   });
 
@@ -76,6 +83,6 @@ export function buildApp() {
 declare module "fastify" {
   interface FastifyInstance {
     db: ReturnType<typeof createDb>;
+    taskEvents: TaskEventBroker;
   }
 }
-

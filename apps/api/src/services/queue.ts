@@ -45,6 +45,8 @@ export const pipelineQueue = new Queue("gowith-pipeline", { connection });
 
 type PipelineRunType =
   | "creator_video_sync"
+  | "creator_profile_sync"
+  | "bilibili_auth_check"
   | "video_processing"
   | "video_asr_retry"
   | "video_ai_retry"
