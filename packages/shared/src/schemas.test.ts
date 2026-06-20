@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { videoClassificationResultSchema } from "./schemas";
+import { taskAcceptedResponseSchema, videoClassificationResultSchema } from "./schemas";
 import { evaluateClassificationReviewNeed } from "./validation";
 
 describe("video classification schema", () => {
@@ -23,3 +23,16 @@ describe("video classification schema", () => {
   });
 });
 
+describe("admin task response schema", () => {
+  it("accepts a subscribable pipeline run response", () => {
+    const result = taskAcceptedResponseSchema.parse({
+      run_id: "2a176d61-e18b-420c-8b03-f5a92c51e0e5",
+      job_id: null,
+      run_type: "video_ai_retry",
+      entity_type: "video",
+      entity_id: "2a176d61-e18b-420c-8b03-f5a92c51e0e5",
+      status: "queued",
+    });
+    expect(result.run_type).toBe("video_ai_retry");
+  });
+});

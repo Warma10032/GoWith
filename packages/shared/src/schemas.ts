@@ -11,6 +11,41 @@ import {
 export const uuidSchema = z.string().uuid();
 export const confidenceSchema = z.number().min(0).max(1);
 
+export const pipelineRunTypes = [
+  "creator_video_sync",
+  "creator_profile_sync",
+  "bilibili_auth_check",
+  "video_processing",
+  "video_asr_retry",
+  "video_ai_retry",
+  "poi_match",
+] as const;
+
+export const taskAcceptedResponseSchema = z.object({
+  run_id: uuidSchema,
+  job_id: uuidSchema.nullable(),
+  run_type: z.enum(pipelineRunTypes),
+  entity_type: z.string(),
+  entity_id: uuidSchema,
+  status: z.enum(["queued", "running"]),
+});
+
+export const adminTaskEventSchema = z.object({
+  type: z.enum(["run.created", "run.updated", "pipeline.event"]),
+  run_id: uuidSchema,
+  run_type: z.enum(pipelineRunTypes).optional(),
+  entity_type: z.string(),
+  entity_id: uuidSchema,
+  status: z.enum(["queued", "running", "success", "failed", "cancelled"]).optional(),
+  event_id: uuidSchema.optional(),
+  stage: z.string().optional(),
+  event_type: z.string().optional(),
+  level: z.string().optional(),
+  progress_percent: z.union([z.number(), z.string(), z.null()]).optional(),
+  created_at: z.string().optional(),
+  updated_at: z.string().optional(),
+});
+
 export const evidenceSchema = z.object({
   id: z.string(),
   source: z.enum(evidenceSources),
@@ -288,3 +323,5 @@ export type PoiMatchResult = z.infer<typeof poiMatchResultSchema>;
 export type PublishedShopSnapshot = z.infer<typeof publishedShopSnapshotSchema>;
 export type MapShop = z.infer<typeof mapShopSchema>;
 export type ShopSearchResult = z.infer<typeof shopSearchResultSchema>;
+export type TaskAcceptedResponse = z.infer<typeof taskAcceptedResponseSchema>;
+export type AdminTaskEvent = z.infer<typeof adminTaskEventSchema>;
