@@ -52,7 +52,7 @@ export async function handlePipelineJob(db: Kysely<DB>, job: Job) {
     case "match_poi":
       return matchPoiJob(db, job);
     default:
-      return { skipped: true, job: job.name };
+      throw new Error(`Unsupported pipeline job: ${job.name}`);
   }
 }
 
