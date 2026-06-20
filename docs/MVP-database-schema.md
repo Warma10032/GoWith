@@ -44,14 +44,14 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 通用字段约定：
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid | 主键，默认 `gen_random_uuid()` |
-| `created_at` | timestamptz | 创建时间，默认 `now()` |
-| `updated_at` | timestamptz | 更新时间，由 `set_updated_at()` 触发器自动维护（见下） |
-| `deleted_at` | timestamptz/null | 软删除，可选 |
-| `status` | text | 状态枚举，业务层校验 |
-| `metadata` | jsonb | 低频扩展字段 |
+| 字段         | 类型             | 说明                                                   |
+| ------------ | ---------------- | ------------------------------------------------------ |
+| `id`         | uuid             | 主键，默认 `gen_random_uuid()`                         |
+| `created_at` | timestamptz      | 创建时间，默认 `now()`                                 |
+| `updated_at` | timestamptz      | 更新时间，由 `set_updated_at()` 触发器自动维护（见下） |
+| `deleted_at` | timestamptz/null | 软删除，可选                                           |
+| `status`     | text             | 状态枚举，业务层校验                                   |
+| `metadata`   | jsonb            | 低频扩展字段                                           |
 
 MVP 建议用 `text + CHECK` 或业务层枚举，而不是大量 PostgreSQL enum。原因是 AI 状态、风险标记、审核状态还会快速迭代。
 
@@ -167,20 +167,20 @@ merged
 
 用户表。MVP 需要登录系统，后台只有一个人使用也建议把管理员作为 `role = admin`。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 用户 ID |
-| `email` | text/null | 邮箱 |
-| `phone` | text/null | 手机号 |
-| `username` | text/null | 用户名 |
-| `display_name` | text/null | 展示名 |
-| `avatar_url` | text/null | 头像 |
-| `role` | text | `user` / `admin` |
-| `status` | text | `active` / `disabled` |
-| `password_hash` | text/null | 如使用账号密码 |
-| `last_login_at` | timestamptz/null | 最近登录 |
-| `created_at` | timestamptz | 创建时间 |
-| `updated_at` | timestamptz | 更新时间 |
+| 字段            | 类型             | 说明                  |
+| --------------- | ---------------- | --------------------- |
+| `id`            | uuid PK          | 用户 ID               |
+| `email`         | text/null        | 邮箱                  |
+| `phone`         | text/null        | 手机号                |
+| `username`      | text/null        | 用户名                |
+| `display_name`  | text/null        | 展示名                |
+| `avatar_url`    | text/null        | 头像                  |
+| `role`          | text             | `user` / `admin`      |
+| `status`        | text             | `active` / `disabled` |
+| `password_hash` | text/null        | 如使用账号密码        |
+| `last_login_at` | timestamptz/null | 最近登录              |
+| `created_at`    | timestamptz      | 创建时间              |
+| `updated_at`    | timestamptz      | 更新时间              |
 
 索引：
 
@@ -194,17 +194,17 @@ CREATE INDEX users_role_idx ON users (role);
 
 普通用户登录会话。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 会话 ID |
-| `user_id` | uuid FK | 用户 |
-| `session_token_hash` | text | 会话 token hash |
-| `client_type` | text | `web` / `miniapp` / `app` |
-| `ip_hash` | text/null | IP hash |
-| `user_agent` | text/null | UA |
-| `expires_at` | timestamptz | 过期时间 |
-| `revoked_at` | timestamptz/null | 撤销时间 |
-| `created_at` | timestamptz | 创建时间 |
+| 字段                 | 类型             | 说明                      |
+| -------------------- | ---------------- | ------------------------- |
+| `id`                 | uuid PK          | 会话 ID                   |
+| `user_id`            | uuid FK          | 用户                      |
+| `session_token_hash` | text             | 会话 token hash           |
+| `client_type`        | text             | `web` / `miniapp` / `app` |
+| `ip_hash`            | text/null        | IP hash                   |
+| `user_agent`         | text/null        | UA                        |
+| `expires_at`         | timestamptz      | 过期时间                  |
+| `revoked_at`         | timestamptz/null | 撤销时间                  |
+| `created_at`         | timestamptz      | 创建时间                  |
 
 索引：
 
@@ -219,20 +219,20 @@ CREATE INDEX auth_sessions_user_idx ON auth_sessions (user_id, expires_at DESC);
 
 服务端统一维护 B站登录态。Cookie 必须加密保存。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 登录态 ID |
-| `label` | text | 备注名 |
-| `encrypted_cookie` | text | 加密 Cookie |
-| `csrf_token_encrypted` | text/null | 加密 token |
-| `status` | text | `active` / `expired` / `paused` / `risk` |
-| `last_health_check_at` | timestamptz/null | 最近健康检查 |
-| `last_success_at` | timestamptz/null | 最近成功请求 |
-| `last_error_code` | text/null | 最近错误码 |
-| `last_error_message` | text/null | 最近错误 |
-| `rate_limit_policy` | jsonb | 限流配置 |
-| `created_at` | timestamptz | 创建时间 |
-| `updated_at` | timestamptz | 更新时间 |
+| 字段                   | 类型             | 说明                                     |
+| ---------------------- | ---------------- | ---------------------------------------- |
+| `id`                   | uuid PK          | 登录态 ID                                |
+| `label`                | text             | 备注名                                   |
+| `encrypted_cookie`     | text             | 加密 Cookie                              |
+| `csrf_token_encrypted` | text/null        | 加密 token                               |
+| `status`               | text             | `active` / `expired` / `paused` / `risk` |
+| `last_health_check_at` | timestamptz/null | 最近健康检查                             |
+| `last_success_at`      | timestamptz/null | 最近成功请求                             |
+| `last_error_code`      | text/null        | 最近错误码                               |
+| `last_error_message`   | text/null        | 最近错误                                 |
+| `rate_limit_policy`    | jsonb            | 限流配置                                 |
+| `created_at`           | timestamptz      | 创建时间                                 |
+| `updated_at`           | timestamptz      | 更新时间                                 |
 
 索引：
 
@@ -244,23 +244,23 @@ CREATE INDEX bilibili_auth_accounts_status_idx ON bilibili_auth_accounts (status
 
 B站博主表。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 内部博主 ID |
-| `bilibili_uid` | text | B站 UID |
-| `name` | text | 昵称 |
-| `avatar_url` | text/null | 头像 |
-| `profile_url` | text | B站主页 |
-| `bio` | text/null | 简介 |
-| `follower_count` | bigint/null | 粉丝数 |
-| `status` | text | `active` / `paused` / `error` |
-| `sync_mode` | text | `full` / `incremental` |
-| `last_synced_at` | timestamptz/null | 最近同步 |
-| `last_video_published_at` | timestamptz/null | 最近视频发布时间 |
-| `stats` | jsonb | 统计快照 |
-| `raw_payload_id` | uuid/null | 原始响应 |
-| `created_at` | timestamptz | 创建时间 |
-| `updated_at` | timestamptz | 更新时间 |
+| 字段                      | 类型             | 说明                          |
+| ------------------------- | ---------------- | ----------------------------- |
+| `id`                      | uuid PK          | 内部博主 ID                   |
+| `bilibili_uid`            | text             | B站 UID                       |
+| `name`                    | text             | 昵称                          |
+| `avatar_url`              | text/null        | 头像                          |
+| `profile_url`             | text             | B站主页                       |
+| `bio`                     | text/null        | 简介                          |
+| `follower_count`          | bigint/null      | 粉丝数                        |
+| `status`                  | text             | `active` / `paused` / `error` |
+| `sync_mode`               | text             | `full` / `incremental`        |
+| `last_synced_at`          | timestamptz/null | 最近同步                      |
+| `last_video_published_at` | timestamptz/null | 最近视频发布时间              |
+| `stats`                   | jsonb            | 统计快照                      |
+| `raw_payload_id`          | uuid/null        | 原始响应                      |
+| `created_at`              | timestamptz      | 创建时间                      |
+| `updated_at`              | timestamptz      | 更新时间                      |
 
 索引：
 
@@ -274,31 +274,31 @@ CREATE INDEX creators_name_trgm_idx ON creators USING GIN (name gin_trgm_ops);
 
 B站视频主表。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 内部视频 ID |
-| `creator_id` | uuid FK | 博主 |
-| `bvid` | text | BV号 |
-| `aid` | text/null | AV号 |
-| `cid` | text/null | 默认 CID |
-| `title` | text | 标题 |
-| `description` | text/null | 简介 |
-| `cover_url` | text/null | 封面 |
-| `source_url` | text | B站链接 |
-| `duration_sec` | integer/null | 时长 |
-| `published_at` | timestamptz/null | 发布时间 |
-| `tags` | text[] | 标签 |
-| `category` | text/null | B站分区 |
-| `stats` | jsonb | 播放、点赞、收藏、评论等 |
-| `workflow_status` | text | 工作流状态 |
-| `is_shop_visit` | boolean/null | 是否探店 |
-| `content_type` | text/null | 内容类型 |
-| `classification_confidence` | numeric(4,3)/null | 分类置信度 |
-| `risk_flags` | text[] | 风险标记 |
-| `raw_payload_id` | uuid/null | 原始响应 |
-| `last_synced_at` | timestamptz/null | 最近同步 |
-| `created_at` | timestamptz | 创建时间 |
-| `updated_at` | timestamptz | 更新时间 |
+| 字段                        | 类型              | 说明                     |
+| --------------------------- | ----------------- | ------------------------ |
+| `id`                        | uuid PK           | 内部视频 ID              |
+| `creator_id`                | uuid FK           | 博主                     |
+| `bvid`                      | text              | BV号                     |
+| `aid`                       | text/null         | AV号                     |
+| `cid`                       | text/null         | 默认 CID                 |
+| `title`                     | text              | 标题                     |
+| `description`               | text/null         | 简介                     |
+| `cover_url`                 | text/null         | 封面                     |
+| `source_url`                | text              | B站链接                  |
+| `duration_sec`              | integer/null      | 时长                     |
+| `published_at`              | timestamptz/null  | 发布时间                 |
+| `tags`                      | text[]            | 标签                     |
+| `category`                  | text/null         | B站分区                  |
+| `stats`                     | jsonb             | 播放、点赞、收藏、评论等 |
+| `workflow_status`           | text              | 工作流状态               |
+| `is_shop_visit`             | boolean/null      | 是否探店                 |
+| `content_type`              | text/null         | 内容类型                 |
+| `classification_confidence` | numeric(4,3)/null | 分类置信度               |
+| `risk_flags`                | text[]            | 风险标记                 |
+| `raw_payload_id`            | uuid/null         | 原始响应                 |
+| `last_synced_at`            | timestamptz/null  | 最近同步                 |
+| `created_at`                | timestamptz       | 创建时间                 |
+| `updated_at`                | timestamptz       | 更新时间                 |
 
 索引：
 
@@ -314,19 +314,19 @@ CREATE INDEX videos_title_trgm_idx ON videos USING GIN (title gin_trgm_ops);
 
 保存外部 API 原始响应，用于排查、回放和字段重解析。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 原始响应 ID |
-| `provider` | text | `bilibili` / `amap` / `groq` / `openai` |
-| `resource_type` | text | `creator` / `video` / `comment` / `poi_search` 等 |
-| `resource_key` | text | 外部资源标识 |
-| `request_hash` | text | 请求参数 hash |
-| `payload` | jsonb/null | 小响应直接入库 |
-| `object_key` | text/null | 大响应对象存储地址 |
-| `payload_sha256` | text | 内容 hash |
-| `fetched_at` | timestamptz | 获取时间 |
-| `expires_at` | timestamptz/null | 可选过期 |
-| `created_at` | timestamptz | 创建时间 |
+| 字段             | 类型             | 说明                                              |
+| ---------------- | ---------------- | ------------------------------------------------- |
+| `id`             | uuid PK          | 原始响应 ID                                       |
+| `provider`       | text             | `bilibili` / `amap` / `groq` / `openai`           |
+| `resource_type`  | text             | `creator` / `video` / `comment` / `poi_search` 等 |
+| `resource_key`   | text             | 外部资源标识                                      |
+| `request_hash`   | text             | 请求参数 hash                                     |
+| `payload`        | jsonb/null       | 小响应直接入库                                    |
+| `object_key`     | text/null        | 大响应对象存储地址                                |
+| `payload_sha256` | text             | 内容 hash                                         |
+| `fetched_at`     | timestamptz      | 获取时间                                          |
+| `expires_at`     | timestamptz/null | 可选过期                                          |
+| `created_at`     | timestamptz      | 创建时间                                          |
 
 索引：
 
@@ -341,22 +341,22 @@ CREATE UNIQUE INDEX raw_ingest_request_hash_uidx ON raw_ingest_payloads (provide
 
 字幕或 ASR 结果。长文本可同时存 `content_text` 和对象存储 `object_key`。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 文本资产 ID |
-| `video_id` | uuid FK | 视频 |
-| `source` | text | `subtitle` / `asr` |
-| `language` | text/null | 语言 |
-| `content_text` | text | 合并文本 |
-| `content_sha256` | text | 文本 hash |
-| `segments` | jsonb | 带时间戳片段 |
-| `model_provider` | text/null | ASR provider，如 `groq` |
-| `model_name` | text/null | ASR 模型 |
-| `status` | text | `ready` / `failed` |
-| `error_message` | text/null | 错误 |
-| `object_key` | text/null | 原始字幕/ASR 文件 |
-| `created_at` | timestamptz | 创建时间 |
-| `updated_at` | timestamptz | 更新时间 |
+| 字段             | 类型        | 说明                    |
+| ---------------- | ----------- | ----------------------- |
+| `id`             | uuid PK     | 文本资产 ID             |
+| `video_id`       | uuid FK     | 视频                    |
+| `source`         | text        | `subtitle` / `asr`      |
+| `language`       | text/null   | 语言                    |
+| `content_text`   | text        | 合并文本                |
+| `content_sha256` | text        | 文本 hash               |
+| `segments`       | jsonb       | 带时间戳片段            |
+| `model_provider` | text/null   | ASR provider，如 `groq` |
+| `model_name`     | text/null   | ASR 模型                |
+| `status`         | text        | `ready` / `failed`      |
+| `error_message`  | text/null   | 错误                    |
+| `object_key`     | text/null   | 原始字幕/ASR 文件       |
+| `created_at`     | timestamptz | 创建时间                |
+| `updated_at`     | timestamptz | 更新时间                |
 
 索引：
 
@@ -369,17 +369,17 @@ CREATE UNIQUE INDEX video_text_assets_hash_uidx ON video_text_assets (video_id, 
 
 把字幕/ASR 片段拆表，便于证据引用和后台时间轴展示。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 片段 ID |
-| `asset_id` | uuid FK | 文本资产 |
-| `video_id` | uuid FK | 视频 |
-| `segment_index` | integer | 顺序 |
-| `start_sec` | numeric(10,3)/null | 开始秒 |
-| `end_sec` | numeric(10,3)/null | 结束秒 |
-| `text` | text | 片段文本 |
-| `confidence` | numeric(4,3)/null | ASR 置信度 |
-| `created_at` | timestamptz | 创建时间 |
+| 字段            | 类型               | 说明       |
+| --------------- | ------------------ | ---------- |
+| `id`            | uuid PK            | 片段 ID    |
+| `asset_id`      | uuid FK            | 文本资产   |
+| `video_id`      | uuid FK            | 视频       |
+| `segment_index` | integer            | 顺序       |
+| `start_sec`     | numeric(10,3)/null | 开始秒     |
+| `end_sec`       | numeric(10,3)/null | 结束秒     |
+| `text`          | text               | 片段文本   |
+| `confidence`    | numeric(4,3)/null  | ASR 置信度 |
+| `created_at`    | timestamptz        | 创建时间   |
 
 索引：
 
@@ -393,23 +393,26 @@ CREATE INDEX video_text_segments_text_trgm_idx ON video_text_segments USING GIN 
 
 评论样本表。MVP 中评论主要用于 AI 和后台，不默认在前台展示原文。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 评论 ID |
-| `video_id` | uuid FK | 视频 |
-| `platform_comment_id` | text | B站评论 ID |
-| `parent_comment_id` | text/null | 父评论 |
-| `content` | text | 评论内容 |
-| `content_sha256` | text | 内容 hash |
-| `user_hash` | text/null | 评论用户匿名 hash |
-| `like_count` | integer/null | 点赞数 |
-| `reply_count` | integer/null | 回复数 |
-| `published_at` | timestamptz/null | 评论时间 |
-| `sample_type` | text | `hot` / `latest` / `keyword` |
-| `contains_location_signal` | boolean | 是否有位置线索 |
-| `contains_shop_signal` | boolean | 是否有店铺线索 |
-| `raw_payload_id` | uuid/null | 原始响应 |
-| `created_at` | timestamptz | 创建时间 |
+| 字段                       | 类型             | 说明                                       |
+| -------------------------- | ---------------- | ------------------------------------------ |
+| `id`                       | uuid PK          | 评论 ID                                    |
+| `video_id`                 | uuid FK          | 视频                                       |
+| `platform_comment_id`      | text             | B站评论 ID                                 |
+| `parent_comment_id`        | text/null        | 父评论                                     |
+| `content`                  | text             | 评论内容                                   |
+| `content_sha256`           | text             | 内容 hash                                  |
+| `user_hash`                | text/null        | 评论用户匿名 hash                          |
+| `author_name`              | text/null        | 后台证据视图使用的评论昵称；公共页面不展示 |
+| `author_avatar_url`        | text/null        | 后台证据视图使用的头像源 URL               |
+| `image_urls`               | text[]           | 评论附图源 URL；默认空数组                 |
+| `like_count`               | integer/null     | 点赞数                                     |
+| `reply_count`              | integer/null     | 回复数                                     |
+| `published_at`             | timestamptz/null | 评论时间                                   |
+| `sample_type`              | text             | `hot` / `latest` / `keyword`               |
+| `contains_location_signal` | boolean          | 是否有位置线索                             |
+| `contains_shop_signal`     | boolean          | 是否有店铺线索                             |
+| `raw_payload_id`           | uuid/null        | 原始响应                                   |
+| `created_at`               | timestamptz      | 创建时间                                   |
 
 索引：
 
@@ -426,25 +429,27 @@ CREATE INDEX video_comments_content_trgm_idx ON video_comments USING GIN (conten
 
 所有 AI 调用统一记录，便于成本、调试和回放。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | AI 调用 ID |
-| `stage` | text | `classify_video` / `extract_shop_candidates` / `comment_signal` / `structure_video` |
-| `entity_type` | text | `video` / `shop_candidate` |
-| `entity_id` | uuid | 关联实体 |
-| `provider` | text | `openai` / `groq` 等 |
-| `model` | text | 模型名 |
-| `prompt_version` | text | Prompt 版本 |
-| `input_hash` | text | 输入 hash |
-| `input_payload` | jsonb | 输入摘要，避免过大 |
-| `output_payload` | jsonb/null | 模型 JSON 输出 |
-| `raw_output_text` | text/null | 原始输出 |
-| `usage` | jsonb | token/音频秒数/成本 |
-| `status` | text | `success` / `failed` / `invalid_json` / `schema_error` |
-| `error_message` | text/null | 错误 |
-| `started_at` | timestamptz | 开始时间 |
-| `finished_at` | timestamptz/null | 结束时间 |
-| `created_at` | timestamptz | 创建时间 |
+| 字段              | 类型             | 说明                                                                                |
+| ----------------- | ---------------- | ----------------------------------------------------------------------------------- |
+| `id`              | uuid PK          | AI 调用 ID                                                                          |
+| `parent_ai_run_id` | uuid/null FK    | 递进式调用的父阶段；顶层调用为空                                                    |
+| `call_index`       | integer/null     | 同一父阶段内的调用顺序                                                              |
+| `stage`           | text             | `classify_video` / `extract_shop_candidates` / `comment_signal` / `structure_video` |
+| `entity_type`     | text             | `video` / `shop_candidate`                                                          |
+| `entity_id`       | uuid             | 关联实体                                                                            |
+| `provider`        | text             | `openai` / `groq` 等                                                                |
+| `model`           | text             | 模型名                                                                              |
+| `prompt_version`  | text             | Prompt 版本                                                                         |
+| `input_hash`      | text             | 输入 hash                                                                           |
+| `input_payload`   | jsonb            | 输入摘要，避免过大                                                                  |
+| `output_payload`  | jsonb/null       | 模型 JSON 输出                                                                      |
+| `raw_output_text` | text/null        | 原始输出                                                                            |
+| `usage`           | jsonb            | token/音频秒数/成本                                                                 |
+| `status`          | text             | `success` / `failed` / `invalid_json` / `schema_error`                              |
+| `error_message`   | text/null        | 错误                                                                                |
+| `started_at`      | timestamptz      | 开始时间                                                                            |
+| `finished_at`     | timestamptz/null | 结束时间                                                                            |
+| `created_at`      | timestamptz      | 创建时间                                                                            |
 
 索引：
 
@@ -452,25 +457,28 @@ CREATE INDEX video_comments_content_trgm_idx ON video_comments USING GIN (conten
 CREATE INDEX ai_runs_entity_idx ON ai_runs (entity_type, entity_id, stage, created_at DESC);
 CREATE INDEX ai_runs_status_idx ON ai_runs (status, stage);
 CREATE INDEX ai_runs_input_hash_idx ON ai_runs (stage, input_hash);
+CREATE INDEX ai_runs_parent_idx ON ai_runs (parent_ai_run_id, call_index) WHERE parent_ai_run_id IS NOT NULL;
 ```
+
+`pipeline_runs` / `pipeline_events` 通过 migration `010_admin_task_realtime.sql` 安装轻量 `pg_notify` 触发器，只发送 run、实体、阶段、状态和进度标识；完整数据仍从表和增量 API 读取。
 
 ### 8.2 `video_classifications`
 
 视频是否探店的 AI 分类结果。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 分类结果 ID |
-| `video_id` | uuid FK | 视频 |
-| `ai_run_id` | uuid FK | AI 调用 |
-| `is_shop_visit` | boolean | 是否探店 |
-| `content_type` | text | 内容类型 |
-| `confidence` | numeric(4,3) | 置信度 |
-| `reason_codes` | text[] | 原因 |
-| `risk_flags` | text[] | 风险 |
-| `need_manual_review` | boolean | 是否需审 |
-| `evidence_ids` | uuid[] | 证据 |
-| `created_at` | timestamptz | 创建时间 |
+| 字段                 | 类型         | 说明        |
+| -------------------- | ------------ | ----------- |
+| `id`                 | uuid PK      | 分类结果 ID |
+| `video_id`           | uuid FK      | 视频        |
+| `ai_run_id`          | uuid FK      | AI 调用     |
+| `is_shop_visit`      | boolean      | 是否探店    |
+| `content_type`       | text         | 内容类型    |
+| `confidence`         | numeric(4,3) | 置信度      |
+| `reason_codes`       | text[]       | 原因        |
+| `risk_flags`         | text[]       | 风险        |
+| `need_manual_review` | boolean      | 是否需审    |
+| `evidence_ids`       | uuid[]       | 证据        |
+| `created_at`         | timestamptz  | 创建时间    |
 
 索引：
 
@@ -483,18 +491,18 @@ CREATE INDEX video_classifications_need_review_idx ON video_classifications (nee
 
 评论区店铺线索分析结果。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 结果 ID |
-| `video_id` | uuid FK | 视频 |
-| `ai_run_id` | uuid FK | AI 调用 |
-| `sample_strategy` | jsonb | 评论抽样策略 |
-| `shop_name_mentions` | jsonb | 店名线索 |
-| `address_mentions` | jsonb | 地址线索 |
-| `status_mentions` | jsonb | 搬迁、闭店等 |
-| `aspect_sentiments` | jsonb | 维度情绪 |
-| `risk_flags` | text[] | 风险 |
-| `created_at` | timestamptz | 创建时间 |
+| 字段                 | 类型        | 说明         |
+| -------------------- | ----------- | ------------ |
+| `id`                 | uuid PK     | 结果 ID      |
+| `video_id`           | uuid FK     | 视频         |
+| `ai_run_id`          | uuid FK     | AI 调用      |
+| `sample_strategy`    | jsonb       | 评论抽样策略 |
+| `shop_name_mentions` | jsonb       | 店名线索     |
+| `address_mentions`   | jsonb       | 地址线索     |
+| `status_mentions`    | jsonb       | 搬迁、闭店等 |
+| `aspect_sentiments`  | jsonb       | 维度情绪     |
+| `risk_flags`         | text[]      | 风险         |
+| `created_at`         | timestamptz | 创建时间     |
 
 索引：
 
@@ -507,20 +515,20 @@ CREATE INDEX comment_signal_risk_gin_idx ON comment_signal_extractions USING GIN
 
 视频级结构化分析完整输出。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 分析 ID |
-| `video_id` | uuid FK | 视频 |
-| `ai_run_id` | uuid FK | AI 调用 |
-| `schema_version` | text | 如 `video_structured_analysis.v1` |
-| `analysis_json` | jsonb | 完整结构化输出 |
-| `overall_summary` | text/null | 视频总体摘要 |
-| `analysis_confidence` | numeric(4,3)/null | 总体置信度 |
-| `shop_candidate_count` | integer | 候选店铺数 |
-| `risk_flags` | text[] | 风险 |
-| `validation_status` | text | `valid` / `invalid` / `needs_review` |
-| `validation_errors` | jsonb | 校验错误 |
-| `created_at` | timestamptz | 创建时间 |
+| 字段                   | 类型              | 说明                                 |
+| ---------------------- | ----------------- | ------------------------------------ |
+| `id`                   | uuid PK           | 分析 ID                              |
+| `video_id`             | uuid FK           | 视频                                 |
+| `ai_run_id`            | uuid FK           | AI 调用                              |
+| `schema_version`       | text              | 如 `video_structured_analysis.v1`    |
+| `analysis_json`        | jsonb             | 完整结构化输出                       |
+| `overall_summary`      | text/null         | 视频总体摘要                         |
+| `analysis_confidence`  | numeric(4,3)/null | 总体置信度                           |
+| `shop_candidate_count` | integer           | 候选店铺数                           |
+| `risk_flags`           | text[]            | 风险                                 |
+| `validation_status`    | text              | `valid` / `invalid` / `needs_review` |
+| `validation_errors`    | jsonb             | 校验错误                             |
+| `created_at`           | timestamptz       | 创建时间                             |
 
 索引：
 
@@ -534,20 +542,20 @@ CREATE INDEX ai_video_analyses_json_gin_idx ON ai_video_analyses USING GIN (anal
 
 证据链表，连接结论和来源文本。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 证据 ID |
-| `video_id` | uuid FK/null | 视频 |
-| `shop_candidate_id` | uuid FK/null | 候选店铺 |
-| `shop_id` | uuid FK/null | 已发布店铺 |
-| `source` | text | `title` / `subtitle` / `asr` / `comment` / `manual_review` 等 |
-| `source_ref_id` | uuid/text/null | 片段、评论或审核事件 ID |
-| `text_excerpt` | text | 证据片段 |
-| `start_sec` | numeric(10,3)/null | 视频时间 |
-| `end_sec` | numeric(10,3)/null | 视频时间 |
-| `confidence` | numeric(4,3)/null | 相关性 |
-| `metadata` | jsonb | 扩展 |
-| `created_at` | timestamptz | 创建时间 |
+| 字段                | 类型               | 说明                                                          |
+| ------------------- | ------------------ | ------------------------------------------------------------- |
+| `id`                | uuid PK            | 证据 ID                                                       |
+| `video_id`          | uuid FK/null       | 视频                                                          |
+| `shop_candidate_id` | uuid FK/null       | 候选店铺                                                      |
+| `shop_id`           | uuid FK/null       | 已发布店铺                                                    |
+| `source`            | text               | `title` / `subtitle` / `asr` / `comment` / `manual_review` 等 |
+| `source_ref_id`     | uuid/text/null     | 片段、评论或审核事件 ID                                       |
+| `text_excerpt`      | text               | 证据片段                                                      |
+| `start_sec`         | numeric(10,3)/null | 视频时间                                                      |
+| `end_sec`           | numeric(10,3)/null | 视频时间                                                      |
+| `confidence`        | numeric(4,3)/null  | 相关性                                                        |
+| `metadata`          | jsonb              | 扩展                                                          |
+| `created_at`        | timestamptz        | 创建时间                                                      |
 
 索引：
 
@@ -564,39 +572,39 @@ CREATE INDEX evidence_source_idx ON evidence (source);
 
 AI 从视频中抽出的候选店铺。候选可以没有明确店名，也可以最后被驳回。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 候选 ID |
-| `video_id` | uuid FK | 来源视频 |
-| `creator_id` | uuid FK | 来源博主 |
-| `ai_video_analysis_id` | uuid FK/null | 来源分析 |
-| `candidate_name` | text/null | AI 抽取店名 |
-| `normalized_name` | text/null | 规范化店名 |
-| `alias_names` | text[] | 别名 |
-| `candidate_type` | text | `physical_shop` / `unknown` / `not_shop` |
-| `category_primary` | text/null | 一级品类 |
-| `category_secondary` | text/null | 二级品类 |
-| `province` | text/null | 省 |
-| `city` | text/null | 市 |
-| `district` | text/null | 区县 |
-| `business_area` | text/null | 商圈 |
-| `address_hint` | text/null | 地址线索 |
-| `landmarks` | text[] | 地标 |
-| `time_start_sec` | numeric(10,3)/null | 视频中开始 |
-| `time_end_sec` | numeric(10,3)/null | 视频中结束 |
-| `name_confidence` | numeric(4,3)/null | 店名置信度 |
-| `location_confidence` | numeric(4,3)/null | 位置置信度 |
-| `summary_confidence` | numeric(4,3)/null | 摘要置信度 |
-| `card_payload` | jsonb | 卡片文案、推荐菜、避雷点 |
-| `review_dimensions` | jsonb | 口味、价格、排队等 |
-| `comment_summary` | jsonb | 评论摘要 |
-| `missing_fields` | text[] | 缺失字段 |
-| `risk_flags` | text[] | 风险 |
-| `status` | text | 候选状态 |
-| `selected_poi_id` | uuid FK/null | 已选 POI |
-| `merged_shop_id` | uuid FK/null | 合并到的正式店铺 |
-| `created_at` | timestamptz | 创建时间 |
-| `updated_at` | timestamptz | 更新时间 |
+| 字段                   | 类型               | 说明                                     |
+| ---------------------- | ------------------ | ---------------------------------------- |
+| `id`                   | uuid PK            | 候选 ID                                  |
+| `video_id`             | uuid FK            | 来源视频                                 |
+| `creator_id`           | uuid FK            | 来源博主                                 |
+| `ai_video_analysis_id` | uuid FK/null       | 来源分析                                 |
+| `candidate_name`       | text/null          | AI 抽取店名                              |
+| `normalized_name`      | text/null          | 规范化店名                               |
+| `alias_names`          | text[]             | 别名                                     |
+| `candidate_type`       | text               | `physical_shop` / `unknown` / `not_shop` |
+| `category_primary`     | text/null          | 一级品类                                 |
+| `category_secondary`   | text/null          | 二级品类                                 |
+| `province`             | text/null          | 省                                       |
+| `city`                 | text/null          | 市                                       |
+| `district`             | text/null          | 区县                                     |
+| `business_area`        | text/null          | 商圈                                     |
+| `address_hint`         | text/null          | 地址线索                                 |
+| `landmarks`            | text[]             | 地标                                     |
+| `time_start_sec`       | numeric(10,3)/null | 视频中开始                               |
+| `time_end_sec`         | numeric(10,3)/null | 视频中结束                               |
+| `name_confidence`      | numeric(4,3)/null  | 店名置信度                               |
+| `location_confidence`  | numeric(4,3)/null  | 位置置信度                               |
+| `summary_confidence`   | numeric(4,3)/null  | 摘要置信度                               |
+| `card_payload`         | jsonb              | 卡片文案、推荐菜、避雷点                 |
+| `review_dimensions`    | jsonb              | 口味、价格、排队等                       |
+| `comment_summary`      | jsonb              | 评论摘要                                 |
+| `missing_fields`       | text[]             | 缺失字段                                 |
+| `risk_flags`           | text[]             | 风险                                     |
+| `status`               | text               | 候选状态                                 |
+| `selected_poi_id`      | uuid FK/null       | 已选 POI                                 |
+| `merged_shop_id`       | uuid FK/null       | 合并到的正式店铺                         |
+| `created_at`           | timestamptz        | 创建时间                                 |
+| `updated_at`           | timestamptz        | 更新时间                                 |
 
 索引：
 
@@ -613,28 +621,28 @@ CREATE INDEX shop_candidates_risk_gin_idx ON shop_candidates USING GIN (risk_fla
 
 地图服务商 POI 表。MVP 以高德为主，但要保留 provider 抽象。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 内部 POI ID |
-| `provider` | text | `amap` / `tencent` / `baidu` |
-| `provider_poi_id` | text | 服务商 POI ID |
-| `name` | text | POI 名称 |
-| `address` | text/null | 地址 |
-| `province` | text/null | 省 |
-| `city` | text/null | 市 |
-| `district` | text/null | 区 |
-| `business_area` | text/null | 商圈 |
-| `category` | text/null | 服务商品类 |
-| `category_code` | text/null | 服务商品类码 |
-| `lng` | numeric(10,6) | 经度 |
-| `lat` | numeric(10,6) | 纬度 |
-| `coord_type` | text | `gcj02` / `bd09` / `wgs84` |
-| `geom` | geometry(Point, 4326) | 用 provider 坐标生成的点 |
-| `phone` | text/null | 电话，如服务商返回 |
-| `business_hours` | text/null | 营业时间，如服务商返回 |
-| `raw_payload_id` | uuid/null | 原始响应 |
-| `created_at` | timestamptz | 创建时间 |
-| `updated_at` | timestamptz | 更新时间 |
+| 字段              | 类型                  | 说明                         |
+| ----------------- | --------------------- | ---------------------------- |
+| `id`              | uuid PK               | 内部 POI ID                  |
+| `provider`        | text                  | `amap` / `tencent` / `baidu` |
+| `provider_poi_id` | text                  | 服务商 POI ID                |
+| `name`            | text                  | POI 名称                     |
+| `address`         | text/null             | 地址                         |
+| `province`        | text/null             | 省                           |
+| `city`            | text/null             | 市                           |
+| `district`        | text/null             | 区                           |
+| `business_area`   | text/null             | 商圈                         |
+| `category`        | text/null             | 服务商品类                   |
+| `category_code`   | text/null             | 服务商品类码                 |
+| `lng`             | numeric(10,6)         | 经度                         |
+| `lat`             | numeric(10,6)         | 纬度                         |
+| `coord_type`      | text                  | `gcj02` / `bd09` / `wgs84`   |
+| `geom`            | geometry(Point, 4326) | 用 provider 坐标生成的点     |
+| `phone`           | text/null             | 电话，如服务商返回           |
+| `business_hours`  | text/null             | 营业时间，如服务商返回       |
+| `raw_payload_id`  | uuid/null             | 原始响应                     |
+| `created_at`      | timestamptz           | 创建时间                     |
+| `updated_at`      | timestamptz           | 更新时间                     |
 
 约束与索引：
 
@@ -655,17 +663,17 @@ CREATE INDEX pois_geom_gix ON pois USING GIST (geom);
 
 一次候选店铺的 POI 搜索请求。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 匹配尝试 ID |
-| `shop_candidate_id` | uuid FK | 候选店铺 |
-| `provider` | text | `amap` |
-| `query_strategy` | text | `city_name_keyword` 等 |
-| `query_payload` | jsonb | 搜索参数 |
-| `status` | text | `success` / `failed` / `no_candidate` |
-| `raw_payload_id` | uuid/null | 原始响应 |
-| `error_message` | text/null | 错误 |
-| `created_at` | timestamptz | 创建时间 |
+| 字段                | 类型        | 说明                                  |
+| ------------------- | ----------- | ------------------------------------- |
+| `id`                | uuid PK     | 匹配尝试 ID                           |
+| `shop_candidate_id` | uuid FK     | 候选店铺                              |
+| `provider`          | text        | `amap`                                |
+| `query_strategy`    | text        | `city_name_keyword` 等                |
+| `query_payload`     | jsonb       | 搜索参数                              |
+| `status`            | text        | `success` / `failed` / `no_candidate` |
+| `raw_payload_id`    | uuid/null   | 原始响应                              |
+| `error_message`     | text/null   | 错误                                  |
+| `created_at`        | timestamptz | 创建时间                              |
 
 索引：
 
@@ -678,17 +686,17 @@ CREATE INDEX poi_match_attempts_provider_idx ON poi_match_attempts (provider, st
 
 一次 POI 搜索返回的候选点及本地重排分。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 候选匹配 ID |
-| `attempt_id` | uuid FK | 匹配尝试 |
-| `shop_candidate_id` | uuid FK | 候选店铺 |
-| `poi_id` | uuid FK | POI |
-| `rank` | integer | 服务商或本地排序 |
-| `match_features` | jsonb | 名称、地址、品类等特征分 |
-| `match_score` | numeric(5,4) | 综合分 |
-| `match_status` | text | `candidate` / `selected` / `rejected` |
-| `created_at` | timestamptz | 创建时间 |
+| 字段                | 类型         | 说明                                  |
+| ------------------- | ------------ | ------------------------------------- |
+| `id`                | uuid PK      | 候选匹配 ID                           |
+| `attempt_id`        | uuid FK      | 匹配尝试                              |
+| `shop_candidate_id` | uuid FK      | 候选店铺                              |
+| `poi_id`            | uuid FK      | POI                                   |
+| `rank`              | integer      | 服务商或本地排序                      |
+| `match_features`    | jsonb        | 名称、地址、品类等特征分              |
+| `match_score`       | numeric(5,4) | 综合分                                |
+| `match_status`      | text         | `candidate` / `selected` / `rejected` |
+| `created_at`        | timestamptz  | 创建时间                              |
 
 索引：
 
@@ -704,33 +712,33 @@ CREATE INDEX poi_match_candidates_poi_idx ON poi_match_candidates (poi_id);
 
 审核和合并后的正式店铺实体，前台主要读取此表。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 店铺 ID |
-| `primary_poi_id` | uuid FK | 主 POI |
-| `canonical_name` | text | 规范店名 |
-| `display_name` | text | 前台展示店名 |
-| `category_primary` | text/null | 一级品类 |
-| `category_secondary` | text/null | 二级品类 |
-| `province` | text/null | 省 |
-| `city` | text/null | 市 |
-| `district` | text/null | 区 |
-| `business_area` | text/null | 商圈 |
-| `address` | text/null | 地址 |
-| `lng` | numeric(10,6) | 经度 |
-| `lat` | numeric(10,6) | 纬度 |
-| `coord_type` | text | 坐标系 |
-| `geom` | geometry(Point, 4326) | 空间点 |
-| `avg_price_hint` | text/null | 人均提示 |
-| `card_payload` | jsonb | 前台卡片展示数据 |
-| `aggregated_review` | jsonb | 聚合评价 |
-| `quality` | jsonb | 置信度、审核状态等 |
-| `source_stats` | jsonb | 来源视频/博主/评论数量 |
-| `status` | text | `draft` / `published` 等 |
-| `published_at` | timestamptz/null | 发布时间 |
-| `last_reviewed_at` | timestamptz/null | 最近审核 |
-| `created_at` | timestamptz | 创建时间 |
-| `updated_at` | timestamptz | 更新时间 |
+| 字段                 | 类型                  | 说明                     |
+| -------------------- | --------------------- | ------------------------ |
+| `id`                 | uuid PK               | 店铺 ID                  |
+| `primary_poi_id`     | uuid FK               | 主 POI                   |
+| `canonical_name`     | text                  | 规范店名                 |
+| `display_name`       | text                  | 前台展示店名             |
+| `category_primary`   | text/null             | 一级品类                 |
+| `category_secondary` | text/null             | 二级品类                 |
+| `province`           | text/null             | 省                       |
+| `city`               | text/null             | 市                       |
+| `district`           | text/null             | 区                       |
+| `business_area`      | text/null             | 商圈                     |
+| `address`            | text/null             | 地址                     |
+| `lng`                | numeric(10,6)         | 经度                     |
+| `lat`                | numeric(10,6)         | 纬度                     |
+| `coord_type`         | text                  | 坐标系                   |
+| `geom`               | geometry(Point, 4326) | 空间点                   |
+| `avg_price_hint`     | text/null             | 人均提示                 |
+| `card_payload`       | jsonb                 | 前台卡片展示数据         |
+| `aggregated_review`  | jsonb                 | 聚合评价                 |
+| `quality`            | jsonb                 | 置信度、审核状态等       |
+| `source_stats`       | jsonb                 | 来源视频/博主/评论数量   |
+| `status`             | text                  | `draft` / `published` 等 |
+| `published_at`       | timestamptz/null      | 发布时间                 |
+| `last_reviewed_at`   | timestamptz/null      | 最近审核                 |
+| `created_at`         | timestamptz           | 创建时间                 |
+| `updated_at`         | timestamptz           | 更新时间                 |
 
 索引：
 
@@ -746,14 +754,14 @@ CREATE INDEX shops_published_idx ON shops (published_at DESC) WHERE status = 'pu
 
 店铺别名表，用于合并和搜索。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 别名 ID |
-| `shop_id` | uuid FK | 店铺 |
-| `alias_name` | text | 别名 |
-| `source` | text | `ai` / `manual` / `poi` |
-| `confidence` | numeric(4,3)/null | 置信度 |
-| `created_at` | timestamptz | 创建时间 |
+| 字段         | 类型              | 说明                    |
+| ------------ | ----------------- | ----------------------- |
+| `id`         | uuid PK           | 别名 ID                 |
+| `shop_id`    | uuid FK           | 店铺                    |
+| `alias_name` | text              | 别名                    |
+| `source`     | text              | `ai` / `manual` / `poi` |
+| `confidence` | numeric(4,3)/null | 置信度                  |
+| `created_at` | timestamptz       | 创建时间                |
 
 索引：
 
@@ -766,21 +774,21 @@ CREATE INDEX shop_aliases_name_trgm_idx ON shop_aliases USING GIN (alias_name gi
 
 正式店铺与视频、博主的关联。它是“某个视频提到了某家店”的事实表。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 关联 ID |
-| `shop_id` | uuid FK | 店铺 |
-| `shop_candidate_id` | uuid FK/null | 来源候选 |
-| `video_id` | uuid FK | 视频 |
-| `creator_id` | uuid FK | 博主 |
-| `mention_type` | text | `main` / `secondary` / `passing` |
-| `sentiment` | text | 正负向 |
-| `confidence` | numeric(4,3) | 置信度 |
-| `time_start_sec` | numeric(10,3)/null | 视频开始 |
-| `time_end_sec` | numeric(10,3)/null | 视频结束 |
-| `summary` | text/null | 该视频对该店摘要 |
-| `evidence_ids` | uuid[] | 证据 |
-| `created_at` | timestamptz | 创建时间 |
+| 字段                | 类型               | 说明                             |
+| ------------------- | ------------------ | -------------------------------- |
+| `id`                | uuid PK            | 关联 ID                          |
+| `shop_id`           | uuid FK            | 店铺                             |
+| `shop_candidate_id` | uuid FK/null       | 来源候选                         |
+| `video_id`          | uuid FK            | 视频                             |
+| `creator_id`        | uuid FK            | 博主                             |
+| `mention_type`      | text               | `main` / `secondary` / `passing` |
+| `sentiment`         | text               | 正负向                           |
+| `confidence`        | numeric(4,3)       | 置信度                           |
+| `time_start_sec`    | numeric(10,3)/null | 视频开始                         |
+| `time_end_sec`      | numeric(10,3)/null | 视频结束                         |
+| `summary`           | text/null          | 该视频对该店摘要                 |
+| `evidence_ids`      | uuid[]             | 证据                             |
+| `created_at`        | timestamptz        | 创建时间                         |
 
 索引：
 
@@ -795,21 +803,21 @@ CREATE INDEX shop_video_mentions_video_idx ON shop_video_mentions (video_id);
 
 店铺维度评价结论，可来自单视频或多视频聚合。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 结论 ID |
-| `shop_id` | uuid FK | 店铺 |
-| `dimension` | text | `taste` / `price` / `queue` / `service` 等 |
-| `sentiment` | text | 情绪 |
-| `summary` | text | 摘要 |
-| `confidence` | numeric(4,3) | 置信度 |
-| `source_type` | text | `video` / `comment` / `aggregate` / `manual` |
-| `source_ids` | uuid[] | 来源 |
-| `evidence_ids` | uuid[] | 证据 |
-| `model_version` | text/null | 模型版本 |
-| `status` | text | `active` / `hidden` / `needs_recheck` |
-| `created_at` | timestamptz | 创建时间 |
-| `updated_at` | timestamptz | 更新时间 |
+| 字段            | 类型         | 说明                                         |
+| --------------- | ------------ | -------------------------------------------- |
+| `id`            | uuid PK      | 结论 ID                                      |
+| `shop_id`       | uuid FK      | 店铺                                         |
+| `dimension`     | text         | `taste` / `price` / `queue` / `service` 等   |
+| `sentiment`     | text         | 情绪                                         |
+| `summary`       | text         | 摘要                                         |
+| `confidence`    | numeric(4,3) | 置信度                                       |
+| `source_type`   | text         | `video` / `comment` / `aggregate` / `manual` |
+| `source_ids`    | uuid[]       | 来源                                         |
+| `evidence_ids`  | uuid[]       | 证据                                         |
+| `model_version` | text/null    | 模型版本                                     |
+| `status`        | text         | `active` / `hidden` / `needs_recheck`        |
+| `created_at`    | timestamptz  | 创建时间                                     |
+| `updated_at`    | timestamptz  | 更新时间                                     |
 
 索引：
 
@@ -822,15 +830,15 @@ CREATE INDEX shop_insights_sentiment_idx ON shop_insights (dimension, sentiment)
 
 前台发布快照，用于保证展示稳定，也方便回滚。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 快照 ID |
-| `shop_id` | uuid FK | 店铺 |
-| `version` | integer | 版本 |
-| `snapshot_json` | jsonb | 前台完整展示数据 |
-| `published_by` | uuid FK/null | 操作人 |
-| `published_at` | timestamptz | 发布时间 |
-| `is_current` | boolean | 是否当前版本 |
+| 字段            | 类型         | 说明             |
+| --------------- | ------------ | ---------------- |
+| `id`            | uuid PK      | 快照 ID          |
+| `shop_id`       | uuid FK      | 店铺             |
+| `version`       | integer      | 版本             |
+| `snapshot_json` | jsonb        | 前台完整展示数据 |
+| `published_by`  | uuid FK/null | 操作人           |
+| `published_at`  | timestamptz  | 发布时间         |
+| `is_current`    | boolean      | 是否当前版本     |
 
 索引：
 
@@ -845,23 +853,23 @@ CREATE INDEX published_shop_snapshots_shop_version_idx ON published_shop_snapsho
 
 后台任务队列。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 任务 ID |
-| `task_type` | text | `poi_review` / `shop_name_missing` / `merge_shop` 等 |
-| `entity_type` | text | `video` / `shop_candidate` / `shop` |
-| `entity_id` | uuid | 关联实体 |
-| `title` | text | 任务标题 |
-| `reason` | text | 任务原因 |
-| `priority` | integer | 优先级，数值越大越高 |
-| `status` | text | `open` / `resolved` 等 |
-| `risk_flags` | text[] | 风险 |
-| `payload` | jsonb | 任务上下文 |
-| `assigned_to` | uuid FK/null | 分配人 |
-| `resolved_by` | uuid FK/null | 处理人 |
-| `resolved_at` | timestamptz/null | 处理时间 |
-| `created_at` | timestamptz | 创建时间 |
-| `updated_at` | timestamptz | 更新时间 |
+| 字段          | 类型             | 说明                                                 |
+| ------------- | ---------------- | ---------------------------------------------------- |
+| `id`          | uuid PK          | 任务 ID                                              |
+| `task_type`   | text             | `poi_review` / `shop_name_missing` / `merge_shop` 等 |
+| `entity_type` | text             | `video` / `shop_candidate` / `shop`                  |
+| `entity_id`   | uuid             | 关联实体                                             |
+| `title`       | text             | 任务标题                                             |
+| `reason`      | text             | 任务原因                                             |
+| `priority`    | integer          | 优先级，数值越大越高                                 |
+| `status`      | text             | `open` / `resolved` 等                               |
+| `risk_flags`  | text[]           | 风险                                                 |
+| `payload`     | jsonb            | 任务上下文                                           |
+| `assigned_to` | uuid FK/null     | 分配人                                               |
+| `resolved_by` | uuid FK/null     | 处理人                                               |
+| `resolved_at` | timestamptz/null | 处理时间                                             |
+| `created_at`  | timestamptz      | 创建时间                                             |
+| `updated_at`  | timestamptz      | 更新时间                                             |
 
 索引：
 
@@ -875,18 +883,18 @@ CREATE INDEX review_tasks_risk_gin_idx ON review_tasks USING GIN (risk_flags);
 
 审核动作审计日志。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 事件 ID |
-| `review_task_id` | uuid FK/null | 任务 |
-| `entity_type` | text | 实体类型 |
-| `entity_id` | uuid | 实体 ID |
-| `action` | text | `select_poi` / `reject_candidate` 等 |
-| `before_json` | jsonb/null | 修改前 |
-| `after_json` | jsonb/null | 修改后 |
-| `reason` | text/null | 原因 |
-| `reviewer_id` | uuid FK | 操作人 |
-| `created_at` | timestamptz | 创建时间 |
+| 字段             | 类型         | 说明                                 |
+| ---------------- | ------------ | ------------------------------------ |
+| `id`             | uuid PK      | 事件 ID                              |
+| `review_task_id` | uuid FK/null | 任务                                 |
+| `entity_type`    | text         | 实体类型                             |
+| `entity_id`      | uuid         | 实体 ID                              |
+| `action`         | text         | `select_poi` / `reject_candidate` 等 |
+| `before_json`    | jsonb/null   | 修改前                               |
+| `after_json`     | jsonb/null   | 修改后                               |
+| `reason`         | text/null    | 原因                                 |
+| `reviewer_id`    | uuid FK      | 操作人                               |
+| `created_at`     | timestamptz  | 创建时间                             |
 
 索引：
 
@@ -901,11 +909,11 @@ CREATE INDEX review_events_task_idx ON review_events (review_task_id, created_at
 
 用户关注博主。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 记录 ID |
-| `user_id` | uuid FK | 用户 |
-| `creator_id` | uuid FK | 博主 |
+| 字段         | 类型        | 说明     |
+| ------------ | ----------- | -------- |
+| `id`         | uuid PK     | 记录 ID  |
+| `user_id`    | uuid FK     | 用户     |
+| `creator_id` | uuid FK     | 博主     |
 | `created_at` | timestamptz | 创建时间 |
 
 索引：
@@ -919,15 +927,15 @@ CREATE INDEX creator_follows_creator_idx ON creator_follows (creator_id);
 
 收藏、想去、去过都用此表表达。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 记录 ID |
-| `user_id` | uuid FK | 用户 |
-| `shop_id` | uuid FK | 店铺 |
-| `action_type` | text | `favorite` / `want_to_go` / `visited` |
-| `note` | text/null | 用户备注 |
-| `created_at` | timestamptz | 创建时间 |
-| `updated_at` | timestamptz | 更新时间 |
+| 字段          | 类型        | 说明                                  |
+| ------------- | ----------- | ------------------------------------- |
+| `id`          | uuid PK     | 记录 ID                               |
+| `user_id`     | uuid FK     | 用户                                  |
+| `shop_id`     | uuid FK     | 店铺                                  |
+| `action_type` | text        | `favorite` / `want_to_go` / `visited` |
+| `note`        | text/null   | 用户备注                              |
+| `created_at`  | timestamptz | 创建时间                              |
+| `updated_at`  | timestamptz | 更新时间                              |
 
 索引：
 
@@ -940,16 +948,16 @@ CREATE INDEX user_favorites_shop_idx ON user_favorites (shop_id, action_type);
 
 一次推荐请求，记录上下文。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 推荐请求 ID |
-| `user_id` | uuid FK/null | 登录用户 |
-| `anonymous_id` | text/null | 匿名设备 ID |
-| `surface` | text | `home` / `map` / `creator_page` |
-| `request_context` | jsonb | 城市、筛选、位置、端类型 |
-| `algorithm` | text | `rule_v0` / `ranker_v1` |
-| `model_version` | text/null | 模型版本 |
-| `created_at` | timestamptz | 创建时间 |
+| 字段              | 类型         | 说明                            |
+| ----------------- | ------------ | ------------------------------- |
+| `id`              | uuid PK      | 推荐请求 ID                     |
+| `user_id`         | uuid FK/null | 登录用户                        |
+| `anonymous_id`    | text/null    | 匿名设备 ID                     |
+| `surface`         | text         | `home` / `map` / `creator_page` |
+| `request_context` | jsonb        | 城市、筛选、位置、端类型        |
+| `algorithm`       | text         | `rule_v0` / `ranker_v1`         |
+| `model_version`   | text/null    | 模型版本                        |
+| `created_at`      | timestamptz  | 创建时间                        |
 
 索引：
 
@@ -962,16 +970,16 @@ CREATE INDEX recommendation_requests_surface_idx ON recommendation_requests (sur
 
 一次推荐请求返回的 item 列表，后续训练排序模型需要它。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 推荐 item ID |
-| `request_id` | uuid FK | 推荐请求 |
-| `shop_id` | uuid FK | 店铺 |
-| `rank` | integer | 排名 |
-| `score` | numeric(10,6) | 分数 |
-| `reason_codes` | text[] | 推荐原因 |
-| `feature_snapshot` | jsonb | 排序特征快照 |
-| `created_at` | timestamptz | 创建时间 |
+| 字段               | 类型          | 说明         |
+| ------------------ | ------------- | ------------ |
+| `id`               | uuid PK       | 推荐 item ID |
+| `request_id`       | uuid FK       | 推荐请求     |
+| `shop_id`          | uuid FK       | 店铺         |
+| `rank`             | integer       | 排名         |
+| `score`            | numeric(10,6) | 分数         |
+| `reason_codes`     | text[]        | 推荐原因     |
+| `feature_snapshot` | jsonb         | 排序特征快照 |
+| `created_at`       | timestamptz   | 创建时间     |
 
 索引：
 
@@ -984,23 +992,23 @@ CREATE INDEX recommendation_items_shop_idx ON recommendation_items (shop_id, cre
 
 统一行为日志。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 事件 ID |
-| `user_id` | uuid FK/null | 登录用户 |
-| `anonymous_id` | text/null | 匿名 ID |
-| `event_name` | text | `shop_card_click` / `navigation_click` 等 |
-| `entity_type` | text/null | `shop` / `creator` / `video` |
-| `entity_id` | uuid/null | 目标实体 |
-| `shop_id` | uuid/null | 店铺快捷字段 |
-| `creator_id` | uuid/null | 博主快捷字段 |
-| `video_id` | uuid/null | 视频快捷字段 |
-| `recommendation_request_id` | uuid/null | 推荐请求 |
-| `recommendation_item_id` | uuid/null | 推荐 item |
-| `surface` | text | 发生页面 |
-| `event_payload` | jsonb | 上下文 |
-| `client_type` | text | `web` / `miniapp` / `app` |
-| `created_at` | timestamptz | 发生时间 |
+| 字段                        | 类型         | 说明                                      |
+| --------------------------- | ------------ | ----------------------------------------- |
+| `id`                        | uuid PK      | 事件 ID                                   |
+| `user_id`                   | uuid FK/null | 登录用户                                  |
+| `anonymous_id`              | text/null    | 匿名 ID                                   |
+| `event_name`                | text         | `shop_card_click` / `navigation_click` 等 |
+| `entity_type`               | text/null    | `shop` / `creator` / `video`              |
+| `entity_id`                 | uuid/null    | 目标实体                                  |
+| `shop_id`                   | uuid/null    | 店铺快捷字段                              |
+| `creator_id`                | uuid/null    | 博主快捷字段                              |
+| `video_id`                  | uuid/null    | 视频快捷字段                              |
+| `recommendation_request_id` | uuid/null    | 推荐请求                                  |
+| `recommendation_item_id`    | uuid/null    | 推荐 item                                 |
+| `surface`                   | text         | 发生页面                                  |
+| `event_payload`             | jsonb        | 上下文                                    |
+| `client_type`               | text         | `web` / `miniapp` / `app`                 |
+| `created_at`                | timestamptz  | 发生时间                                  |
 
 索引：
 
@@ -1024,24 +1032,24 @@ CREATE INDEX user_events_reco_idx ON user_events (recommendation_request_id, rec
 
 MVP 可用数据库任务表或队列系统。即便用 BullMQ/Redis，也建议保留任务审计表。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 任务 ID |
-| `job_type` | text | `sync_creator_videos` / `fetch_subtitle` / `run_asr` 等 |
-| `entity_type` | text | 实体类型 |
-| `entity_id` | uuid | 实体 ID |
-| `payload` | jsonb | 参数 |
-| `status` | text | `queued` / `running` / `success` / `failed` / `cancelled` |
-| `priority` | integer | 优先级 |
-| `attempts` | integer | 已尝试次数 |
-| `max_attempts` | integer | 最大尝试 |
-| `scheduled_at` | timestamptz | 计划时间 |
-| `started_at` | timestamptz/null | 开始 |
-| `finished_at` | timestamptz/null | 结束 |
-| `error_code` | text/null | 错误码 |
-| `error_message` | text/null | 错误 |
-| `created_at` | timestamptz | 创建 |
-| `updated_at` | timestamptz | 更新 |
+| 字段            | 类型             | 说明                                                      |
+| --------------- | ---------------- | --------------------------------------------------------- |
+| `id`            | uuid PK          | 任务 ID                                                   |
+| `job_type`      | text             | `sync_creator_videos` / `fetch_subtitle` / `run_asr` 等   |
+| `entity_type`   | text             | 实体类型                                                  |
+| `entity_id`     | uuid             | 实体 ID                                                   |
+| `payload`       | jsonb            | 参数                                                      |
+| `status`        | text             | `queued` / `running` / `success` / `failed` / `cancelled` |
+| `priority`      | integer          | 优先级                                                    |
+| `attempts`      | integer          | 已尝试次数                                                |
+| `max_attempts`  | integer          | 最大尝试                                                  |
+| `scheduled_at`  | timestamptz      | 计划时间                                                  |
+| `started_at`    | timestamptz/null | 开始                                                      |
+| `finished_at`   | timestamptz/null | 结束                                                      |
+| `error_code`    | text/null        | 错误码                                                    |
+| `error_message` | text/null        | 错误                                                      |
+| `created_at`    | timestamptz      | 创建                                                      |
+| `updated_at`    | timestamptz      | 更新                                                      |
 
 索引：
 
@@ -1224,30 +1232,30 @@ LIMIT 20;
 
 后续深度推荐和语义搜索使用。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `id` | uuid PK | 向量 ID |
-| `entity_type` | text | `shop` / `video` / `creator` |
-| `entity_id` | uuid | 实体 ID |
-| `embedding_type` | text | `content` / `behavior` |
-| `model` | text | 模型名 |
-| `embedding` | vector/null | pgvector 向量 |
-| `embedding_json` | jsonb/null | 未启用 pgvector 时暂存 |
-| `created_at` | timestamptz | 创建 |
+| 字段             | 类型        | 说明                         |
+| ---------------- | ----------- | ---------------------------- |
+| `id`             | uuid PK     | 向量 ID                      |
+| `entity_type`    | text        | `shop` / `video` / `creator` |
+| `entity_id`      | uuid        | 实体 ID                      |
+| `embedding_type` | text        | `content` / `behavior`       |
+| `model`          | text        | 模型名                       |
+| `embedding`      | vector/null | pgvector 向量                |
+| `embedding_json` | jsonb/null  | 未启用 pgvector 时暂存       |
+| `created_at`     | timestamptz | 创建                         |
 
 ### 18.2 `user_profiles`
 
 推荐系统用户画像。
 
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `user_id` | uuid PK | 用户 |
-| `preferred_cities` | text[] | 偏好城市 |
-| `preferred_categories` | text[] | 偏好品类 |
-| `preferred_price_range` | jsonb | 价格偏好 |
-| `creator_affinity` | jsonb | 博主偏好 |
-| `profile_vector_id` | uuid/null | 用户向量 |
-| `updated_at` | timestamptz | 更新时间 |
+| 字段                    | 类型        | 说明     |
+| ----------------------- | ----------- | -------- |
+| `user_id`               | uuid PK     | 用户     |
+| `preferred_cities`      | text[]      | 偏好城市 |
+| `preferred_categories`  | text[]      | 偏好品类 |
+| `preferred_price_range` | jsonb       | 价格偏好 |
+| `creator_affinity`      | jsonb       | 博主偏好 |
+| `profile_vector_id`     | uuid/null   | 用户向量 |
+| `updated_at`            | timestamptz | 更新时间 |
 
 ## 19. 实施建议
 
@@ -1290,14 +1298,14 @@ geom geometry(Point, 4326) GENERATED ALWAYS AS (
 
 `packages/db/src/schema.ts` 是 Kysely 类型镜像，部分表的列定义与 SQL 不一致。**M1 之前必须修复**，否则后续在 TS 侧写 review / shop-insights / shop-mentions 业务时会 runtime 报错。
 
-| 表 | TS 类型（`packages/db/src/schema.ts`） | SQL 实际（`db/migrations/003_*`） | 差异 | 影响 |
-| --- | --- | --- | --- | --- |
-| `shop_video_mentions` | `mention_type: "primary" \| "secondary" \| "comparison"`、无 `sentiment`/`summary`/`time_start_sec`/`time_end_sec`、无 `shop_candidate_id` | `mention_type text NOT NULL DEFAULT 'main'`、`sentiment text NOT NULL DEFAULT 'unknown'`、`summary text`、`time_start_sec numeric(10,3)`、`time_end_sec numeric(10,3)`、`shop_candidate_id uuid REFERENCES shop_candidates(id)` | 枚举值不同；缺字段；多 FK | 写 mention 时 Kysely 会因列不存在 / 类型不匹配报错 |
-| `shop_insights` | `insight_type`、`payload jsonb`、`source_video_ids`、`source_comment_ids` | `dimension`、`sentiment`、`summary`、`confidence`、`source_type`、`source_ids`、`evidence_ids`、`model_version`、`status` | 字段命名 / 含义完全不同 | 完全不能用现有 TS 类型写 insight |
-| `review_events` | `task_id`、`actor_id`、`note` | `review_task_id`、`reviewer_id`、`reason` | 字段命名不同 | 写 audit 日志时会因列名错报错 |
-| `shop_aliases` | 无 `confidence` | 有 `confidence numeric(4,3)` | 缺字段 | 影响搜索相似度权重（如后续用到） |
-| `shops` | 无 `geom` | `geom GENERATED ALWAYS AS STORED` | 缺字段（不需要写，但需要声明） | 不影响写入，但 TS 拼 SQL `ST_*` 表达式时类型推断不到 |
-| `pois` | 无 `geom` | 同上 | 同上 | 同上 |
+| 表                    | TS 类型（`packages/db/src/schema.ts`）                                                                                                     | SQL 实际（`db/migrations/003_*`）                                                                                                                                                                                               | 差异                           | 影响                                                 |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | ---------------------------------------------------- |
+| `shop_video_mentions` | `mention_type: "primary" \| "secondary" \| "comparison"`、无 `sentiment`/`summary`/`time_start_sec`/`time_end_sec`、无 `shop_candidate_id` | `mention_type text NOT NULL DEFAULT 'main'`、`sentiment text NOT NULL DEFAULT 'unknown'`、`summary text`、`time_start_sec numeric(10,3)`、`time_end_sec numeric(10,3)`、`shop_candidate_id uuid REFERENCES shop_candidates(id)` | 枚举值不同；缺字段；多 FK      | 写 mention 时 Kysely 会因列不存在 / 类型不匹配报错   |
+| `shop_insights`       | `insight_type`、`payload jsonb`、`source_video_ids`、`source_comment_ids`                                                                  | `dimension`、`sentiment`、`summary`、`confidence`、`source_type`、`source_ids`、`evidence_ids`、`model_version`、`status`                                                                                                       | 字段命名 / 含义完全不同        | 完全不能用现有 TS 类型写 insight                     |
+| `review_events`       | `task_id`、`actor_id`、`note`                                                                                                              | `review_task_id`、`reviewer_id`、`reason`                                                                                                                                                                                       | 字段命名不同                   | 写 audit 日志时会因列名错报错                        |
+| `shop_aliases`        | 无 `confidence`                                                                                                                            | 有 `confidence numeric(4,3)`                                                                                                                                                                                                    | 缺字段                         | 影响搜索相似度权重（如后续用到）                     |
+| `shops`               | 无 `geom`                                                                                                                                  | `geom GENERATED ALWAYS AS STORED`                                                                                                                                                                                               | 缺字段（不需要写，但需要声明） | 不影响写入，但 TS 拼 SQL `ST_*` 表达式时类型推断不到 |
+| `pois`                | 无 `geom`                                                                                                                                  | 同上                                                                                                                                                                                                                            | 同上                           | 同上                                                 |
 
 修复流程：
 
@@ -1308,4 +1316,3 @@ geom geometry(Point, 4326) GENERATED ALWAYS AS (
 5. CI 加静态检查（`grep -E "review_events\.\(task_id\|actor_id\|note\)" packages/` 应为空）。
 
 修复顺序建议：先 `review_events`（最常用），再 `shop_video_mentions`（review 流程依赖），最后 `shop_insights`（暂未用）、`shop_aliases`（次要）。
-

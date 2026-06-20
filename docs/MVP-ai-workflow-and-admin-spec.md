@@ -393,9 +393,21 @@ MVP 建议混合抽样：
 }
 ```
 
-`category.primary` 只允许：`中餐`、`地方特色菜`、`火锅`、`烧烤`、`海鲜`、`自助餐`、`小吃快餐`、`粉面粥`、`甜品饮品`、`咖啡烘焙`、`西餐`、`日本料理`、`韩国料理`、`东南亚菜`、`素食`、`其他餐饮`。`category.secondary` 只允许项目约定的菜系词表（如粤菜、潮汕菜、川菜、湘菜）；无证据时为 `null`。MVP 暂不生成或展示 `tags`。
+`category.primary` 只允许：`中餐`、`地方特色菜`、`火锅`、`烧烤`、`海鲜`、`自助餐`、`小吃快餐`、`粉面粥`、`甜品饮品`、`咖啡烘焙`、`西餐`、`日本料理`、`韩国料理`、`东南亚菜`、`素食`、`其他餐饮`。`category.secondary` 只允许项目约定的菜系词表（如鲁菜、粤菜、潮汕菜、川菜、湘菜）；无证据时为 `null`。MVP 暂不生成或展示 `tags`。
 
 `recommend_reason` 必须来自字幕中的博主结论，至少表达“是否推荐、推荐或不推荐什么菜、具体原因”中的可确认部分。评论只能进入 `comment_summary` / `aggregated_review`，不得替代博主推荐结论。
+
+`structure_video.v3` 先用小 Schema 从字幕提炼店名、城市、博主态度与推荐菜，再进入完整结构化调用。若完整调用对已确认的探店视频返回空 `shop_candidates`，仅在小 Schema 有店名字幕证据时生成一个候选，避免出现“分析成功但没有 POI 候选”的断链。
+
+`comment_analysis.v4` 使用两段式评论分析：`comment_relevance_filter.v1` 从最多 80 条样本中只返回与当前店铺直接相关的 `comment_id`，随后 M3 仅分析这些评论。维度仍使用 `sentiment / summary / confidence / evidence_ids`，`summary` 禁止出现评论编号，编号只保存在 `evidence_ids`。后台点击整个评价维度后，通过 `evidence.source_ref_id -> video_comments.id` 展示关联原评论。
+
+AI Worker 采用双层模型：视频分类、评论相关性筛选、JSON 修复等预处理任务使用 `MINIMAX_SIMPLE_MODEL`（默认 `MiniMax-M2.7`）；字幕洞察、评论维度结论、视频结构化总结等分析任务使用 `MINIMAX_COMPLEX_MODEL`（默认 `MiniMax-M3`）。两段式调用的子模型写入 `usage.model`，顶层 `ai_runs.model` 记录产出最终阶段结果的模型。
+
+全部 Prompt 集中在 `apps/ai-worker/app/prompts.py`，由注册表保存 key、版本、模型层级、任务目标、证据优先级、决策规则和 Pydantic JSON Schema 输出契约。结构化阶段依次执行 `transcript_fact_extraction.v1`、`transcript_opinion_analysis.v1`、`structure_synthesis.v4`；若单店探店缺少候选、视频缺少证据或推荐菜缺少字幕证据，则执行一次 `structure_semantic_retry.v1`。`json_repair.v2` 只能修复 JSON 语法和字段形状，禁止改变业务语义。
+
+AI Worker envelope 的 `subcalls` 按调用顺序返回每次模型调用的 stage、model、prompt_version、input_hash、输入摘要、原始输出、解析输出、usage、status 与错误。Worker 将顶层阶段写为父 `ai_runs`，子调用通过 `parent_ai_run_id` 与 `call_index` 关联；失败 HTTP 响应也携带已发生的 subcalls 并落库。
+
+后台异步命令统一返回 HTTP 202 与 `run_id`。`pipeline_runs` 状态变化和 `pipeline_events` 新增后由 PostgreSQL `NOTIFY gowith_admin_tasks` 通知 API，`GET /api/admin/task-stream` 通过 SSE 推送到后台全局 Provider；断线时通过 `GET /api/admin/pipeline-runs/changes?since=...` 每 10 秒增量补偿。任务按钮在 queued/running 阶段保持页面级 busy，终态后自动刷新后台数据。
 
 ### 7.3 字段要求
 

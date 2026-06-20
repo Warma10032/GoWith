@@ -1,5 +1,20 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/OAI/OpenAPI-Specification/main/schemas/v3.1/schema.yaml
 openapi: 3.1.0
+x-ai-worker-envelope:
+  description: Internal AI Worker responses include ordered subcall audit traces.
+  subcall-fields:
+    - call_index
+    - stage
+    - provider
+    - model
+    - prompt_version
+    - input_hash
+    - input_payload
+    - output_payload
+    - raw_output_text
+    - usage
+    - status
+    - error_message
 info:
   title: GoWith API
   version: 0.1.0
@@ -240,9 +255,33 @@ paths:
       responses:
         "200":
           description: Pipeline run list.
+  /api/admin/pipeline-runs/changes:
+    get:
+      summary: Get durable task changes after an ISO cursor
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: since
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Changed pipeline runs, events, and the next cursor.
+  /api/admin/task-stream:
+    get:
+      summary: Subscribe to admin task updates using Server-Sent Events
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: SSE stream emitting run.created, run.updated, pipeline.event, and heartbeat.
+          content:
+            text/event-stream:
+              schema: { type: string }
   /api/admin/pipeline-runs/{id}/events:
     get:
-      summary: Get pipeline run events for polling UI
+      summary: Get pipeline run events for detail and fallback UI
       security:
         - cookieAuth: []
       parameters:
@@ -419,7 +458,7 @@ paths:
           description: Shop list.
   /api/admin/shops/{id}:
     get:
-      summary: Get shop detail (with mentions, videos, creators) for the /admin/shops/[id] page
+      summary: Get shop detail with sources and review-comment evidence
       security:
         - cookieAuth: []
       parameters:
@@ -427,9 +466,10 @@ paths:
       responses:
         "200":
           description: |
-            Shop record joined with its shop_video_mentions, the source videos
-            and creators. Powers the AI-info / rating / comment-analysis /
-            evidence-chain view.
+            Shop record joined with its shop_video_mentions, source videos,
+            creators, and `review_comments`. Each review comment contains its
+            `evidence_id`, content, author metadata when captured, published
+            time, likes, replies, and image URLs for the admin evidence dialog.
         "404":
           description: shop_not_found
     patch:
