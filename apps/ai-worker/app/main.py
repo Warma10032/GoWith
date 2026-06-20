@@ -432,14 +432,6 @@ def _confidence_value(value: object, default: float = 0.5) -> float:
     confidence = _float_value(value)
     if confidence is not None:
         return min(1.0, max(0.0, confidence))
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"high", "高", "high_confidence"}:
-            return 0.85
-        if normalized in {"medium", "mid", "中", "medium_confidence"}:
-            return 0.6
-        if normalized in {"low", "低", "low_confidence"}:
-            return 0.35
     return default
 
 
@@ -448,17 +440,9 @@ def _conclusion_items(value: object, field: Literal["name", "text"]) -> list[dic
         return []
     items: list[dict[str, Any]] = []
     for raw_item in value[:5]:
-        if isinstance(raw_item, str) and raw_item.strip():
-            items.append({field: raw_item.strip(), "confidence": 0.5, "evidence_ids": []})
-            continue
         if isinstance(raw_item, dict):
             item = dict(raw_item)
-            item[field] = (
-                _string_or_none(item.get(field))
-                or _string_or_none(item.get("name"))
-                or _string_or_none(item.get("text"))
-                or _string_or_none(item.get("reason"))
-            )
+            item[field] = _string_or_none(item.get(field))
             if item[field] is None:
                 continue
             item["confidence"] = _confidence_value(item.get("confidence"), 0.5)
@@ -504,19 +488,19 @@ def _comment_signal_brief(value: object) -> dict[str, Any]:
             [item for item in shop_names if isinstance(item, dict)]
             if isinstance(shop_names, list)
             else [],
-            ("candidate_name", "text", "name"),
+            ("candidate_name",),
         ),
         "address_mentions": _compact_text_blocks(
             [item for item in addresses if isinstance(item, dict)]
             if isinstance(addresses, list)
             else [],
-            ("text", "address", "address_text"),
+            ("text",),
         ),
         "status_mentions": _compact_text_blocks(
             [item for item in statuses if isinstance(item, dict)]
             if isinstance(statuses, list)
             else [],
-            ("text", "summary", "status", "note"),
+            ("text",),
         ),
         "aspect_sentiments": sentiments if isinstance(sentiments, dict) else {},
         "risk_flags": _filtered_ai_risk_flags(value.get("risk_flags")),
@@ -593,14 +577,6 @@ def _normalize_review_dimensions(value: object) -> dict[str, dict[str, Any]]:
     for key, raw_item in value.items():
         if not isinstance(key, str):
             continue
-        if isinstance(raw_item, str):
-            normalized[key] = {
-                "sentiment": "unknown",
-                "summary": raw_item,
-                "confidence": 0.35,
-                "evidence_ids": [],
-            }
-            continue
         if not isinstance(raw_item, dict):
             continue
         sentiment = raw_item.get("sentiment")
@@ -629,15 +605,6 @@ def _normalize_review_dimensions(value: object) -> dict[str, dict[str, Any]]:
 
 
 def _normalize_comment_summary(value: object) -> dict[str, Any]:
-    if isinstance(value, str):
-        return {
-            "positive_points": [],
-            "negative_points": [],
-            "controversial_points": [],
-            "recent_status_points": [value],
-            "confidence": 0.35,
-            "evidence_ids": [],
-        }
     if not isinstance(value, dict):
         return {
             "positive_points": [],
@@ -652,12 +619,7 @@ def _normalize_comment_summary(value: object) -> dict[str, Any]:
         for item in value.get("status_mentions", []):
             if not isinstance(item, dict):
                 continue
-            text = (
-                _string_or_none(item.get("text"))
-                or _string_or_none(item.get("summary"))
-                or _string_or_none(item.get("note"))
-                or _string_or_none(item.get("status"))
-            )
+            text = _string_or_none(item.get("text"))
             if text is not None:
                 status_points.append(text)
         positive_points: list[str] = []
@@ -792,7 +754,7 @@ def _infer_district_from_inputs(
 def _specific_recommend_reason(
     card: dict[str, Any],
 ) -> str:
-    existing = _string_or_none(card.get("recommend_reason")) or _string_or_none(card.get("reason"))
+    existing = _string_or_none(card.get("recommend_reason"))
     if (
         not _is_vague_review_text(existing)
         and existing is not None
@@ -903,48 +865,28 @@ def _normalize_shop_candidate(
 
     candidate_name = (
         _string_or_none(candidate.get("candidate_name"))
-        or _string_or_none(candidate.get("shop_name"))
-        or _string_or_none(candidate.get("name"))
-        or _string_or_none(card.get("shop_name"))
+        or _string_or_none(insights.get("candidate_name"))
         or _string_or_none(card.get("display_title"))
         or _first_signal_text(
-            comment_signals, "shop_name_mentions", ("candidate_name", "name", "text")
+            comment_signals, "shop_name_mentions", ("candidate_name",)
         )
     )
     raw_category = candidate.get("category")
     insight_category = insights.get("category")
     if isinstance(insight_category, dict):
         raw_category = insight_category
-    if isinstance(raw_category, str):
-        raw_category = {"primary": raw_category, "secondary": None, "confidence": 0.5}
     category_payload = _normalized_category(raw_category, request)
 
     location = candidate.get("location_hints")
     location_payload: dict[str, Any]
-    if isinstance(location, list):
-        location_payload = {
-            "country": "中国",
-            "province": None,
-            "city": None,
-            "district": None,
-            "business_area": None,
-            "address_text": " ".join(_string_list(location)),
-            "landmarks": [],
-            "confidence": 0.5,
-        }
-    elif isinstance(location, dict):
+    if isinstance(location, dict):
         location_payload = {
             "country": _string_or_none(location.get("country")) or "中国",
             "province": _string_or_none(location.get("province")),
             "city": _string_or_none(location.get("city")),
             "district": _string_or_none(location.get("district")),
             "business_area": _string_or_none(location.get("business_area")),
-            "address_text": (
-                _string_or_none(location.get("address_text"))
-                or _string_or_none(location.get("address"))
-                or _string_or_none(location.get("address_evidence"))
-                or _string_or_none(location.get("exact_address"))
-            ),
+            "address_text": _string_or_none(location.get("address_text")),
             "landmarks": _string_list(location.get("landmarks"), 5),
             "confidence": _confidence_value(location.get("confidence"), 0.5),
         }
@@ -965,7 +907,7 @@ def _normalize_shop_candidate(
         location_payload["district"] = _infer_district_from_inputs(request, comment_signals)
     if location_payload["address_text"] is None:
         location_payload["address_text"] = _first_signal_text(
-            comment_signals, "address_mentions", ("text", "address", "address_text")
+            comment_signals, "address_mentions", ("text",)
         )
 
     candidate_type = candidate.get("candidate_type")
@@ -997,7 +939,7 @@ def _normalize_shop_candidate(
         "candidate_name": candidate_name,
         "normalized_name": _string_or_none(candidate.get("normalized_name")) or candidate_name,
         "name_confidence": _confidence_value(
-            candidate.get("name_confidence") or candidate.get("confidence"), 0.5
+            candidate.get("name_confidence"), 0.5
         ),
         "alias_names": _string_list(candidate.get("alias_names"), 5),
         "candidate_type": candidate_type,
@@ -1010,8 +952,7 @@ def _normalize_shop_candidate(
             "display_title": display_title,
             "subtitle": _string_or_none(card.get("subtitle")),
             "recommend_reason": recommend_reason,
-            "avg_price_hint": _string_or_none(card.get("avg_price_hint"))
-            or _string_or_none(card.get("price")),
+            "avg_price_hint": _string_or_none(card.get("avg_price_hint")),
             "cover_source": _string_or_none(card.get("cover_source")),
             "tags": [],
             "recommended_dishes": _conclusion_items(card.get("recommended_dishes"), "name"),
@@ -1058,12 +999,11 @@ def _normalize_structured_payload(
             raw_video.get("is_shop_visit", classification.get("is_shop_visit", False))
         ),
         "overall_summary": _string_or_none(raw_video.get("overall_summary"))
-        or _string_or_none(raw_video.get("summary"))
         or metadata.title,
         "primary_city": _string_or_none(raw_video.get("primary_city")),
         "primary_categories": primary_categories,
         "analysis_confidence": _confidence_value(
-            raw_video.get("analysis_confidence") or raw_video.get("confidence"), 0.5
+            raw_video.get("analysis_confidence"), 0.5
         ),
         "risk_flags": _filtered_ai_risk_flags(raw_video.get("risk_flags")),
         "evidence_ids": _string_list(raw_video.get("evidence_ids")),

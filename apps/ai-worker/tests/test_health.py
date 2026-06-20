@@ -1,4 +1,6 @@
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
+import pytest
 
 import app.main as main
 from app.main import (
@@ -9,8 +11,7 @@ from app.main import (
     app,
 )
 from app.prompts import PROMPTS, build_messages
-from app.schemas import VideoAnalysisRequest
-from app.schemas import VideoClassificationResponse
+from app.schemas import CommentSignalResponse, VideoAnalysisRequest, VideoClassificationResponse
 
 
 def _analysis_payload() -> dict:
@@ -38,6 +39,20 @@ def test_health() -> None:
     assert response.json()["ok"] is True
 
 
+def test_legacy_ai_fields_are_rejected() -> None:
+    with pytest.raises(ValidationError):
+        CommentSignalResponse.model_validate(
+            {
+                "video_id": "video-1",
+                "shop_name_mentions": [
+                    {
+                        "name": "旧店名字段",
+                        "confidence": 0.9,
+                        "evidence_ids": ["comment-1"],
+                    }
+                ],
+            }
+        )
 def test_asr_requires_file() -> None:
     client = TestClient(app)
     response = client.post("/asr/transcribe")
