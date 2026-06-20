@@ -1,5 +1,4 @@
 import {
-  AlertTriangle,
   Compass,
   MapPin,
   Store,
@@ -12,7 +11,7 @@ import { HomeFilters } from "@/components/home-filters";
 import { apiFetch, type ShopCardData } from "@/lib/api";
 
 interface RecommendedShopsPayload {
-  recommendation_request_id?: string;
+  recommendation_request_id: string;
   shops: ShopCardData[];
 }
 
@@ -34,7 +33,6 @@ export default async function HomePage() {
     apiFetch<StatsPayload>("/api/stats").catch(() => null),
   ]);
 
-  const isFallback = !recommended.recommendation_request_id;
   const shops = recommended.shops;
   const isEmpty = shops.length === 0;
 
@@ -46,8 +44,6 @@ export default async function HomePage() {
 
         <section className="space-y-4">
           {stats ? <SiteMetrics stats={stats} /> : null}
-
-          {isFallback ? <FallbackBanner /> : null}
 
           <div className="flex items-center justify-between">
             <div>
@@ -143,21 +139,6 @@ function formatUpdatedAt(value: string | undefined): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function FallbackBanner() {
-  return (
-    <div className="flex items-start gap-3 rounded-lg border border-[#f2c7bd] bg-[#fff7f4] px-4 py-3 text-sm text-[#9a341f]">
-      <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-      <div>
-        <p className="font-semibold">当前展示示例数据</p>
-        <p className="mt-1 leading-6">
-          API 服务暂未连接。下面是 fallback
-          卡片，等后端恢复后会切换为真实推荐流。
-        </p>
-      </div>
-    </div>
-  );
 }
 
 function EmptyState() {

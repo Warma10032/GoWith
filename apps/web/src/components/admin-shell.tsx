@@ -48,8 +48,6 @@ const navItems = [
   { href: "/admin/ai-runs", label: "AI 运行", icon: Bot },
 ];
 
-export { adminFetch } from "@/lib/admin-api";
-
 interface AdminShellProps {
   title: string;
   description?: string;

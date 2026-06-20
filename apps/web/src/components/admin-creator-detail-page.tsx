@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ExternalLink, LoaderCircle, Play, Search } from "lucide-react";
-import { AdminShell, adminFetch } from "./admin-shell";
+import { AdminShell } from "./admin-shell";
+import { adminFetch } from "@/lib/admin-api";
 import { SafeImage } from "./safe-image";
 import {
   CREATOR_STATUS_LABELS,
@@ -11,8 +12,7 @@ import {
   VIDEO_WORKFLOW_STATUS_LABELS,
   lookupLabel,
 } from "@/lib/labels";
-import { isTaskAccepted } from "@/lib/admin-api";
-import { useAdminRealtime, useAdminRealtimeRefresh } from "./admin-realtime-provider";
+import { useAdminRealtimeRefresh, useAdminTaskMutation } from "./admin-realtime-provider";
 
 type CreatorDetail = {
   creator: {
@@ -46,7 +46,7 @@ type Video = {
 };
 
 export function AdminCreatorDetailPage({ creatorId }: { creatorId: string }) {
-  const { waitForTask } = useAdminRealtime();
+  const { runTask } = useAdminTaskMutation();
   const [detail, setDetail] = useState<CreatorDetail | null>(null);
   const [videos, setVideos] = useState<Video[]>([]);
   const [q, setQ] = useState("");
@@ -73,11 +73,7 @@ export function AdminCreatorDetailPage({ creatorId }: { creatorId: string }) {
     setBusy(label);
     setError(null);
     try {
-      const result = await action();
-      if (isTaskAccepted(result)) {
-        const terminal = await waitForTask(result);
-        if (terminal.status !== "success") throw new Error(`${label} 未成功完成`);
-      }
+      await runTask(action);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "操作失败");

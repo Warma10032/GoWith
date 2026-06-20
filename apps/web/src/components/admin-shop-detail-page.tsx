@@ -12,7 +12,8 @@ import {
   ThumbsUp,
   X,
 } from "lucide-react";
-import { AdminShell, adminFetch } from "./admin-shell";
+import { AdminShell } from "./admin-shell";
+import { adminFetch } from "@/lib/admin-api";
 import { useAdminRealtimeRefresh } from "./admin-realtime-provider";
 import {
   MENTION_TYPE_LABELS,
@@ -172,7 +173,7 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
 
   const { shop, mentions, videos, creators } = data;
   const card = (shop.card_payload ?? {}) as {
-    title?: string;
+    display_title?: string;
     subtitle?: string;
     recommend_reason?: string;
     avg_price_hint?: string;
@@ -288,7 +289,7 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
           AI 总结，仅供参考；所有数据来自卡片 JSON 字段。
         </p>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
-          <Field label="店名" value={card.title ?? shop.display_name} />
+          <Field label="店名" value={card.display_title ?? shop.display_name} />
           <Field label="副标题" value={card.subtitle ?? "—"} />
           <Field label="推荐理由" value={card.recommend_reason ?? "—"} wide />
           <Field

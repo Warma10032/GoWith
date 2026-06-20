@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ExternalLink, Search } from "lucide-react";
-import { AdminShell, adminFetch } from "./admin-shell";
+import { AdminShell } from "./admin-shell";
+import { adminFetch } from "@/lib/admin-api";
 import { SafeImage } from "./safe-image";
 import { ListState } from "./admin-list-state";
 import { useDebouncedEffect } from "@/lib/use-debounced-effect";

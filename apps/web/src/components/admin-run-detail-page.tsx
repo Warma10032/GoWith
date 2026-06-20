@@ -9,7 +9,8 @@ import {
   ExternalLink,
   LoaderCircle,
 } from "lucide-react";
-import { AdminShell, adminFetch } from "./admin-shell";
+import { AdminShell } from "./admin-shell";
+import { adminFetch } from "@/lib/admin-api";
 import { useAdminRealtimeRefresh } from "./admin-realtime-provider";
 import {
   AI_RUN_STAGE_LABELS,

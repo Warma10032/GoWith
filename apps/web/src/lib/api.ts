@@ -12,24 +12,18 @@ function getServerApiBaseUrl() {
 export async function apiFetch<T>(
   path: string,
   init?: RequestInit,
-  fallback?: T,
 ): Promise<T> {
-  try {
-    const response = await fetch(`${getServerApiBaseUrl()}${path}`, {
-      ...init,
-      credentials: "include",
-      headers: {
-        "content-type": "application/json",
-        ...(init?.headers ?? {}),
-      },
-      cache: "no-store",
-    });
-    if (!response.ok) throw new Error(`API ${response.status}`);
-    return (await response.json()) as T;
-  } catch (error) {
-    if (fallback !== undefined) return fallback;
-    throw error;
-  }
+  const response = await fetch(`${getServerApiBaseUrl()}${path}`, {
+    ...init,
+    credentials: "include",
+    headers: {
+      "content-type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+    cache: "no-store",
+  });
+  if (!response.ok) throw new Error(`API ${response.status}`);
+  return (await response.json()) as T;
 }
 
 export interface ShopCardData {
@@ -44,11 +38,10 @@ export interface ShopCardData {
   lat?: number | string | null;
   card_payload?: {
     display_title?: string;
-    title?: string;
     subtitle?: string;
     recommend_reason?: string;
     avg_price_hint?: string;
-    recommended_dishes?: Array<{ name?: string; text?: string }>;
+    recommended_dishes?: Array<{ name?: string; reason?: string }>;
     avoid_points?: Array<{ text?: string }>;
   };
   quality?: Record<string, unknown>;

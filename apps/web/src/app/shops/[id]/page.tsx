@@ -145,7 +145,7 @@ export default async function ShopPage({
     .filter(Boolean)
     .join(" · ");
   const recommendedDishes = (card.recommended_dishes ?? [])
-    .map((dish) => dish.name ?? dish.text)
+    .map((dish) => dish.name)
     .filter((dish): dish is string => Boolean(dish));
   const review = reviewData(data.shop.aggregated_review);
 

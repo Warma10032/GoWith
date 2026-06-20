@@ -14,9 +14,13 @@ import {
   RefreshCw,
   ShieldOff,
 } from "lucide-react";
-import { AdminShell, adminFetch } from "./admin-shell";
-import { isTaskAccepted } from "@/lib/admin-api";
-import { useAdminRealtime, useAdminRealtimeRefresh } from "./admin-realtime-provider";
+import { AdminShell } from "./admin-shell";
+import { adminFetch } from "@/lib/admin-api";
+import {
+  useAdminRealtime,
+  useAdminRealtimeRefresh,
+  useAdminTaskMutation,
+} from "./admin-realtime-provider";
 import { SafeImage } from "./safe-image";
 import {
   POI_MATCH_STATUS_LABELS,
@@ -116,7 +120,8 @@ type VideoDetail = {
 };
 
 export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
-  const { subscribe, waitForTask } = useAdminRealtime();
+  const { subscribe } = useAdminRealtime();
+  const { runTask } = useAdminTaskMutation();
   const [detail, setDetail] = useState<VideoDetail | null>(null);
   const [activeRun, setActiveRun] = useState<PipelineRun | null>(null);
   const [events, setEvents] = useState<PipelineEvent[]>([]);
@@ -134,7 +139,7 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
   }
 
   async function loadEvents(runId: string) {
-    const payload = await adminFetch<{ run: PipelineRun; events: PipelineEvent[] }>(`/api/admin/pipeline-runs/${runId}/events`);
+    const payload = await adminFetch<{ type: "pipeline"; run: PipelineRun; events: PipelineEvent[] }>(`/api/admin/runs/${runId}`);
     setActiveRun(payload.run);
     setEvents(payload.events);
   }
@@ -175,14 +180,8 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
     setBusy(label);
     setError(null);
     try {
-      const result = await action();
+      await runTask(action, { onAccepted: (task) => loadEvents(task.run_id) });
       await load();
-      if (isTaskAccepted(result)) {
-        await loadEvents(result.run_id);
-        const terminal = await waitForTask(result);
-        if (terminal.status !== "success") throw new Error(`${label} 未成功完成`);
-        await load();
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "操作失败");
     } finally {
@@ -194,11 +193,7 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
     setBusy(label);
     setError(null);
     try {
-      const result = await action();
-      if (isTaskAccepted(result)) {
-        const terminal = await waitForTask(result);
-        if (terminal.status !== "success") throw new Error(`${label} 未成功完成`);
-      }
+      await runTask(action);
       await load();
       if (expandedCandidateId === candidateId) await loadCandidateDetail(candidateId);
     } catch (err) {

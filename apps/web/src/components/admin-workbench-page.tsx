@@ -16,9 +16,9 @@ import {
   Trash2,
   Workflow,
 } from "lucide-react";
-import { AdminShell, adminFetch } from "./admin-shell";
-import { isTaskAccepted } from "@/lib/admin-api";
-import { useAdminRealtime, useAdminRealtimeRefresh } from "./admin-realtime-provider";
+import { AdminShell } from "./admin-shell";
+import { adminFetch } from "@/lib/admin-api";
+import { useAdminRealtimeRefresh, useAdminTaskMutation } from "./admin-realtime-provider";
 import {
   BILIBILI_ACCOUNT_STATUS_LABELS,
   CREATOR_STATUS_LABELS,
@@ -83,7 +83,7 @@ type PipelineRun = {
 };
 
 export function AdminWorkbenchPage() {
-  const { waitForTask } = useAdminRealtime();
+  const { runTask } = useAdminTaskMutation();
   const [user, setUser] = useState<User | null>(null);
   const [email, setEmail] = useState("admin@gowith.local");
   const [password, setPassword] = useState("admin123456");
@@ -157,14 +157,8 @@ export function AdminWorkbenchPage() {
     setError(null);
     setMessage(null);
     try {
-      const result = await action();
-      if (isTaskAccepted(result)) {
-        const terminal = await waitForTask(result);
-        if (terminal.status !== "success") throw new Error(`${label} 未成功完成`);
-        setMessage(`${label} 已完成`);
-      } else {
-        setMessage(`${label} 已完成`);
-      }
+      await runTask(action);
+      setMessage(`${label} 已完成`);
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "操作失败");

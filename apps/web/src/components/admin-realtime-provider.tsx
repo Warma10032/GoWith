@@ -1,6 +1,5 @@
 "use client";
 
-import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import {
   createContext,
   type ReactNode,
@@ -70,7 +69,6 @@ const RealtimeContext = createContext<RealtimeContextValue | null>(null);
 const TERMINAL = new Set<RunStatus>(["success", "failed", "cancelled"]);
 
 function RealtimeRuntime({ children }: { children: ReactNode }) {
-  const queryClient = useQueryClient();
   const [connectionState, setConnectionState] = useState<ConnectionState>("connecting");
   const [activeRuns, setActiveRuns] = useState<Map<string, AdminTaskEvent>>(() => new Map());
   const [lastResult, setLastResult] = useState<AdminTaskEvent | null>(null);
@@ -90,7 +88,6 @@ function RealtimeRuntime({ children }: { children: ReactNode }) {
             return next;
           });
           setLastResult(event);
-          void queryClient.invalidateQueries({ queryKey: ["admin"] });
           for (const resolve of waiters.current.get(event.run_id) ?? []) resolve(event);
           waiters.current.delete(event.run_id);
         } else {
@@ -99,7 +96,7 @@ function RealtimeRuntime({ children }: { children: ReactNode }) {
       }
       for (const listener of listeners.current) listener(event);
     },
-    [queryClient],
+    [],
   );
 
   const pollChanges = useCallback(async () => {
@@ -213,14 +210,7 @@ function RealtimeRuntime({ children }: { children: ReactNode }) {
 }
 
 export function AdminRealtimeProvider({ children }: { children: ReactNode }) {
-  const [queryClient] = useState(
-    () => new QueryClient({ defaultOptions: { queries: { staleTime: 5_000 } } }),
-  );
-  return (
-    <QueryClientProvider client={queryClient}>
-      <RealtimeRuntime>{children}</RealtimeRuntime>
-    </QueryClientProvider>
-  );
+  return <RealtimeRuntime>{children}</RealtimeRuntime>;
 }
 
 export function useAdminRealtime() {
@@ -233,10 +223,14 @@ export function useAdminTaskMutation() {
   const { waitForTask } = useAdminRealtime();
 
   const runTask = useCallback(
-    async <T,>(action: () => Promise<T>): Promise<T> => {
+    async <T,>(
+      action: () => Promise<T>,
+      options: { onAccepted?: (task: TaskAcceptedResponse) => void | Promise<void> } = {},
+    ): Promise<T> => {
       const result = await action();
       if (!isTaskAccepted(result)) return result;
 
+      await options.onAccepted?.(result);
       const terminal = await waitForTask(result);
       if (terminal.status !== "success") {
         throw new Error(`后台任务${terminal.status === "cancelled" ? "已取消" : "执行失败"}`);

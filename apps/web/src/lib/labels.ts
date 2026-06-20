@@ -74,13 +74,6 @@ export const PIPELINE_RUN_TYPE_LABELS: Readonly<Record<string, string>> = {
   video_asr_retry: "重新转写视频",
   video_ai_retry: "重新执行 AI 分析",
   poi_match: "POI 匹配",
-  sync_creator_videos: "同步博主视频",
-  process_video: "视频处理",
-  match_poi: "POI 匹配",
-  refresh_creator_profile: "刷新博主资料",
-  fetch_video_subtitle: "拉取字幕",
-  transcribe_video: "视频转写",
-  fetch_video_comments: "拉取评论",
 };
 
 export const AI_RUN_STAGE_LABELS: Readonly<Record<string, string>> = {
