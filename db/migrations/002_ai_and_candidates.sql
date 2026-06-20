@@ -46,6 +46,9 @@ CREATE TABLE IF NOT EXISTS video_comments (
   content text NOT NULL,
   content_sha256 text NOT NULL,
   user_hash text,
+  author_name text,
+  author_avatar_url text,
+  image_urls text[] NOT NULL DEFAULT '{}'::text[],
   like_count integer,
   reply_count integer,
   published_at timestamptz,
@@ -73,6 +76,8 @@ CREATE TABLE IF NOT EXISTS ai_runs (
   input_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
   output_payload jsonb,
   raw_output_text text,
+  parent_ai_run_id uuid REFERENCES ai_runs(id) ON DELETE CASCADE,
+  call_index integer,
   usage jsonb NOT NULL DEFAULT '{}'::jsonb,
   status text NOT NULL CHECK (status IN ('success', 'failed', 'invalid_json', 'schema_error')),
   error_message text,
@@ -84,6 +89,80 @@ CREATE TABLE IF NOT EXISTS ai_runs (
 CREATE INDEX IF NOT EXISTS ai_runs_entity_idx ON ai_runs (entity_type, entity_id, stage, created_at DESC);
 CREATE INDEX IF NOT EXISTS ai_runs_status_idx ON ai_runs (status, stage);
 CREATE INDEX IF NOT EXISTS ai_runs_input_hash_idx ON ai_runs (stage, input_hash);
+CREATE INDEX IF NOT EXISTS ai_runs_parent_idx ON ai_runs (parent_ai_run_id, call_index)
+WHERE parent_ai_run_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS pipeline_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id uuid NOT NULL REFERENCES pipeline_runs(id) ON DELETE CASCADE,
+  job_id uuid REFERENCES jobs(id) ON DELETE SET NULL,
+  entity_type text NOT NULL,
+  entity_id uuid NOT NULL,
+  stage text NOT NULL,
+  event_type text NOT NULL CHECK (event_type IN ('queued', 'started', 'progress', 'ai_request_prepared', 'ai_response_validated', 'saved', 'skipped', 'failed', 'completed')),
+  level text NOT NULL DEFAULT 'info' CHECK (level IN ('info', 'success', 'warning', 'error')),
+  title text NOT NULL,
+  message text,
+  progress_percent numeric(5,2),
+  detail_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  ai_run_id uuid REFERENCES ai_runs(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS pipeline_events_run_idx ON pipeline_events (run_id, created_at);
+CREATE INDEX IF NOT EXISTS pipeline_events_entity_idx ON pipeline_events (entity_type, entity_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS pipeline_events_stage_idx ON pipeline_events (stage, event_type, created_at DESC);
+
+CREATE OR REPLACE FUNCTION notify_admin_task_event()
+RETURNS trigger AS $$
+DECLARE
+  payload json;
+BEGIN
+  IF TG_TABLE_NAME = 'pipeline_runs' THEN
+    payload = json_build_object(
+      'type', CASE WHEN TG_OP = 'INSERT' THEN 'run.created' ELSE 'run.updated' END,
+      'run_id', NEW.id,
+      'run_type', NEW.run_type,
+      'entity_type', NEW.entity_type,
+      'entity_id', NEW.entity_id,
+      'status', NEW.status,
+      'updated_at', NEW.updated_at
+    );
+  ELSE
+    payload = json_build_object(
+      'type', 'pipeline.event',
+      'event_id', NEW.id,
+      'run_id', NEW.run_id,
+      'entity_type', NEW.entity_type,
+      'entity_id', NEW.entity_id,
+      'stage', NEW.stage,
+      'event_type', NEW.event_type,
+      'level', NEW.level,
+      'progress_percent', NEW.progress_percent,
+      'created_at', NEW.created_at
+    );
+  END IF;
+  PERFORM pg_notify('gowith_admin_tasks', payload::text);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS pipeline_runs_insert_notify_admin_task ON pipeline_runs;
+CREATE TRIGGER pipeline_runs_insert_notify_admin_task
+AFTER INSERT ON pipeline_runs
+FOR EACH ROW EXECUTE FUNCTION notify_admin_task_event();
+
+DROP TRIGGER IF EXISTS pipeline_runs_update_notify_admin_task ON pipeline_runs;
+CREATE TRIGGER pipeline_runs_update_notify_admin_task
+AFTER UPDATE OF status ON pipeline_runs
+FOR EACH ROW
+WHEN (OLD.status IS DISTINCT FROM NEW.status)
+EXECUTE FUNCTION notify_admin_task_event();
+
+DROP TRIGGER IF EXISTS pipeline_events_notify_admin_task ON pipeline_events;
+CREATE TRIGGER pipeline_events_notify_admin_task
+AFTER INSERT ON pipeline_events
+FOR EACH ROW EXECUTE FUNCTION notify_admin_task_event();
 
 CREATE TABLE IF NOT EXISTS video_classifications (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -201,4 +280,3 @@ CREATE INDEX IF NOT EXISTS evidence_video_idx ON evidence (video_id);
 CREATE INDEX IF NOT EXISTS evidence_candidate_idx ON evidence (shop_candidate_id);
 CREATE INDEX IF NOT EXISTS evidence_shop_idx ON evidence (shop_id);
 CREATE INDEX IF NOT EXISTS evidence_source_idx ON evidence (source);
-

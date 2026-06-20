@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
   username text,
   display_name text,
   avatar_url text,
+  avatar_source_url text,
   role text NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
   status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
   password_hash text,
@@ -91,6 +92,7 @@ CREATE TABLE IF NOT EXISTS creators (
   bilibili_uid text NOT NULL,
   name text NOT NULL,
   avatar_url text,
+  avatar_source_url text,
   profile_url text NOT NULL,
   bio text,
   follower_count bigint,
@@ -121,6 +123,7 @@ CREATE TABLE IF NOT EXISTS videos (
   title text NOT NULL,
   description text,
   cover_url text,
+  cover_source_url text,
   source_url text NOT NULL,
   duration_sec integer,
   published_at timestamptz,
@@ -148,11 +151,42 @@ DROP TRIGGER IF EXISTS videos_set_updated_at ON videos;
 CREATE TRIGGER videos_set_updated_at BEFORE UPDATE ON videos
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_type text NOT NULL CHECK (run_type IN (
+    'creator_video_sync',
+    'creator_profile_sync',
+    'bilibili_auth_check',
+    'video_processing',
+    'video_asr_retry',
+    'video_ai_retry',
+    'poi_match'
+  )),
+  entity_type text NOT NULL,
+  entity_id uuid NOT NULL,
+  status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'success', 'failed', 'cancelled')),
+  triggered_by uuid REFERENCES users(id) ON DELETE SET NULL,
+  started_at timestamptz,
+  finished_at timestamptz,
+  summary_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS pipeline_runs_entity_idx ON pipeline_runs (entity_type, entity_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS pipeline_runs_status_idx ON pipeline_runs (status, created_at DESC);
+CREATE INDEX IF NOT EXISTS pipeline_runs_type_idx ON pipeline_runs (run_type, created_at DESC);
+
+DROP TRIGGER IF EXISTS pipeline_runs_set_updated_at ON pipeline_runs;
+CREATE TRIGGER pipeline_runs_set_updated_at BEFORE UPDATE ON pipeline_runs
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
 CREATE TABLE IF NOT EXISTS jobs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   job_type text NOT NULL,
   entity_type text NOT NULL,
   entity_id uuid NOT NULL,
+  run_id uuid REFERENCES pipeline_runs(id) ON DELETE SET NULL,
   payload jsonb NOT NULL DEFAULT '{}'::jsonb,
   status text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'success', 'failed', 'cancelled')),
   priority integer NOT NULL DEFAULT 0,
@@ -170,8 +204,8 @@ CREATE TABLE IF NOT EXISTS jobs (
 CREATE INDEX IF NOT EXISTS jobs_queue_idx ON jobs (status, priority DESC, scheduled_at);
 CREATE INDEX IF NOT EXISTS jobs_entity_idx ON jobs (entity_type, entity_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS jobs_type_status_idx ON jobs (job_type, status);
+CREATE INDEX IF NOT EXISTS jobs_run_idx ON jobs (run_id, created_at DESC);
 
 DROP TRIGGER IF EXISTS jobs_set_updated_at ON jobs;
 CREATE TRIGGER jobs_set_updated_at BEFORE UPDATE ON jobs
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
