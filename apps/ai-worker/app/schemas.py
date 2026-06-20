@@ -118,6 +118,13 @@ class VideoMetadata(BaseModel):
     description: str | None = None
     tags: list[str] = Field(default_factory=list)
     category: str | None = None
+    evidence: list["MetadataEvidence"] = Field(default_factory=list)
+
+
+class MetadataEvidence(BaseModel):
+    evidence_id: str
+    source: Literal["title", "description", "tag"]
+    text: str
 
 
 class VideoAnalysisRequest(BaseModel):
@@ -400,6 +407,40 @@ class VideoStructuredAnalysisResponse(BaseModel):
     shop_candidates: list[StructuredShopCandidate] = Field(default_factory=list)
 
 
+class RelevantCommentFilterResponse(BaseModel):
+    relevant_comment_ids: list[str] = Field(default_factory=list)
+
+
+class TranscriptFactResponse(BaseModel):
+    candidate_name: str | None = None
+    name_confidence: Confidence = 0.0
+    name_evidence_ids: list[str] = Field(default_factory=list)
+    location_hints: LocationHints
+    category: CategoryPayload
+
+
+class TranscriptOpinionResponse(BaseModel):
+    attitude: Literal["recommend", "conditional", "not_recommend", "unclear"]
+    recommend_reason: str
+    recommended_dishes: list[CardConclusion] = Field(default_factory=list)
+    avoid_points: list[CardConclusion] = Field(default_factory=list)
+
+
+class AiCallTrace(BaseModel):
+    call_index: int = Field(ge=0)
+    stage: str
+    provider: str = "minimax"
+    model: str
+    prompt_version: str
+    input_hash: str
+    input_payload: dict[str, Any]
+    output_payload: dict[str, Any] | None = None
+    raw_output_text: str | None = None
+    usage: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["success", "failed", "invalid_json", "schema_error"]
+    error_message: str | None = None
+
+
 class AiResponseEnvelope(BaseModel):
     output: dict[str, Any]
     provider: str = "minimax"
@@ -407,3 +448,4 @@ class AiResponseEnvelope(BaseModel):
     prompt_version: str
     usage: dict[str, Any] = Field(default_factory=dict)
     raw_output_text: str | None = None
+    subcalls: list[AiCallTrace] = Field(default_factory=list)

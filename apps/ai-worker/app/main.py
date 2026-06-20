@@ -1,29 +1,36 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import math
 import os
 import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Literal, TypedDict, TypeVar
+from typing import Any, Callable, Literal, TypedDict, TypeVar
 
 import httpx
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
 from openai import APIError, AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 from pydantic import BaseModel, ValidationError
 
 from .schemas import (
+    AiCallTrace,
     AiResponseEnvelope,
     AsrResponse,
     CommentSignalResponse,
+    RelevantCommentFilterResponse,
+    TranscriptFactResponse,
+    TranscriptOpinionResponse,
     TranscriptSegment,
     VideoAnalysisRequest,
     VideoClassificationResponse,
     VideoStructuredAnalysisResponse,
 )
+from .prompts import build_messages, prompt_spec
 
 app = FastAPI(title="GoWith AI Worker", version="0.1.0")
 
@@ -97,6 +104,7 @@ PRIMARY_SHOP_CATEGORIES = (
     "其他餐饮",
 )
 SECONDARY_CUISINES = (
+    "鲁菜",
     "粤菜",
     "潮汕菜",
     "客家菜",
@@ -133,8 +141,27 @@ VAGUE_REVIEW_TEXT_PATTERNS = (
 INLINE_EVIDENCE_ID_PATTERN = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 )
+INLINE_SHORT_EVIDENCE_ID_PATTERN = re.compile(r"(?<![0-9a-fA-F])[0-9a-fA-F]{8}(?![0-9a-fA-F])")
 
 T = TypeVar("T", bound=BaseModel)
+
+
+class AiWorkflowError(Exception):
+    def __init__(self, message: str, subcalls: list[AiCallTrace]) -> None:
+        super().__init__(message)
+        self.message = message
+        self.subcalls = subcalls
+
+
+@app.exception_handler(AiWorkflowError)
+async def ai_workflow_error_handler(_: Request, error: AiWorkflowError) -> JSONResponse:
+    return JSONResponse(
+        status_code=502,
+        content={
+            "detail": error.message,
+            "subcalls": [call.model_dump(mode="json") for call in error.subcalls],
+        },
+    )
 
 
 class GroqSegment(TypedDict):
@@ -160,8 +187,12 @@ def _groq_model() -> str:
     return os.getenv("GROQ_ASR_MODEL", "whisper-large-v3-turbo")
 
 
-def _minimax_model() -> str:
-    return os.getenv("MINIMAX_MODEL", "MiniMax-M3")
+def _minimax_simple_model() -> str:
+    return os.getenv("MINIMAX_SIMPLE_MODEL", "MiniMax-M2.7")
+
+
+def _minimax_complex_model() -> str:
+    return os.getenv("MINIMAX_COMPLEX_MODEL", os.getenv("MINIMAX_MODEL", "MiniMax-M3"))
 
 
 def _minimax_base_url() -> str:
@@ -533,71 +564,6 @@ def _input_payload(request: VideoAnalysisRequest) -> dict[str, Any]:
     }
 
 
-def _system_prompt(stage: str) -> str:
-    return (
-        "你是 GoWith 的 B站探店内容结构化分析器。"
-        "只能根据输入材料输出结论，不要编造店名、地址、价格、菜品、营业状态。"
-        "信息不足时使用 unknown/null/[] 或空字符串，不要写“信息不足”“人工复核”“需要审核”等占位文案。"
-        "不要输出 needs_manual_review；如果有风险，只输出具体风险，例如 address_missing 或 insufficient_evidence。"
-        "所有 evidence_ids 必须来自输入中的 segment_id/comment_id/title/description/tag 证据 ID。"
-        "content_type 只能使用：single_shop_visit, multi_shop_visit, city_food_collection, "
-        "travel_vlog_with_shops, food_review_not_shop, not_physical_shop, non_shop_visit, unknown。"
-        "risk_flags 只能使用：non_shop_visit_possible, shop_name_missing, shop_name_ambiguous, "
-        "generic_name_risk, multiple_shops_in_video, address_missing, city_missing, poi_no_candidate, "
-        "poi_low_confidence, poi_many_same_name_candidates, chain_store_branch_uncertain, "
-        "closed_or_moved_mentioned, comment_conflict, asr_low_quality, subtitle_missing, "
-        "insufficient_evidence, ai_output_incomplete, needs_manual_review。"
-        "sentiment 只能使用：positive, neutral, negative, mixed, controversial, unknown。"
-        "missing_fields 只能使用：shop_name, city, district, business_area, exact_address, poi, "
-        "avg_price, opening_hours, phone, recommended_dishes, avoid_points, service, environment, "
-        "queue, parking, reservation。"
-        f"当前阶段：{stage}。只输出合法 JSON，不要 Markdown，不要解释。"
-    )
-
-
-def _user_prompt(stage: str, request: VideoAnalysisRequest) -> str:
-    schema_hint = {
-        "classify_video": (
-            "输出 video_classification.v1 JSON，字段包括 schema_version, video_id, bvid, "
-            "is_shop_visit, content_type, confidence, primary_city_hints, "
-            "primary_category_hints, reason_codes, risk_flags, need_manual_review, evidence_ids。"
-        ),
-        "comment_signal": (
-            "输出 comment_signal.v1 JSON，字段包括 schema_version, video_id, sample_strategy, "
-            "location_questions, shop_name_mentions, address_mentions, status_mentions, "
-            "aspect_sentiments, risk_flags。评论样本都属于当前视频，评论无需重复店名也可以作为菜品和口味评价证据。"
-            "必须逐条阅读评论，优先聚合 taste、dish_recommendation、value_for_money、service、environment、queue 六个维度；"
-            "例如评论明确说某菜好吃、值得一试、难以接受时，应写入对应维度并引用 comment_id。"
-            "只有真实出现互相矛盾的结论才输出 comment_conflict；没有店名或地址不属于评论分析风险。"
-            "没有提到的维度不要凑数，不要输出空 summary 的 unknown 维度。"
-        ),
-        "structure_video": (
-            "输出 video_structured_analysis.v1 JSON，字段包括 video 与 shop_candidates。"
-            "这是递进阶段：必须优先使用 previous_stage_outputs.classification 和 comment_signals，"
-            "再结合标题、标签、字幕分段生成店铺候选。标题、标签、评论线索中明确出现的城市、店名、地址片段必须保留。"
-            "shop_candidates 必须足以支撑大众点评式店铺卡片；无法确定店名时 candidate_name=null。"
-            "MVP smoke 首版最多输出 1 个最主要的 shop_candidate。"
-            "category.primary 必须从以下主类选择一个或 null："
-            f"{', '.join(PRIMARY_SHOP_CATEGORIES)}；category.secondary 必须从以下菜系选择一个或 null："
-            f"{', '.join(SECONDARY_CUISINES)}。不得自由创造品类。"
-            "必须完整分析提供的字幕时序，先判断博主态度是推荐、有条件推荐、不推荐还是未明确，再提取具体推荐菜和理由。"
-            "recommend_reason 必须总结博主态度、推荐或不推荐的菜品及字幕中的味道/口感/性价比理由，"
-            "例如“博主推荐田鼠，认为肉质嫩、咸香；桂花蝉仅建议猎奇尝试”。不得复述标题、地点或店名充当推荐理由。"
-            "recommended_dishes 和 avoid_points 的每项必须带字幕 segment_id 作为 evidence_ids；评论不能替代博主结论。"
-            "所有 summary/reason 控制在 100 个中文字符以内；recommended_dishes/avoid_points/suitable_scenes 每项最多 5 个。"
-            "tags 固定输出空数组。没有字幕证据时 recommend_reason 输出空字符串。"
-            "comment_summary 必须吸收 comment_signals 中明确的正负面、地址、营业状态线索；没有就输出空数组。"
-        ),
-    }[stage]
-    return json.dumps(
-        {
-            "task": schema_hint,
-            "input": _input_payload(request),
-        },
-        ensure_ascii=False,
-    )
-
-
 def _extract_json_text(text: str) -> str:
     stripped = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
     fence = re.search(r"```(?:json)?\s*(.*?)```", stripped, flags=re.DOTALL | re.IGNORECASE)
@@ -640,6 +606,7 @@ def _normalize_review_dimensions(value: object) -> dict[str, dict[str, Any]]:
         sentiment = raw_item.get("sentiment")
         summary = _string_or_none(raw_item.get("summary")) or ""
         summary = INLINE_EVIDENCE_ID_PATTERN.sub("", summary)
+        summary = INLINE_SHORT_EVIDENCE_ID_PATTERN.sub("", summary)
         summary = re.sub(r"（[、，,\s]*）", "", summary)
         summary = re.sub(r"([、，,]\s*){2,}", "、", summary).strip(" 、，,")
         confidence = _confidence_value(raw_item.get("confidence"), 0.35)
@@ -782,6 +749,7 @@ def _infer_city_from_inputs(request: VideoAnalysisRequest, signals: dict[str, An
         "厦门",
         "佛山",
         "东莞",
+        "烟台",
         "番禺",
     )
     for token in known_city_tokens:
@@ -891,6 +859,7 @@ def _normalized_category(value: object, request: VideoAnalysisRequest) -> dict[s
 
     if secondary is None:
         cuisine_keywords = (
+            ("鲁菜", ("鲁菜", "山东", "烟台", "青岛")),
             ("潮汕菜", ("潮汕", "潮州", "汕头")),
             ("客家菜", ("客家",)),
             ("粤菜", ("广东", "广州", "番禺", "顺德", "粤菜")),
@@ -1073,6 +1042,11 @@ def _normalize_structured_payload(
     content_type = raw_video.get("content_type") or classification.get("content_type")
     if content_type not in ALLOWED_CONTENT_TYPES:
         content_type = "unknown"
+    # 品类提示：优先本阶段 AI 输出，没有则继承 classify 阶段的 primary_category_hints。
+    # 这样链路上"分类阶段出 hint → 结构化阶段消费并精修"的语义是连贯的。
+    primary_categories = _string_list(raw_video.get("primary_categories"), 5)
+    if not primary_categories:
+        primary_categories = _string_list(classification.get("primary_category_hints"), 5)
     normalized["schema_version"] = "video_structured_analysis.v1"
     normalized["video"] = {
         "video_id": _string_or_none(raw_video.get("video_id")) or metadata.video_id,
@@ -1087,7 +1061,7 @@ def _normalize_structured_payload(
         or _string_or_none(raw_video.get("summary"))
         or metadata.title,
         "primary_city": _string_or_none(raw_video.get("primary_city")),
-        "primary_categories": _string_list(raw_video.get("primary_categories"), 5),
+        "primary_categories": primary_categories,
         "analysis_confidence": _confidence_value(
             raw_video.get("analysis_confidence") or raw_video.get("confidence"), 0.5
         ),
@@ -1095,9 +1069,10 @@ def _normalize_structured_payload(
         "evidence_ids": _string_list(raw_video.get("evidence_ids")),
     }
     candidates = parsed.get("shop_candidates")
+    candidate_items = candidates if isinstance(candidates, list) else []
     normalized["shop_candidates"] = [
         _normalize_shop_candidate(candidate, index, request)
-        for index, candidate in enumerate(candidates if isinstance(candidates, list) else [])
+        for index, candidate in enumerate(candidate_items)
     ][:1]
     return normalized
 
@@ -1157,10 +1132,12 @@ def _usage_dict(response: Any) -> dict[str, Any]:
 
 async def _chat_completion(
     messages: list[ChatCompletionMessageParam],
+    *,
+    model: str,
 ) -> tuple[str, dict[str, Any]]:
     try:
         response = await _minimax_client().chat.completions.create(
-            model=_minimax_model(),
+            model=model,
             messages=messages,
             temperature=_minimax_temperature(),
             max_completion_tokens=_minimax_max_completion_tokens(),
@@ -1173,263 +1150,274 @@ async def _chat_completion(
     content = getattr(message, "content", None) if message else None
     if not isinstance(content, str) or not content.strip():
         raise HTTPException(status_code=502, detail="minimax_empty_response")
-    return content, _usage_dict(response)
+    return content, {**_usage_dict(response), "model": model}
 
 
-async def _repair_json(
-    stage: str, raw_output_text: str, error_message: str
-) -> tuple[str, dict[str, Any]]:
-    return await _chat_completion(
-        [
-            {"role": "system", "content": _system_prompt(f"{stage}:json_repair")},
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "error": error_message,
-                        "raw_output_text": raw_output_text,
-                        "instruction": "修复为符合目标 schema 的单个 JSON object，只输出 JSON。",
-                    },
-                    ensure_ascii=False,
-                ),
-            },
-        ]
-    )
-
-
-async def _focused_transcript_insights(
-    request: VideoAnalysisRequest,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    segments = _representative_items(
-        [segment.model_dump(mode="json") for segment in request.transcript_segments], 240
-    )
-    raw_text, usage = await _chat_completion(
-        [
-            {
-                "role": "system",
-                "content": (
-                    "你只分析探店视频字幕中的博主评价。不得使用标题或评论替代字幕结论。"
-                    "只输出 JSON，不要 Markdown。每道菜和结论必须引用输入 segment_id。"
-                ),
-            },
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "task": (
-                            "按完整时间顺序判断博主是否推荐，提取推荐菜、不推荐或仅建议猎奇的菜，"
-                            "并用味道、口感、价格等字幕原话概括原因。"
-                        ),
-                        "output_schema": {
-                            "attitude": "recommend|conditional|not_recommend|unclear",
-                            "recommend_reason": "100字内，必须包含态度、菜品和具体原因",
-                            "recommended_dishes": [
-                                {
-                                    "name": "菜名",
-                                    "reason": "具体原因",
-                                    "confidence": 0.0,
-                                    "evidence_ids": ["segment_id"],
-                                }
-                            ],
-                            "avoid_points": [
-                                {
-                                    "text": "不推荐或限制条件",
-                                    "confidence": 0.0,
-                                    "evidence_ids": ["segment_id"],
-                                }
-                            ],
-                            "category": {
-                                "primary": list(PRIMARY_SHOP_CATEGORIES),
-                                "secondary": list(SECONDARY_CUISINES),
-                                "confidence": 0.0,
-                            },
-                        },
-                        "transcript_segments": segments,
-                    },
-                    ensure_ascii=False,
-                ),
-            },
-        ]
-    )
-    parsed = _parse_json_output(raw_text)
-    reason = _string_or_none(parsed.get("recommend_reason"))
+def _model_for_prompt(key: str) -> str:
     return (
-        {
-            "attitude": parsed.get("attitude")
-            if parsed.get("attitude") in {"recommend", "conditional", "not_recommend", "unclear"}
-            else "unclear",
-            "recommend_reason": "" if _is_vague_review_text(reason) else reason or "",
-            "recommended_dishes": _conclusion_items(parsed.get("recommended_dishes"), "name"),
-            "avoid_points": _conclusion_items(parsed.get("avoid_points"), "text"),
-            "category": _normalized_category(parsed.get("category"), request),
-        },
-        usage,
+        _minimax_simple_model()
+        if prompt_spec(key).model_tier == "simple"
+        else _minimax_complex_model()
     )
 
 
-async def _focused_comment_dimensions(
-    request: VideoAnalysisRequest,
-) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
-    comments = [comment.model_dump(mode="json") for comment in request.comment_samples]
-    raw_text, usage = await _chat_completion(
-        [
-            {
-                "role": "system",
-                "content": (
-                    "你只聚合视频评论中的实际用餐评价。评论无需包含店名。"
-                    "不得把猎奇讨论或提问当成到店评价。只输出 JSON，不要 Markdown。"
-                ),
-            },
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "task": (
-                            "提取评论明确表达的菜品推荐、口味、性价比、服务、环境和排队评价。"
-                            "同一维度综合正负面，summary 写具体菜品与观点，并引用 comment_id。"
-                        ),
-                        "allowed_dimensions": [
-                            "taste",
-                            "dish_recommendation",
-                            "value_for_money",
-                            "service",
-                            "environment",
-                            "queue",
-                        ],
-                        "output_schema": {
-                            "aspect_sentiments": {
-                                "dimension": {
-                                    "sentiment": "positive|neutral|negative|mixed|controversial",
-                                    "summary": "具体评论结论",
-                                    "confidence": 0.0,
-                                    "evidence_ids": ["comment_id"],
-                                }
-                            }
-                        },
-                        "comment_samples": comments,
-                    },
-                    ensure_ascii=False,
-                ),
-            },
-        ]
-    )
-    parsed = _parse_json_output(raw_text)
-    dimensions = _normalize_review_dimensions(parsed.get("aspect_sentiments"))
-    allowed = {
-        "taste",
-        "dish_recommendation",
-        "value_for_money",
-        "service",
-        "environment",
-        "queue",
-    }
-    return ({key: value for key, value in dimensions.items() if key in allowed}, usage)
+def _messages_hash(messages: list[ChatCompletionMessageParam]) -> str:
+    payload = json.dumps(messages, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-async def _minimax_structured_call(
-    stage: Literal["classify_video", "comment_signal", "structure_video"],
-    request: VideoAnalysisRequest,
+async def _prompt_call(
+    key: str,
+    context: dict[str, Any],
     response_model: type[T],
-) -> AiResponseEnvelope:
-    prompt_versions = {
-        "classify_video": "classify_video.v1.minimax",
-        "comment_signal": "comment_signal.v2.minimax",
-        "structure_video": "structure_video.v2.minimax",
-    }
-    prompt_version = prompt_versions[stage]
-    raw_output_text, usage = await _chat_completion(
-        [
-            {"role": "system", "content": _system_prompt(stage)},
-            {"role": "user", "content": _user_prompt(stage, request)},
-        ]
-    )
+    subcalls: list[AiCallTrace],
+    normalizer: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+    *,
+    allow_json_repair: bool = True,
+) -> T:
+    spec = prompt_spec(key)
+    model = _model_for_prompt(key)
+    messages = build_messages(key, context, response_model)
+    input_hash = _messages_hash(messages)
+    raw_output_text: str | None = None
+    usage: dict[str, Any] = {}
     try:
+        raw_output_text, usage = await _chat_completion(messages, model=model)
         parsed = _parse_json_output(raw_output_text)
-        parsed = _normalize_common_payload(stage, parsed, request)
+        if normalizer is not None:
+            parsed = normalizer(parsed)
         validated = response_model.model_validate(parsed)
-    except (HTTPException, ValidationError) as error:
-        repair_text, repair_usage = await _repair_json(stage, raw_output_text, str(error))
-        try:
-            parsed = _parse_json_output(repair_text)
-            parsed = _normalize_common_payload(stage, parsed, request)
-            validated = response_model.model_validate(parsed)
-            raw_output_text = repair_text
-            usage = {**usage, "repair": repair_usage}
-        except (HTTPException, ValidationError) as repair_error:
-            raise HTTPException(
-                status_code=502, detail=f"minimax_schema_error: {repair_error}"
-            ) from repair_error
+    except HTTPException as error:
+        status: Literal["invalid_json", "failed"] = (
+            "invalid_json"
+            if str(error.detail).startswith("minimax_invalid_json")
+            else "failed"
+        )
+        subcalls.append(
+            AiCallTrace(
+                call_index=len(subcalls),
+                stage=spec.key,
+                model=model,
+                prompt_version=spec.version,
+                input_hash=input_hash,
+                input_payload=context,
+                raw_output_text=raw_output_text,
+                usage=usage,
+                status=status,
+                error_message=str(error.detail),
+            )
+        )
+        if allow_json_repair and raw_output_text:
+            return await _prompt_call(
+                "json_repair",
+                {
+                    "target_prompt": spec.key,
+                    "validation_error": str(error.detail),
+                    "raw_output_text": raw_output_text,
+                },
+                response_model,
+                subcalls,
+                normalizer,
+                allow_json_repair=False,
+            )
+        raise AiWorkflowError(str(error.detail), subcalls) from error
+    except ValidationError as error:
+        subcalls.append(
+            AiCallTrace(
+                call_index=len(subcalls),
+                stage=spec.key,
+                model=model,
+                prompt_version=spec.version,
+                input_hash=input_hash,
+                input_payload=context,
+                output_payload=parsed,
+                raw_output_text=raw_output_text,
+                usage=usage,
+                status="schema_error",
+                error_message=str(error),
+            )
+        )
+        if allow_json_repair and raw_output_text:
+            return await _prompt_call(
+                "json_repair",
+                {
+                    "target_prompt": spec.key,
+                    "validation_error": str(error),
+                    "raw_output_text": raw_output_text,
+                },
+                response_model,
+                subcalls,
+                normalizer,
+                allow_json_repair=False,
+            )
+        raise AiWorkflowError(f"minimax_schema_error: {error}", subcalls) from error
 
     output = validated.model_dump(mode="json")
-    if stage == "structure_video":
-        candidates = output.get("shop_candidates")
-        if isinstance(candidates, list):
-            for candidate in candidates:
-                if not isinstance(candidate, dict):
-                    continue
-                card = candidate.get("card_payload")
-                if not isinstance(card, dict):
-                    continue
-                for field in ("recommended_dishes", "avoid_points"):
-                    items = card.get(field)
-                    if not isinstance(items, list):
-                        continue
-                    for item in items:
-                        if not isinstance(item, dict):
-                            continue
-                        for optional_field in ("name", "text", "reason"):
-                            if item.get(optional_field) is None:
-                                item.pop(optional_field, None)
-
-    return AiResponseEnvelope(
-        output=output,
-        provider=MINIMAX_PROVIDER,
-        model=_minimax_model(),
-        prompt_version=prompt_version,
-        usage=usage,
-        raw_output_text=raw_output_text,
+    subcalls.append(
+        AiCallTrace(
+            call_index=len(subcalls),
+            stage=spec.key,
+            model=model,
+            prompt_version=spec.version,
+            input_hash=input_hash,
+            input_payload=context,
+            output_payload=output,
+            raw_output_text=raw_output_text,
+            usage=usage,
+            status="success",
+        )
     )
+    return validated
+
+
+def _envelope(key: str, output: BaseModel, subcalls: list[AiCallTrace]) -> AiResponseEnvelope:
+    spec = prompt_spec(key)
+    successful = [call for call in subcalls if call.status == "success"]
+    last_call = successful[-1] if successful else None
+    return AiResponseEnvelope(
+        output=output.model_dump(mode="json"),
+        provider=MINIMAX_PROVIDER,
+        model=_model_for_prompt(key),
+        prompt_version=spec.version,
+        usage={"calls": [call.usage for call in subcalls]},
+        raw_output_text=last_call.raw_output_text if last_call else None,
+        subcalls=subcalls,
+    )
+
+
+def _structure_semantic_issues(
+    result: VideoStructuredAnalysisResponse,
+    request: VideoAnalysisRequest,
+) -> list[str]:
+    issues: list[str] = []
+    facts = request.previous_stage_outputs.get("transcriptFacts")
+    fact_name = _string_or_none(facts.get("candidate_name")) if isinstance(facts, dict) else None
+    if (
+        result.video.is_shop_visit
+        and result.video.content_type == "single_shop_visit"
+        and fact_name
+        and not result.shop_candidates
+    ):
+        issues.append("single_shop_visit_missing_candidate")
+    if not result.video.evidence_ids:
+        issues.append("video_missing_evidence")
+    for candidate in result.shop_candidates:
+        for dish in candidate.card_payload.recommended_dishes:
+            if not dish.evidence_ids:
+                issues.append(f"{candidate.candidate_id}:dish_missing_evidence")
+    return issues
 
 
 @app.post("/ai/classify-video", response_model=AiResponseEnvelope)
 async def classify_video(request: VideoAnalysisRequest) -> AiResponseEnvelope:
-    return await _minimax_structured_call("classify_video", request, VideoClassificationResponse)
+    subcalls: list[AiCallTrace] = []
+    result = await _prompt_call(
+        "classify_video",
+        _input_payload(request),
+        VideoClassificationResponse,
+        subcalls,
+        lambda parsed: _normalize_common_payload("classify_video", parsed, request),
+    )
+    return _envelope("classify_video", result, subcalls)
 
 
 @app.post("/ai/comment-signals", response_model=AiResponseEnvelope)
 async def comment_signals(request: VideoAnalysisRequest) -> AiResponseEnvelope:
-    envelope = await _minimax_structured_call("comment_signal", request, CommentSignalResponse)
-    if envelope.output.get("aspect_sentiments") or not request.comment_samples:
-        return envelope
-
-    dimensions, focused_usage = await _focused_comment_dimensions(request)
-    if not dimensions:
-        return envelope
-    output = dict(envelope.output)
-    output["aspect_sentiments"] = dimensions
-    output["risk_flags"] = [
-        flag for flag in output.get("risk_flags", []) if flag != "insufficient_evidence"
-    ]
-    validated = CommentSignalResponse.model_validate(output)
-    return envelope.model_copy(
+    subcalls: list[AiCallTrace] = []
+    relevant_ids: set[str] = set()
+    if request.comment_samples:
+        filtered = await _prompt_call(
+            "comment_relevance_filter",
+            {
+                "video_metadata": _metadata_dict(request),
+                "transcript_context": _representative_items(
+                    [item.model_dump(mode="json") for item in request.transcript_segments], 80
+                ),
+                "comment_samples": [
+                    item.model_dump(mode="json") for item in request.comment_samples
+                ],
+            },
+            RelevantCommentFilterResponse,
+            subcalls,
+        )
+        allowed_ids = {comment.comment_id for comment in request.comment_samples}
+        relevant_ids = set(filtered.relevant_comment_ids) & allowed_ids
+    filtered_request = request.model_copy(
         update={
-            "output": validated.model_dump(mode="json"),
-            "usage": {**envelope.usage, "focused_comment_analysis": focused_usage},
+            "comment_samples": [
+                comment for comment in request.comment_samples if comment.comment_id in relevant_ids
+            ]
         }
     )
+    result = await _prompt_call(
+        "comment_analysis",
+        _input_payload(filtered_request),
+        CommentSignalResponse,
+        subcalls,
+        lambda parsed: _normalize_common_payload("comment_signal", parsed, filtered_request),
+    )
+    return _envelope("comment_analysis", result, subcalls)
 
 
 @app.post("/ai/structure-video", response_model=AiResponseEnvelope)
 async def structure_video(request: VideoAnalysisRequest) -> AiResponseEnvelope:
-    insights: dict[str, Any] = {}
-    insight_usage: dict[str, Any] = {}
-    if request.transcript_segments:
-        insights, insight_usage = await _focused_transcript_insights(request)
-    previous_outputs = {**request.previous_stage_outputs, "transcriptInsights": insights}
+    subcalls: list[AiCallTrace] = []
+    transcript_context = {
+        "video_metadata": _metadata_dict(request),
+        "transcript_segments": [
+            segment.model_dump(mode="json") for segment in request.transcript_segments
+        ],
+    }
+    facts = await _prompt_call(
+        "transcript_fact_extraction",
+        {
+            **transcript_context,
+            "allowed_primary_categories": list(PRIMARY_SHOP_CATEGORIES),
+            "allowed_secondary_cuisines": list(SECONDARY_CUISINES),
+        },
+        TranscriptFactResponse,
+        subcalls,
+    )
+    opinions = await _prompt_call(
+        "transcript_opinion_analysis",
+        {**transcript_context, "transcript_facts": facts.model_dump(mode="json")},
+        TranscriptOpinionResponse,
+        subcalls,
+    )
+    insights = {**facts.model_dump(mode="json"), **opinions.model_dump(mode="json")}
+    previous_outputs = {
+        **request.previous_stage_outputs,
+        "transcriptFacts": facts.model_dump(mode="json"),
+        "transcriptOpinion": opinions.model_dump(mode="json"),
+        "transcriptInsights": insights,
+    }
     enriched_request = request.model_copy(update={"previous_stage_outputs": previous_outputs})
-    envelope = await _minimax_structured_call(
-        "structure_video", enriched_request, VideoStructuredAnalysisResponse
+    def normalize_structure(parsed: dict[str, Any]) -> dict[str, Any]:
+        return _normalize_common_payload("structure_video", parsed, enriched_request)
+
+    result = await _prompt_call(
+        "structure_synthesis",
+        _input_payload(enriched_request),
+        VideoStructuredAnalysisResponse,
+        subcalls,
+        normalize_structure,
     )
-    return envelope.model_copy(
-        update={"usage": {**envelope.usage, "transcript_insights": insight_usage}}
-    )
+    issues = _structure_semantic_issues(result, enriched_request)
+    if issues:
+        result = await _prompt_call(
+            "structure_semantic_retry",
+            {
+                "input": _input_payload(enriched_request),
+                "previous_output": result.model_dump(mode="json"),
+                "validation_errors": issues,
+            },
+            VideoStructuredAnalysisResponse,
+            subcalls,
+            normalize_structure,
+        )
+        remaining_issues = _structure_semantic_issues(result, enriched_request)
+        if remaining_issues:
+            raise AiWorkflowError(
+                f"structure_semantic_error: {', '.join(remaining_issues)}", subcalls
+            )
+    return _envelope("structure_synthesis", result, subcalls)
