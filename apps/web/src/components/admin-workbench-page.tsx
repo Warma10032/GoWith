@@ -17,6 +17,8 @@ import {
   Workflow,
 } from "lucide-react";
 import { AdminShell, adminFetch } from "./admin-shell";
+import { isTaskAccepted } from "@/lib/admin-api";
+import { useAdminRealtime, useAdminRealtimeRefresh } from "./admin-realtime-provider";
 import {
   BILIBILI_ACCOUNT_STATUS_LABELS,
   CREATOR_STATUS_LABELS,
@@ -81,6 +83,7 @@ type PipelineRun = {
 };
 
 export function AdminWorkbenchPage() {
+  const { waitForTask } = useAdminRealtime();
   const [user, setUser] = useState<User | null>(null);
   const [email, setEmail] = useState("admin@gowith.local");
   const [password, setPassword] = useState("admin123456");
@@ -108,6 +111,7 @@ export function AdminWorkbenchPage() {
   useEffect(() => {
     void bootstrap();
   }, []);
+  useAdminRealtimeRefresh(loadData);
 
   useEffect(() => {
     if (!message) return undefined;
@@ -148,13 +152,19 @@ export function AdminWorkbenchPage() {
     setRuns(runPayload.runs);
   }
 
-  async function run(label: string, action: () => Promise<void>) {
+  async function run(label: string, action: () => Promise<unknown>) {
     setBusy(label);
     setError(null);
     setMessage(null);
     try {
-      await action();
-      setMessage(`${label} 已提交`);
+      const result = await action();
+      if (isTaskAccepted(result)) {
+        const terminal = await waitForTask(result);
+        if (terminal.status !== "success") throw new Error(`${label} 未成功完成`);
+        setMessage(`${label} 已完成`);
+      } else {
+        setMessage(`${label} 已完成`);
+      }
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "操作失败");
@@ -198,11 +208,12 @@ export function AdminWorkbenchPage() {
   async function handleCreatorCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await run("新增博主", async () => {
-      await adminFetch("/api/admin/creators", {
+      const result = await adminFetch("/api/admin/creators", {
         method: "POST",
         body: JSON.stringify({ bilibili_uid: creatorUid }),
       });
       setCreatorUid("");
+      return result;
     });
   }
 
@@ -397,11 +408,11 @@ export function AdminWorkbenchPage() {
             />
             <button
               onClick={() =>
-                void run("检查 Cookie 池", async () => {
-                  await adminFetch("/api/admin/bilibili-auth/check", {
+                void run("检查 Cookie 池", () =>
+                  adminFetch("/api/admin/bilibili-auth/check", {
                     method: "POST",
-                  });
-                })
+                  }),
+                )
               }
               className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md border border-[#d7dde5] px-2 py-2 text-xs font-medium"
               disabled={!!busy}

@@ -15,6 +15,8 @@ import {
   ShieldOff,
 } from "lucide-react";
 import { AdminShell, adminFetch } from "./admin-shell";
+import { isTaskAccepted } from "@/lib/admin-api";
+import { useAdminRealtime, useAdminRealtimeRefresh } from "./admin-realtime-provider";
 import { SafeImage } from "./safe-image";
 import {
   POI_MATCH_STATUS_LABELS,
@@ -114,6 +116,7 @@ type VideoDetail = {
 };
 
 export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
+  const { subscribe, waitForTask } = useAdminRealtime();
   const [detail, setDetail] = useState<VideoDetail | null>(null);
   const [activeRun, setActiveRun] = useState<PipelineRun | null>(null);
   const [events, setEvents] = useState<PipelineEvent[]>([]);
@@ -139,14 +142,14 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
   useEffect(() => {
     void load().catch((err) => setError(err instanceof Error ? err.message : "加载失败"));
   }, [videoId]);
+  useAdminRealtimeRefresh(load);
 
   useEffect(() => {
     if (!activeRun || !["queued", "running"].includes(activeRun.status as string)) return undefined;
-    const timer = setInterval(() => {
-      void loadEvents(activeRun.id).catch(() => undefined);
-    }, 2000);
-    return () => clearInterval(timer);
-  }, [activeRun?.id, activeRun?.status]);
+    return subscribe((event) => {
+      if (event.run_id === activeRun.id) void loadEvents(activeRun.id).catch(() => undefined);
+    });
+  }, [activeRun?.id, activeRun?.status, subscribe]);
 
   async function loadCandidateDetail(candidateId: string) {
     setCandidateError(null);
@@ -168,13 +171,18 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
     await loadCandidateDetail(candidateId);
   }
 
-  async function run(label: string, action: () => Promise<{ run_id?: string } | void>) {
+  async function run(label: string, action: () => Promise<unknown>) {
     setBusy(label);
     setError(null);
     try {
       const result = await action();
       await load();
-      if (result?.run_id) await loadEvents(result.run_id);
+      if (isTaskAccepted(result)) {
+        await loadEvents(result.run_id);
+        const terminal = await waitForTask(result);
+        if (terminal.status !== "success") throw new Error(`${label} 未成功完成`);
+        await load();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "操作失败");
     } finally {
@@ -182,11 +190,15 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
     }
   }
 
-  async function candidateAction(candidateId: string, label: string, action: () => Promise<void>) {
+  async function candidateAction(candidateId: string, label: string, action: () => Promise<unknown>) {
     setBusy(label);
     setError(null);
     try {
-      await action();
+      const result = await action();
+      if (isTaskAccepted(result)) {
+        const terminal = await waitForTask(result);
+        if (terminal.status !== "success") throw new Error(`${label} 未成功完成`);
+      }
       await load();
       if (expandedCandidateId === candidateId) await loadCandidateDetail(candidateId);
     } catch (err) {
@@ -358,9 +370,9 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
                       error={candidateError}
                       onEdit={() => editCandidateInline(candidate.id, candidateDetail?.candidate.candidate_name ?? candidate.candidate_name ?? null, candidateDetail?.candidate.address_hint ?? null)}
                       onSearchPoi={() =>
-                        void candidateAction(candidate.id, "搜索 POI", async () => {
-                          await adminFetch(`/api/admin/shop-candidates/${candidate.id}/search-poi`, { method: "POST" });
-                        })
+                        void candidateAction(candidate.id, "搜索 POI", () =>
+                          adminFetch(`/api/admin/shop-candidates/${candidate.id}/search-poi`, { method: "POST" }),
+                        )
                       }
                       onSelectPoi={(poiId) =>
                         void candidateAction(candidate.id, "选 POI", async () => {

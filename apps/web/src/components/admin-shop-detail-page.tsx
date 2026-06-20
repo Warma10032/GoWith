@@ -6,10 +6,14 @@ import {
   CheckCircle2,
   ExternalLink,
   LoaderCircle,
+  MessageSquareText,
   RefreshCw,
   Send,
+  ThumbsUp,
+  X,
 } from "lucide-react";
 import { AdminShell, adminFetch } from "./admin-shell";
+import { useAdminRealtimeRefresh } from "./admin-realtime-provider";
 import {
   MENTION_TYPE_LABELS,
   SENTIMENT_LABELS,
@@ -86,6 +90,20 @@ type ShopResponse = {
   mentions: ShopMention[];
   videos: ShopVideo[];
   creators: ShopCreator[];
+  review_comments: ReviewComment[];
+};
+
+type ReviewComment = {
+  evidence_id: string;
+  id: string;
+  content: string;
+  user_hash: string | null;
+  author_name: string | null;
+  author_avatar_url: string | null;
+  image_urls: string[];
+  like_count: number | null;
+  reply_count: number | null;
+  published_at: string | null;
 };
 
 function readNumber(obj: Record<string, unknown>, key: string): number | null {
@@ -103,6 +121,9 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [selectedReviewAspect, setSelectedReviewAspect] = useState<
+    string | null
+  >(null);
 
   const load = useCallback(async () => {
     try {
@@ -119,6 +140,7 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+  useAdminRealtimeRefresh(load);
 
   async function runAction(label: string, action: () => Promise<void>) {
     setBusy(label);
@@ -174,6 +196,7 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
       sentiment?: string;
       summary?: string;
       confidence?: number;
+      evidence_ids?: string[];
     };
     return typeof dimension.summary === "string" &&
       Number(dimension.confidence ?? 0) > 0.4 &&
@@ -181,19 +204,13 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
       ? [[aspect, dimension] as const]
       : [];
   });
-  const commentSummary = (aggregatedReview.comment_summary ?? {}) as {
-    positive_points?: string[];
-    negative_points?: string[];
-    controversial_points?: string[];
-    recent_status_points?: string[];
-    confidence?: number;
-  };
-  const commentSummaryPoints = [
-    ...(commentSummary.positive_points ?? []),
-    ...(commentSummary.negative_points ?? []),
-    ...(commentSummary.controversial_points ?? []),
-    ...(commentSummary.recent_status_points ?? []),
-  ];
+  const selectedReview = review.find(
+    ([aspect]) => aspect === selectedReviewAspect,
+  );
+  const selectedEvidenceIds = new Set(selectedReview?.[1].evidence_ids ?? []);
+  const selectedComments = data.review_comments.filter((comment) =>
+    selectedEvidenceIds.has(comment.evidence_id),
+  );
   const qualityScore = readNumber(shop.quality, "shop_confidence");
   const creatorCount = (() => {
     const stats = readArray(shop.source_stats, "creator_count");
@@ -336,7 +353,12 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
         </p>
         <div className="mt-3 grid gap-2 md:grid-cols-2">
           {review.map(([aspect, info]) => (
-            <div key={aspect} className="rounded-lg border border-line p-3">
+            <button
+              key={aspect}
+              type="button"
+              onClick={() => setSelectedReviewAspect(aspect)}
+              className="rounded-lg border border-line p-3 text-left transition-colors hover:border-brand focus:outline-none focus:ring-2 focus:ring-brand/30"
+            >
               <div className="flex items-baseline justify-between">
                 <span className="text-xs font-semibold text-ink">{aspect}</span>
                 <span
@@ -362,26 +384,112 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
                   置信度 {(Number(info.confidence) * 100).toFixed(0)}%
                 </p>
               ) : null}
-            </div>
+              <span className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-brand">
+                <MessageSquareText size={12} />
+                查看 {info.evidence_ids?.length ?? 0} 条原评论
+              </span>
+            </button>
           ))}
-          {commentSummaryPoints.length ? (
-            <div className="rounded-lg border border-line p-3 md:col-span-2">
-              <div className="text-xs font-semibold text-ink">评论结论</div>
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
-                {commentSummaryPoints.map((point) => (
-                  <li key={point}>{cleanReviewText(point)}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {!review.length && !commentSummaryPoints.length ? (
+          {!review.length ? (
             <p className="text-sm text-muted">暂无有效评论结论</p>
-          ) : null}
-          {!Object.keys(review).length ? (
-            <p className="text-sm text-muted">暂无评论维度。</p>
           ) : null}
         </div>
       </section>
+
+      {selectedReview ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <section className="max-h-[85vh] w-full max-w-3xl overflow-hidden rounded-lg bg-white shadow-xl">
+            <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
+              <div>
+                <h2 className="font-semibold text-ink">
+                  {selectedReview[0]} · 原评论证据
+                </h2>
+                <p className="mt-1 text-xs text-muted">
+                  {selectedComments.length} 条可追溯评论，AI 总结仅供参考
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedReviewAspect(null)}
+                className="grid size-8 shrink-0 place-items-center rounded-md border border-line text-muted hover:text-ink"
+                title="关闭"
+                aria-label="关闭评论证据"
+              >
+                <X size={16} />
+              </button>
+            </header>
+            <div className="max-h-[calc(85vh-76px)] space-y-3 overflow-y-auto p-5">
+              {selectedComments.map((comment) => (
+                <article
+                  key={comment.evidence_id}
+                  className="rounded-lg border border-line p-4"
+                >
+                  <div className="flex items-center gap-3">
+                    {comment.author_avatar_url ? (
+                      <img
+                        src={comment.author_avatar_url}
+                        alt=""
+                        className="size-8 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="grid size-8 rounded-full bg-[#f0e7dc] text-xs font-semibold text-brand">
+                        <span className="m-auto">评</span>
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">
+                        {comment.author_name ??
+                          (comment.user_hash
+                            ? `匿名用户 ${comment.user_hash.slice(0, 8)}`
+                            : "匿名用户")}
+                      </div>
+                      <div className="text-xs text-muted">
+                        {comment.published_at
+                          ? new Date(comment.published_at).toLocaleString(
+                              "zh-CN",
+                            )
+                          : "时间未知"}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-muted">
+                      <span className="inline-flex items-center gap-1">
+                        <ThumbsUp size={12} /> {comment.like_count ?? 0}
+                      </span>
+                      <span>{comment.reply_count ?? 0} 回复</span>
+                    </div>
+                  </div>
+                  <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-ink">
+                    {comment.content}
+                  </p>
+                  {comment.image_urls.length ? (
+                    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {comment.image_urls.map((url) => (
+                        <a
+                          key={url}
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <img
+                            src={url}
+                            alt="评论图片"
+                            className="aspect-square w-full rounded-md border border-line object-cover"
+                          />
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+              {!selectedComments.length ? (
+                <p className="py-8 text-center text-sm text-muted">
+                  这些证据来自旧分析记录，暂未关联到可展示的原评论。
+                </p>
+              ) : null}
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       <section className="mt-4 rounded-lg border border-line bg-white p-4">
         <h2 className="text-sm font-semibold text-ink">来源视频与博主</h2>

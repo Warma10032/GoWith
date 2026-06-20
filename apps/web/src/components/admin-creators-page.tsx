@@ -6,6 +6,8 @@ import { ExternalLink, LoaderCircle, Play, Plus, Search } from "lucide-react";
 import { AdminShell, adminFetch } from "./admin-shell";
 import { SafeImage } from "./safe-image";
 import { CREATOR_STATUS_LABELS, lookupLabel } from "@/lib/labels";
+import { isTaskAccepted } from "@/lib/admin-api";
+import { useAdminRealtime, useAdminRealtimeRefresh } from "./admin-realtime-provider";
 
 type Creator = {
   id: string;
@@ -19,6 +21,7 @@ type Creator = {
 };
 
 export function AdminCreatorsPage() {
+  const { waitForTask } = useAdminRealtime();
   const [q, setQ] = useState("");
   const [uid, setUid] = useState("");
   const [creators, setCreators] = useState<Creator[]>([]);
@@ -36,12 +39,17 @@ export function AdminCreatorsPage() {
   useEffect(() => {
     void load().catch((err) => setError(err instanceof Error ? err.message : "加载失败"));
   }, []);
+  useAdminRealtimeRefresh(load);
 
-  async function run(label: string, action: () => Promise<void>) {
+  async function run(label: string, action: () => Promise<unknown>) {
     setBusy(label);
     setError(null);
     try {
-      await action();
+      const result = await action();
+      if (isTaskAccepted(result)) {
+        const terminal = await waitForTask(result);
+        if (terminal.status !== "success") throw new Error(`${label} 未成功完成`);
+      }
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "操作失败");
@@ -58,8 +66,9 @@ export function AdminCreatorsPage() {
   async function handleCreate(event: FormEvent) {
     event.preventDefault();
     await run("新增博主", async () => {
-      await adminFetch("/api/admin/creators", { method: "POST", body: JSON.stringify({ bilibili_uid: uid }) });
+      const result = await adminFetch("/api/admin/creators", { method: "POST", body: JSON.stringify({ bilibili_uid: uid }) });
       setUid("");
+      return result;
     });
   }
 
@@ -118,9 +127,8 @@ export function AdminCreatorsPage() {
                     查看视频
                   </Link>
                   <button
-                    onClick={() => void run("同步博主", async () => {
-                      await adminFetch(`/api/admin/creators/${creator.id}/sync`, { method: "POST" });
-                    })}
+                    onClick={() => void run("同步博主", () =>
+                      adminFetch(`/api/admin/creators/${creator.id}/sync`, { method: "POST" }))}
                     className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-xs font-medium"
                     disabled={!!busy}
                   >

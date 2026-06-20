@@ -67,6 +67,13 @@ export const RUN_STATUS_LABELS: Readonly<Record<string, string>> = {
 };
 
 export const PIPELINE_RUN_TYPE_LABELS: Readonly<Record<string, string>> = {
+  creator_video_sync: "同步博主视频",
+  creator_profile_sync: "刷新博主资料",
+  bilibili_auth_check: "检查 Cookie 池",
+  video_processing: "视频处理",
+  video_asr_retry: "重新转写视频",
+  video_ai_retry: "重新执行 AI 分析",
+  poi_match: "POI 匹配",
   sync_creator_videos: "同步博主视频",
   process_video: "视频处理",
   match_poi: "POI 匹配",

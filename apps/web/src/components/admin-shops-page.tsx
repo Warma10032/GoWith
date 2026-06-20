@@ -6,6 +6,7 @@ import { Search } from "lucide-react";
 import { AdminShell, adminFetch } from "./admin-shell";
 import { ListState } from "./admin-list-state";
 import { useDebouncedEffect } from "@/lib/use-debounced-effect";
+import { useAdminRealtimeRefresh } from "./admin-realtime-provider";
 import { SHOP_STATUS_LABELS, lookupLabel } from "@/lib/labels";
 
 type ShopRow = {
@@ -57,6 +58,7 @@ export function AdminShopsPage() {
   }
 
   useDebouncedEffect(load, [q, status], 350);
+  useAdminRealtimeRefresh(load);
 
   const isFiltered = q.trim() !== "" || status !== "";
   const showInitialLoading = loading && shops.length === 0;

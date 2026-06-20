@@ -5,6 +5,7 @@ import { useState } from "react";
 import { AdminShell, adminFetch } from "./admin-shell";
 import { ListState } from "./admin-list-state";
 import { useDebouncedEffect } from "@/lib/use-debounced-effect";
+import { useAdminRealtimeRefresh } from "./admin-realtime-provider";
 import {
   AI_RUN_STAGE_LABELS,
   PIPELINE_RUN_TYPE_LABELS,
@@ -77,6 +78,7 @@ export function AdminRunsPage({ mode }: { mode: "pipeline" | "ai" }) {
   }
 
   useDebouncedEffect(load, [mode, status], 350);
+  useAdminRealtimeRefresh(() => load(), { progress: true });
 
   const title = isAi ? "AI 运行" : "处理任务";
   const isFiltered = status !== "";

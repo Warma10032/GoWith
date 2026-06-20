@@ -10,6 +10,7 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import { AdminShell, adminFetch } from "./admin-shell";
+import { useAdminRealtimeRefresh } from "./admin-realtime-provider";
 import {
   AI_RUN_STAGE_LABELS,
   PIPELINE_RUN_TYPE_LABELS,
@@ -68,20 +69,19 @@ export function AdminRunDetailPage({ runId }: AdminRunDetailPageProps) {
   const [data, setData] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  async function load() {
+    try {
+      setData(await adminFetch<RunDetail>(`/api/admin/runs/${runId}`));
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "加载失败");
+    }
+  }
+
   useEffect(() => {
-    let cancelled = false;
-    adminFetch<RunDetail>(`/api/admin/runs/${runId}`)
-      .then((payload) => {
-        if (!cancelled) setData(payload);
-      })
-      .catch((err) => {
-        if (!cancelled)
-          setError(err instanceof Error ? err.message : "加载失败");
-      });
-    return () => {
-      cancelled = true;
-    };
+    void load();
   }, [runId]);
+  useAdminRealtimeRefresh(load, { progress: true });
 
   if (error) {
     return (

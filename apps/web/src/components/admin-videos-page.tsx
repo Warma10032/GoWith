@@ -7,6 +7,7 @@ import { AdminShell, adminFetch } from "./admin-shell";
 import { SafeImage } from "./safe-image";
 import { ListState } from "./admin-list-state";
 import { useDebouncedEffect } from "@/lib/use-debounced-effect";
+import { useAdminRealtimeRefresh } from "./admin-realtime-provider";
 import {
   VIDEO_CONTENT_TYPE_LABELS,
   VIDEO_WORKFLOW_STATUS_LABELS,
@@ -51,6 +52,7 @@ export function AdminVideosPage() {
   }
 
   useDebouncedEffect(load, [q, status], 350);
+  useAdminRealtimeRefresh(load);
 
   const isFiltered = q.trim() !== "" || status !== "";
   const showInitialLoading = loading && videos.length === 0;

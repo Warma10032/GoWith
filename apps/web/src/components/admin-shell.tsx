@@ -15,8 +15,9 @@ import {
   UserRound,
   Workflow,
 } from "lucide-react";
-import { apiBaseUrl } from "@/lib/api";
+import { adminFetch } from "@/lib/admin-api";
 import { RUN_STATUS_LABELS, lookupLabel } from "@/lib/labels";
+import { useAdminRealtime, useAdminRealtimeRefresh } from "./admin-realtime-provider";
 
 type Counts = {
   creators: number;
@@ -47,31 +48,7 @@ const navItems = [
   { href: "/admin/ai-runs", label: "AI 运行", icon: Bot },
 ];
 
-export async function adminFetch<T>(
-  path: string,
-  init?: RequestInit,
-): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    ...init,
-    credentials: "include",
-    headers: {
-      ...(init?.body ? { "content-type": "application/json" } : {}),
-      ...(init?.headers ?? {}),
-    },
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as {
-      error?: { message?: string; code?: string };
-    } | null;
-    throw new Error(
-      payload?.error?.message ??
-        payload?.error?.code ??
-        `Request failed: ${response.status}`,
-    );
-  }
-  return (await response.json()) as T;
-}
+export { adminFetch } from "@/lib/admin-api";
 
 interface AdminShellProps {
   title: string;
@@ -90,11 +67,12 @@ export function AdminShell({
   showActivity = false,
 }: AdminShellProps) {
   const pathname = usePathname();
+  const { activeRuns, connectionState, lastResult } = useAdminRealtime();
   const [counts, setCounts] = useState<Counts | null>(null);
   const [recentRuns, setRecentRuns] = useState<RecentRun[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  async function loadDashboard() {
     adminFetch<{ counts: Counts; recent_runs?: RecentRun[] }>(
       "/api/admin/dashboard",
     )
@@ -105,7 +83,12 @@ export function AdminShell({
       .catch((err) =>
         setError(err instanceof Error ? err.message : "后台未登录或接口不可用"),
       );
+  }
+
+  useEffect(() => {
+    void loadDashboard();
   }, []);
+  useAdminRealtimeRefresh(loadDashboard);
 
   const openWork =
     (counts?.open_reviews ?? 0) +
@@ -170,6 +153,14 @@ export function AdminShell({
               {!counts && !error ? (
                 <LoaderCircle className="animate-spin text-brand" size={18} />
               ) : null}
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+              <span className={`size-2 rounded-full ${connectionState === "connected" ? "bg-[#16855b]" : connectionState === "fallback" ? "bg-[#d7901e]" : "bg-[#7a8794]"}`} />
+              <span className="text-[#66717f]">
+                {connectionState === "connected" ? "实时更新已连接" : connectionState === "fallback" ? "实时连接中断，正在轮询同步" : "正在连接实时更新"}
+              </span>
+              {activeRuns.size ? <span className="font-medium text-brand">{activeRuns.size} 个任务运行中</span> : null}
+              {lastResult?.status ? <span className={lastResult.status === "success" ? "text-[#16855b]" : "text-[#b4482b]"}>最近任务：{lookupLabel(RUN_STATUS_LABELS, lastResult.status)}</span> : null}
             </div>
             {counts ? (
               <>

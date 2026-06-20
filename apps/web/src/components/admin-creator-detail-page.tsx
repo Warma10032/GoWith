@@ -11,6 +11,8 @@ import {
   VIDEO_WORKFLOW_STATUS_LABELS,
   lookupLabel,
 } from "@/lib/labels";
+import { isTaskAccepted } from "@/lib/admin-api";
+import { useAdminRealtime, useAdminRealtimeRefresh } from "./admin-realtime-provider";
 
 type CreatorDetail = {
   creator: {
@@ -44,6 +46,7 @@ type Video = {
 };
 
 export function AdminCreatorDetailPage({ creatorId }: { creatorId: string }) {
+  const { waitForTask } = useAdminRealtime();
   const [detail, setDetail] = useState<CreatorDetail | null>(null);
   const [videos, setVideos] = useState<Video[]>([]);
   const [q, setQ] = useState("");
@@ -64,12 +67,17 @@ export function AdminCreatorDetailPage({ creatorId }: { creatorId: string }) {
   useEffect(() => {
     void load().catch((err) => setError(err instanceof Error ? err.message : "加载失败"));
   }, [creatorId]);
+  useAdminRealtimeRefresh(() => load());
 
-  async function run(label: string, action: () => Promise<void>) {
+  async function run(label: string, action: () => Promise<unknown>) {
     setBusy(label);
     setError(null);
     try {
-      await action();
+      const result = await action();
+      if (isTaskAccepted(result)) {
+        const terminal = await waitForTask(result);
+        if (terminal.status !== "success") throw new Error(`${label} 未成功完成`);
+      }
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "操作失败");
@@ -109,9 +117,8 @@ export function AdminCreatorDetailPage({ creatorId }: { creatorId: string }) {
                 {detail.creator.bio ? <p className="mt-2 line-clamp-2 text-sm text-ink/80">{detail.creator.bio}</p> : null}
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
-                    onClick={() => void run("同步博主", async () => {
-                      await adminFetch(`/api/admin/creators/${creatorId}/sync`, { method: "POST" });
-                    })}
+                    onClick={() => void run("同步博主", () =>
+                      adminFetch(`/api/admin/creators/${creatorId}/sync`, { method: "POST" }))}
                     className="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-sm font-semibold text-white"
                     disabled={!!busy}
                   >
