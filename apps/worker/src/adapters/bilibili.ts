@@ -22,6 +22,9 @@ export interface FetchedComment {
   published_at: string | null;
   sample_type: "hot" | "latest" | "keyword";
   user_hash: string | null;
+  author_name: string | null;
+  author_avatar_url: string | null;
+  image_urls: string[];
   raw_payload_id: string | null;
 }
 
@@ -876,10 +879,20 @@ class LiveBilibiliClient {
   ): FetchedComment | null {
     const reply = asRecord(value);
     const id = firstString(reply.rpid, reply.rpid_str);
-    const content = firstString(asRecord(reply.content).message);
+    const contentRecord = asRecord(reply.content);
+    const content = firstString(contentRecord.message);
     if (!id || !content) return null;
-    const mid = firstString(asRecord(reply.member).mid);
+    const member = asRecord(reply.member);
+    const mid = firstString(member.mid);
     const ctime = asNumber(reply.ctime);
+    const imageUrls = uniqueStrings(
+      asArray(contentRecord.pictures)
+        .map(asRecord)
+        .map((picture) =>
+          firstString(picture.img_src, picture.img_url, picture.url),
+        )
+        .filter((url): url is string => url !== null),
+    );
     return {
       id,
       content,
@@ -888,6 +901,9 @@ class LiveBilibiliClient {
       published_at: ctime ? new Date(ctime * 1000).toISOString() : null,
       sample_type: sampleType,
       user_hash: mid ? sha256(mid) : null,
+      author_name: firstString(member.uname, member.name),
+      author_avatar_url: firstString(member.avatar, member.face),
+      image_urls: imageUrls,
       raw_payload_id: rawPayloadId,
     };
   }

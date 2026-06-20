@@ -42,6 +42,11 @@ export interface VideoAnalysisRequest {
     description: string | null;
     tags: string[];
     category: string | null;
+    evidence: Array<{
+      evidence_id: string;
+      source: "title" | "description" | "tag";
+      text: string;
+    }>;
   };
   transcript_segments: AsrTranscriptSegment[];
   comment_samples: CommentSample[];
@@ -56,6 +61,32 @@ export interface AiResponseEnvelope<T> {
   prompt_version: string;
   usage: Record<string, unknown>;
   raw_output_text: string | null;
+  subcalls: AiCallTrace[];
+}
+
+export interface AiCallTrace {
+  call_index: number;
+  stage: string;
+  provider: string;
+  model: string;
+  prompt_version: string;
+  input_hash: string;
+  input_payload: Record<string, unknown>;
+  output_payload: Record<string, unknown> | null;
+  raw_output_text: string | null;
+  usage: Record<string, unknown>;
+  status: "success" | "failed" | "invalid_json" | "schema_error";
+  error_message: string | null;
+}
+
+export class AiWorkerRequestError extends Error {
+  constructor(
+    message: string,
+    public readonly subcalls: AiCallTrace[],
+  ) {
+    super(message);
+    this.name = "AiWorkerRequestError";
+  }
 }
 
 export async function transcribeAudioFile(input: {
@@ -91,6 +122,7 @@ export function buildVideoAnalysisRequest(input: {
   commentSamples: CommentSample[];
   commentSignals?: Record<string, unknown>;
   previousStageOutputs?: Record<string, unknown>;
+  metadataEvidence?: VideoAnalysisRequest["video_metadata"]["evidence"];
 }): VideoAnalysisRequest {
   return {
     video_metadata: {
@@ -101,6 +133,7 @@ export function buildVideoAnalysisRequest(input: {
       description: input.video.description,
       tags: input.video.tags,
       category: input.video.category,
+      evidence: input.metadataEvidence ?? [],
     },
     transcript_segments: input.transcriptSegments,
     comment_samples: input.commentSamples,
@@ -134,8 +167,15 @@ async function postAi<T>(path: string, request: VideoAnalysisRequest): Promise<A
     body: JSON.stringify(request),
   });
   if (!response.ok) {
-    const message = await response.text().catch(() => "");
-    throw new Error(`AI request failed: ${path} ${response.status} ${message}`.trim());
+    const body = (await response.json().catch(() => null)) as {
+      detail?: string;
+      subcalls?: AiCallTrace[];
+    } | null;
+    const message = body?.detail ?? `HTTP ${response.status}`;
+    throw new AiWorkerRequestError(
+      `AI request failed: ${path} ${message}`,
+      body?.subcalls ?? [],
+    );
   }
   return (await response.json()) as AiResponseEnvelope<T>;
 }

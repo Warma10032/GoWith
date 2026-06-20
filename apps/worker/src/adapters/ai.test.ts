@@ -34,11 +34,15 @@ describe("buildVideoAnalysisRequest", () => {
         },
       ],
       previousStageOutputs: { classification: { is_shop_visit: true } },
+      metadataEvidence: [
+        { evidence_id: "ev-title-1", source: "title", text: "上海牛肉面探店" },
+      ],
     });
 
     expect(request.video_metadata.title).toBe("上海牛肉面探店");
     expect(request.transcript_segments[0]?.segment_id).toBe("ev-seg-1");
     expect(request.comment_samples[0]?.comment_id).toBe("ev-comment-1");
     expect(request.previous_stage_outputs?.classification).toEqual({ is_shop_visit: true });
+    expect(request.video_metadata.evidence[0]?.evidence_id).toBe("ev-title-1");
   });
 });

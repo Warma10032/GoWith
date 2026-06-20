@@ -16,12 +16,14 @@ import {
   type TranscriptSegment,
 } from "../adapters/bilibili";
 import {
+  AiWorkerRequestError,
   buildVideoAnalysisRequest,
   classifyVideo,
   extractCommentSignals,
   structureVideo,
   transcribeAudioFile,
   type AiResponseEnvelope,
+  type AiCallTrace,
   type CommentSample,
   type VideoAnalysisRequest,
 } from "../adapters/ai";
@@ -32,7 +34,7 @@ import { pipelineQueue } from "../queue";
 export async function handlePipelineJob(db: Kysely<DB>, job: Job) {
   switch (job.name) {
     case "check_bilibili_auth_pool":
-      return checkBilibiliCookiePool(db);
+      return checkBilibiliAuthPoolJob(db, job);
     case "sync_creator_profile":
       return syncCreatorProfile(db, job);
     case "sync_creator_videos":
@@ -218,6 +220,12 @@ async function finishRunIfTerminal(
     .execute();
 }
 
+async function checkBilibiliAuthPoolJob(db: Kysely<DB>, job: Job) {
+  const result = await checkBilibiliCookiePool(db);
+  await finishRunIfTerminal(db, job, { checked: true });
+  return result;
+}
+
 async function syncCreatorProfile(db: Kysely<DB>, job: Job) {
   const { entityId, bilibili_uid } = job.data as {
     entityId: string;
@@ -250,8 +258,9 @@ async function syncCreatorProfile(db: Kysely<DB>, job: Job) {
     })
     .where("id", "=", entityId)
     .execute();
-
-  return { updated: true, creator_id: entityId };
+  const result = { updated: true, creator_id: entityId };
+  await finishRunIfTerminal(db, job, result);
+  return result;
 }
 
 async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
@@ -369,6 +378,9 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
             .update(comment.content)
             .digest("hex"),
           user_hash: comment.user_hash,
+          author_name: comment.author_name,
+          author_avatar_url: comment.author_avatar_url,
+          image_urls: comment.image_urls,
           like_count: comment.like_count,
           reply_count: comment.reply_count,
           published_at: comment.published_at
@@ -566,28 +578,40 @@ async function buildAnalysisInput(
     TranscriptSegment & { segment_id: string; confidence?: number | null }
   > = [];
   const commentSamples: CommentSample[] = [];
+  const metadataEvidence: VideoAnalysisRequest["video_metadata"]["evidence"] = [];
 
-  await addTextEvidence(db, evidenceIds, {
+  const titleEvidenceId = await addTextEvidence(db, evidenceIds, {
     videoId: video.id,
     source: "title",
     sourceRefId: `${video.id}:title`,
     text: video.title,
   });
+  metadataEvidence.push({
+    evidence_id: titleEvidenceId,
+    source: "title",
+    text: video.title,
+  });
   if (video.description?.trim()) {
-    await addTextEvidence(db, evidenceIds, {
+    const descriptionEvidenceId = await addTextEvidence(db, evidenceIds, {
       videoId: video.id,
       source: "description",
       sourceRefId: `${video.id}:description`,
       text: video.description,
     });
+    metadataEvidence.push({
+      evidence_id: descriptionEvidenceId,
+      source: "description",
+      text: video.description,
+    });
   }
   for (const tag of video.tags.slice(0, 20)) {
-    await addTextEvidence(db, evidenceIds, {
+    const tagEvidenceId = await addTextEvidence(db, evidenceIds, {
       videoId: video.id,
       source: "tag",
       sourceRefId: `${video.id}:tag:${tag}`,
       text: tag,
     });
+    metadataEvidence.push({ evidence_id: tagEvidenceId, source: "tag", text: tag });
   }
 
   const textRows = await db
@@ -672,6 +696,7 @@ async function buildAnalysisInput(
       commentSamples,
       commentSignals: options.commentSignals,
       previousStageOutputs: options.previousStageOutputs,
+      metadataEvidence,
     }),
   };
 }
@@ -724,6 +749,8 @@ function aiRunValues(
 ) {
   return {
     id: crypto.randomUUID(),
+    parent_ai_run_id: null,
+    call_index: null,
     stage,
     entity_type: "video",
     entity_id: videoId,
@@ -741,6 +768,111 @@ function aiRunValues(
     finished_at: new Date(),
     created_at: new Date(),
   };
+}
+
+async function saveAiSubcalls(
+  db: Kysely<DB>,
+  parentAiRunId: string,
+  videoId: string,
+  subcalls: AiCallTrace[],
+) {
+  if (!subcalls.length) return;
+  await db
+    .insertInto("ai_runs")
+    .values(
+      subcalls.map((call) => ({
+        id: crypto.randomUUID(),
+        parent_ai_run_id: parentAiRunId,
+        call_index: call.call_index,
+        stage: call.stage,
+        entity_type: "video",
+        entity_id: videoId,
+        provider: call.provider,
+        model: call.model,
+        prompt_version: call.prompt_version,
+        input_hash: call.input_hash,
+        input_payload: JSON.stringify(call.input_payload),
+        output_payload: call.output_payload
+          ? JSON.stringify(call.output_payload)
+          : null,
+        raw_output_text: call.raw_output_text,
+        usage: JSON.stringify(call.usage),
+        status: call.status,
+        error_message: call.error_message,
+        started_at: new Date(),
+        finished_at: new Date(),
+        created_at: new Date(),
+      })),
+    )
+    .execute();
+}
+
+async function saveFailedAiCalls(
+  db: Kysely<DB>,
+  stage: string,
+  videoId: string,
+  request: VideoAnalysisRequest,
+  error: AiWorkerRequestError,
+) {
+  const parent = await db
+    .insertInto("ai_runs")
+    .values({
+      id: crypto.randomUUID(),
+      parent_ai_run_id: null,
+      call_index: null,
+      stage,
+      entity_type: "video",
+      entity_id: videoId,
+      provider: "minimax",
+      model: error.subcalls.at(-1)?.model ?? "unknown",
+      prompt_version: error.subcalls.at(-1)?.prompt_version ?? `${stage}.failed`,
+      input_hash: crypto
+        .createHash("sha256")
+        .update(JSON.stringify(request))
+        .digest("hex"),
+      input_payload: JSON.stringify({ request }),
+      output_payload: null,
+      raw_output_text: error.subcalls.at(-1)?.raw_output_text ?? null,
+      usage: JSON.stringify({}),
+      status: "failed",
+      error_message: error.message,
+      started_at: new Date(),
+      finished_at: new Date(),
+      created_at: new Date(),
+    })
+    .returning("id")
+    .executeTakeFirstOrThrow();
+  await saveAiSubcalls(db, parent.id, videoId, error.subcalls);
+  const existingReview = await db
+    .selectFrom("review_tasks")
+    .select("id")
+    .where("task_type", "=", "shop_candidate_review")
+    .where("entity_type", "=", "video")
+    .where("entity_id", "=", videoId)
+    .where("status", "in", ["open", "in_progress"])
+    .executeTakeFirst();
+  if (!existingReview) {
+    await db
+      .insertInto("review_tasks")
+      .values({
+        id: crypto.randomUUID(),
+        task_type: "shop_candidate_review",
+        entity_type: "video",
+        entity_id: videoId,
+        title: `AI 阶段失败：${stage}`,
+        reason: error.message,
+        priority: 80,
+        status: "open",
+        risk_flags: ["ai_output_incomplete"],
+        payload: { ai_run_id: parent.id, stage },
+        assigned_to: null,
+        resolved_by: null,
+        resolved_at: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      })
+      .execute();
+  }
 }
 
 async function runAsrJob(db: Kysely<DB>, job: Job) {
@@ -837,7 +969,21 @@ async function classifyVideoJob(db: Kysely<DB>, job: Job) {
       evidence_count: analysisInput.evidenceIds.size,
     },
   });
-  const envelope = await classifyVideo(analysisInput.request);
+  let envelope: Awaited<ReturnType<typeof classifyVideo>>;
+  try {
+    envelope = await classifyVideo(analysisInput.request);
+  } catch (error) {
+    if (error instanceof AiWorkerRequestError) {
+      await saveFailedAiCalls(
+        db,
+        "classify_video",
+        video.id,
+        analysisInput.request,
+        error,
+      );
+    }
+    throw error;
+  }
   const result = videoClassificationResultSchema.parse(envelope.output);
   result.evidence_ids = validEvidenceIds(
     result.evidence_ids,
@@ -859,6 +1005,7 @@ async function classifyVideoJob(db: Kysely<DB>, job: Job) {
     )
     .returningAll()
     .executeTakeFirstOrThrow();
+  await saveAiSubcalls(db, aiRun.id, video.id, envelope.subcalls);
   await emitPipelineEvent(db, job, {
     eventType: "ai_response_validated",
     level: "success",
@@ -961,7 +1108,21 @@ async function commentSignalsJob(db: Kysely<DB>, job: Job) {
       evidence_count: analysisInput.evidenceIds.size,
     },
   });
-  const envelope = await extractCommentSignals(analysisInput.request);
+  let envelope: Awaited<ReturnType<typeof extractCommentSignals>>;
+  try {
+    envelope = await extractCommentSignals(analysisInput.request);
+  } catch (error) {
+    if (error instanceof AiWorkerRequestError) {
+      await saveFailedAiCalls(
+        db,
+        "comment_signal",
+        video.id,
+        analysisInput.request,
+        error,
+      );
+    }
+    throw error;
+  }
   const result = commentSignalExtractionSchema.parse(envelope.output);
   for (const mention of result.shop_name_mentions)
     mention.evidence_ids = validEvidenceIds(
@@ -1000,6 +1161,7 @@ async function commentSignalsJob(db: Kysely<DB>, job: Job) {
     )
     .returningAll()
     .executeTakeFirstOrThrow();
+  await saveAiSubcalls(db, aiRun.id, video.id, envelope.subcalls);
   await emitPipelineEvent(db, job, {
     eventType: "ai_response_validated",
     level: "success",
@@ -1071,7 +1233,21 @@ async function structureVideoJob(db: Kysely<DB>, job: Job) {
       has_comment_signals: Boolean(commentSignals),
     },
   });
-  const envelope = await structureVideo(analysisInput.request);
+  let envelope: Awaited<ReturnType<typeof structureVideo>>;
+  try {
+    envelope = await structureVideo(analysisInput.request);
+  } catch (error) {
+    if (error instanceof AiWorkerRequestError) {
+      await saveFailedAiCalls(
+        db,
+        "structure_video",
+        video.id,
+        analysisInput.request,
+        error,
+      );
+    }
+    throw error;
+  }
   const result = videoStructuredAnalysisSchema.parse(envelope.output);
   result.video.evidence_ids = validEvidenceIds(
     result.video.evidence_ids,
@@ -1115,6 +1291,7 @@ async function structureVideoJob(db: Kysely<DB>, job: Job) {
     )
     .returningAll()
     .executeTakeFirstOrThrow();
+  await saveAiSubcalls(db, aiRun.id, video.id, envelope.subcalls);
   await emitPipelineEvent(db, job, {
     eventType: "ai_response_validated",
     level: "success",
@@ -1276,9 +1453,15 @@ async function structureVideoJob(db: Kysely<DB>, job: Job) {
         })
         .execute();
 
-      await enqueueWorkerPipelineJob(db, "match_poi", "shop_candidate", row.id, {
-        run_id: runIdFromJob(job),
-      });
+      await enqueueWorkerPipelineJob(
+        db,
+        "match_poi",
+        "shop_candidate",
+        row.id,
+        {
+          run_id: runIdFromJob(job),
+        },
+      );
     }
   }
 
