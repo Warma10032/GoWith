@@ -127,14 +127,14 @@ const conclusionSchema = z.object({
   reason: z.string().optional(),
   confidence: confidenceSchema,
   evidence_ids: z.array(z.string()).default([]),
-});
+}).strict();
 
 const reviewDimensionSchema = z.object({
   sentiment: z.enum(sentiments),
   summary: z.string(),
   confidence: confidenceSchema,
   evidence_ids: z.array(z.string()).default([]),
-});
+}).strict();
 
 export const videoStructuredAnalysisSchema = z.object({
   schema_version: z.literal("video_structured_analysis.v1"),
@@ -151,7 +151,7 @@ export const videoStructuredAnalysisSchema = z.object({
     analysis_confidence: confidenceSchema,
     risk_flags: z.array(z.enum(riskFlags)).default([]),
     evidence_ids: z.array(z.string()).default([]),
-  }),
+  }).strict(),
   shop_candidates: z.array(
     z.object({
       candidate_id: z.string(),
@@ -164,7 +164,7 @@ export const videoStructuredAnalysisSchema = z.object({
         primary: z.string().nullable(),
         secondary: z.string().nullable(),
         confidence: confidenceSchema,
-      }),
+      }).strict(),
       location_hints: z.object({
         country: z.string().nullable().optional(),
         province: z.string().nullable().optional(),
@@ -174,12 +174,12 @@ export const videoStructuredAnalysisSchema = z.object({
         address_text: z.string().nullable().optional(),
         landmarks: z.array(z.string()).default([]),
         confidence: confidenceSchema,
-      }),
+      }).strict(),
       time_range: z
         .object({
           start_sec: z.number().nullable().optional(),
           end_sec: z.number().nullable().optional(),
-        })
+        }).strict()
         .nullable()
         .optional(),
       card_payload: z.object({
@@ -192,7 +192,7 @@ export const videoStructuredAnalysisSchema = z.object({
         recommended_dishes: z.array(conclusionSchema).default([]),
         avoid_points: z.array(conclusionSchema).default([]),
         suitable_scenes: z.array(z.string()).default([]),
-      }),
+      }).strict(),
       review_dimensions: z.record(reviewDimensionSchema).default({}),
       comment_summary: z.object({
         positive_points: z.array(z.string()).default([]),
@@ -201,13 +201,13 @@ export const videoStructuredAnalysisSchema = z.object({
         recent_status_points: z.array(z.string()).default([]),
         confidence: confidenceSchema,
         evidence_ids: z.array(z.string()).default([]),
-      }),
+      }).strict(),
       missing_fields: z.array(z.enum(missingFields)).default([]),
       risk_flags: z.array(z.enum(riskFlags)).default([]),
       manual_review_reasons: z.array(z.string()).default([]),
-    }),
+    }).strict(),
   ),
-});
+}).strict();
 
 export const poiMatchResultSchema = z.object({
   schema_version: z.literal("poi_match.v1"),
