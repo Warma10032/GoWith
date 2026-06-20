@@ -1,4 +1,10 @@
-import type { ColumnType, Generated, Insertable, Selectable, Updateable } from "kysely";
+import type {
+  ColumnType,
+  Generated,
+  Insertable,
+  Selectable,
+  Updateable,
+} from "kysely";
 
 export type JsonValue =
   | string
@@ -11,7 +17,11 @@ export type JsonValue =
     };
 export type Json = ColumnType<JsonValue, unknown, unknown>;
 
-export type Timestamp = ColumnType<Date, Date | string | undefined, Date | string>;
+export type Timestamp = ColumnType<
+  Date,
+  Date | string | undefined,
+  Date | string
+>;
 export type GeneratedUuid = Generated<string>;
 
 export interface UsersTable {
@@ -139,7 +149,14 @@ export interface JobsTable {
 
 export interface PipelineRunsTable {
   id: GeneratedUuid;
-  run_type: "creator_video_sync" | "video_processing" | "video_asr_retry" | "video_ai_retry" | "poi_match";
+  run_type:
+    | "creator_video_sync"
+    | "creator_profile_sync"
+    | "bilibili_auth_check"
+    | "video_processing"
+    | "video_asr_retry"
+    | "video_ai_retry"
+    | "poi_match";
   entity_type: string;
   entity_id: string;
   status: "queued" | "running" | "success" | "failed" | "cancelled";
@@ -158,7 +175,16 @@ export interface PipelineEventsTable {
   entity_type: string;
   entity_id: string;
   stage: string;
-  event_type: "queued" | "started" | "progress" | "ai_request_prepared" | "ai_response_validated" | "saved" | "skipped" | "failed" | "completed";
+  event_type:
+    | "queued"
+    | "started"
+    | "progress"
+    | "ai_request_prepared"
+    | "ai_response_validated"
+    | "saved"
+    | "skipped"
+    | "failed"
+    | "completed";
   level: "info" | "success" | "warning" | "error";
   title: string;
   message: string | null;
@@ -205,6 +231,9 @@ export interface VideoCommentsTable {
   content: string;
   content_sha256: string;
   user_hash: string | null;
+  author_name: string | null;
+  author_avatar_url: string | null;
+  image_urls: string[];
   like_count: number | null;
   reply_count: number | null;
   published_at: Timestamp | null;
@@ -217,6 +246,8 @@ export interface VideoCommentsTable {
 
 export interface AiRunsTable {
   id: GeneratedUuid;
+  parent_ai_run_id: string | null;
+  call_index: number | null;
   stage: string;
   entity_type: string;
   entity_id: string;

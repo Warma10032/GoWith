@@ -2,7 +2,12 @@ import { Kysely, PostgresDialect } from "kysely";
 import pg from "pg";
 import type { DB } from "./schema";
 
-const { Pool } = pg;
+const { Client, Pool } = pg;
+
+export function createNotificationClient(databaseUrl = process.env.DATABASE_URL) {
+  if (!databaseUrl) throw new Error("DATABASE_URL is required");
+  return new Client({ connectionString: databaseUrl });
+}
 
 export function createDb(databaseUrl = process.env.DATABASE_URL): Kysely<DB> {
   if (!databaseUrl) {
@@ -22,4 +27,3 @@ export function createDb(databaseUrl = process.env.DATABASE_URL): Kysely<DB> {
 export async function closeDb(db: Kysely<DB>): Promise<void> {
   await db.destroy();
 }
-
