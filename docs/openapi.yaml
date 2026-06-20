@@ -279,16 +279,16 @@ paths:
           content:
             text/event-stream:
               schema: { type: string }
-  /api/admin/pipeline-runs/{id}/events:
+  /api/admin/runs/{id}:
     get:
-      summary: Get pipeline run events for detail and fallback UI
+      summary: Get a pipeline or AI run with its ordered pipeline events
       security:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/UuidId"
       responses:
         "200":
-          description: Pipeline run and ordered events.
+          description: Run type, run record, and ordered events.
   /api/admin/ai-runs:
     get:
       summary: List AI runs for admin debugging

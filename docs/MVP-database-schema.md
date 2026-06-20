@@ -460,7 +460,7 @@ CREATE INDEX ai_runs_input_hash_idx ON ai_runs (stage, input_hash);
 CREATE INDEX ai_runs_parent_idx ON ai_runs (parent_ai_run_id, call_index) WHERE parent_ai_run_id IS NOT NULL;
 ```
 
-`pipeline_runs` / `pipeline_events` 通过 migration `010_admin_task_realtime.sql` 安装轻量 `pg_notify` 触发器，只发送 run、实体、阶段、状态和进度标识；完整数据仍从表和增量 API 读取。
+`pipeline_runs` / `pipeline_events` 及轻量 `pg_notify` 触发器已纳入 `001-002` 基线迁移；通知只发送 run、实体、阶段、状态和进度标识，完整数据仍从表和增量 API 读取。
 
 ### 8.2 `video_classifications`
 
@@ -1311,7 +1311,7 @@ geom geometry(Point, 4326) GENERATED ALWAYS AS (
 
 1. `git diff packages/db/src/schema.ts db/migrations/` 列差异。
 2. **SQL 是 ground truth**：先把 TS 类型对齐 SQL 的列名、类型、`null` 性、`Generated` 标记。
-3. 若 TS 设计更合理（如 `review_events.actor_id` 比 `reviewer_id` 通用），写新 migration `db/migrations/005_review_events_rename.sql` 改 SQL，**不要**回填已部署数据库的列名。
+3. 当前开发阶段采用 hard-cut 基线；修改对应的 `001-004` SQL 后重建数据库，不维护旧结构兼容迁移。
 4. 同步更新本文件 §3 ER 图与对应章节。
 5. CI 加静态检查（`grep -E "review_events\.\(task_id\|actor_id\|note\)" packages/` 应为空）。
 
