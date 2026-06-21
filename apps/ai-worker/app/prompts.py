@@ -62,7 +62,7 @@ PROMPTS: dict[str, PromptSpec] = {
     ),
     "comment_analysis": PromptSpec(
         key="comment_analysis",
-        version="comment_analysis.v4",
+        version="comment_analysis.v5",
         model_tier="complex",
         objective="仅基于已筛选评论，聚合当前店铺的顾客评价结论。",
         source_priority=("相关评论正文", "点赞和回复数仅用于权重", "不得使用无关评论"),
@@ -87,20 +87,25 @@ PROMPTS: dict[str, PromptSpec] = {
     ),
     "transcript_opinion_analysis": PromptSpec(
         key="transcript_opinion_analysis",
-        version="transcript_opinion_analysis.v1",
+        version="transcript_opinion_analysis.v2",
         model_tier="complex",
-        objective="沿字幕时间顺序分析博主态度、推荐菜、不推荐点和具体理由。",
+        objective="沿字幕时间顺序分析博主态度、总体推荐度、推荐菜、不推荐点和具体理由。",
         source_priority=("字幕原话", "已提取店铺事实用于指代消歧", "评论禁止参与"),
         decision_rules=(
             "先判断 recommend、conditional、not_recommend 或 unclear，再总结理由。",
             "理由必须包含菜品及味道、口感、价格或体验依据，不得复述标题。",
             "recommended_dishes 与 avoid_points 每项都必须引用字幕 segment_id。",
             "区分明确推荐、有限条件推荐、负面评价和仅建议猎奇尝试。",
+            "recommendation_score 表示推荐程度而非信息可信度：强烈推荐 0.80-1.00，"
+            "正向但有条件 0.60-0.79，中性或褒贬不一 0.40-0.59，负面 0.20-0.39，"
+            "明确不推荐 0.00-0.19。",
+            "没有足够的博主态度证据时 recommendation_score 必须为 null；有评分时必须"
+            "在 recommendation_score_evidence_ids 引用支持该判断的字幕 segment_id。",
         ),
     ),
     "structure_synthesis": PromptSpec(
         key="structure_synthesis",
-        version="structure_synthesis.v4",
+        version="structure_synthesis.v5",
         model_tier="complex",
         objective="综合分类、店铺事实、博主观点和评论分析，生成唯一主店铺结构化卡片。",
         source_priority=("字幕事实与博主观点", "分类结果", "评论分析仅补充顾客反馈"),
@@ -108,6 +113,9 @@ PROMPTS: dict[str, PromptSpec] = {
             "single_shop_visit 且存在明确店名证据时必须输出一个 shop_candidate。",
             "recommend_reason 只总结博主态度与字幕理由，不能使用评论结论替代。",
             "评论维度写入 review_dimensions 和 comment_summary，不混入推荐理由。",
+            "recommendation_score 以博主字幕态度为主，评论只能在不反转博主态度的前提下"
+            "辅助校准；不得用信息完整度、店名或 POI 置信度充当推荐度。",
+            "评分必须保留 transcript_opinion_analysis 的字幕证据；没有推荐观点则为 null。",
             "最多输出一个主候选；tags 固定为空数组；文案不超过 100 个中文字符。",
         ),
     ),
@@ -125,7 +133,7 @@ PROMPTS: dict[str, PromptSpec] = {
     ),
     "structure_semantic_retry": PromptSpec(
         key="structure_semantic_retry",
-        version="structure_semantic_retry.v1",
+        version="structure_semantic_retry.v2",
         model_tier="complex",
         objective="根据语义校验问题重新生成完整的视频与店铺结构化结果。",
         source_priority=("完整递进式分析上下文", "语义校验问题", "上一次结构化输出"),
@@ -133,6 +141,7 @@ PROMPTS: dict[str, PromptSpec] = {
             "逐项修复 validation_errors，但不得牺牲已有有效事实和 evidence_ids。",
             "单店探店且已有店名事实时必须保留该候选。",
             "不得通过删除候选、推荐菜或证据来绕过校验。",
+            "推荐度非空时必须保留支持评分的字幕 evidence_ids。",
         ),
     ),
 }

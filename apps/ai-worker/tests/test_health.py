@@ -93,6 +93,8 @@ def test_structure_normalization_does_not_invent_missing_candidates() -> None:
                     "name_confidence": 0.95,
                     "location_hints": {"city": "烟台", "confidence": 0.9},
                     "recommend_reason": "博主推荐疙瘩汤，认为汤鲜、配料足。",
+                    "recommendation_score": 0.88,
+                    "recommendation_score_evidence_ids": ["ev-1"],
                     "recommended_dishes": [
                         {
                             "name": "疙瘩汤",
@@ -175,6 +177,7 @@ def test_structure_retries_when_single_shop_candidate_is_missing(monkeypatch) ->
         if key == "transcript_opinion_analysis":
             return (
                 """{"attitude":"recommend","recommend_reason":"博主推荐鱼饼，认为咸香Q弹。",
+                "recommendation_score":0.9,"recommendation_score_evidence_ids":["ev-1"],
                 "recommended_dishes":[{"name":"怀旧尖椒鱼饼","reason":"咸香Q弹",
                 "confidence":0.9,"evidence_ids":["ev-1"]}],"avoid_points":[]}""",
                 {},
@@ -192,6 +195,7 @@ def test_structure_retries_when_single_shop_candidate_is_missing(monkeypatch) ->
             f'{{"schema_version":"video_structured_analysis.v1",{video},'
             '"shop_candidates":[{"candidate_name":"大笑饭堂","candidate_type":"physical_shop",'
             '"card_payload":{"display_title":"大笑饭堂","recommend_reason":"博主推荐鱼饼，认为咸香Q弹。",'
+            '"recommendation_score":0.9,"recommendation_score_evidence_ids":["ev-1"],'
             '"recommended_dishes":[{"name":"怀旧尖椒鱼饼","reason":"咸香Q弹",'
             '"confidence":0.9,"evidence_ids":["ev-1"]}]}}]}',
             {},
@@ -204,6 +208,9 @@ def test_structure_retries_when_single_shop_candidate_is_missing(monkeypatch) ->
 
     assert response.status_code == 200
     assert response.json()["output"]["shop_candidates"][0]["candidate_name"] == "大笑饭堂"
+    assert response.json()["output"]["shop_candidates"][0]["card_payload"][
+        "recommendation_score"
+    ] == 0.9
     assert called_prompts == [
         "transcript_fact_extraction",
         "transcript_opinion_analysis",
@@ -233,6 +240,9 @@ def test_comment_analysis_only_receives_filtered_comments(monkeypatch) -> None:
 
     monkeypatch.setattr(main, "_chat_completion", fake_chat_completion)
     payload = _analysis_payload()
+    payload["previous_stage_outputs"] = {
+        "classification": {"is_shop_visit": True, "content_type": "single_shop_visit"}
+    }
     payload["comment_samples"] = [
         {"comment_id": "comment-current", "content": "这家鱼饼好吃"},
         {"comment_id": "comment-other", "content": "隔壁店更便宜"},

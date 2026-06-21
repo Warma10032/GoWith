@@ -142,6 +142,7 @@ dependencies = [
     { name = "httpx" },
     { name = "openai" },
     { name = "pydantic" },
+    { name = "python-dotenv" },
     { name = "python-multipart" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -162,6 +163,7 @@ requires-dist = [
     { name = "openai", specifier = ">=1.0.0" },
     { name = "pydantic", specifier = ">=2.10.4" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.4" },
+    { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.4" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },

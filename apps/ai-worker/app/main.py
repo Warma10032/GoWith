@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory
 from typing import Any, Callable, Literal, TypedDict, TypeVar
 
 import httpx
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 from openai import APIError, AsyncOpenAI
@@ -31,6 +32,12 @@ from .schemas import (
     VideoStructuredAnalysisResponse,
 )
 from .prompts import build_messages, prompt_spec
+
+# 启动时加载 monorepo 根目录的 .env（override=False，shell 注入优先）。
+# 这样 `pnpm dev` / `uv run` / IDE 调试 / CI 容器都能读到 MINIMAX_API_KEY 等。
+# main.py 在 apps/ai-worker/app/，所以 parents[3] = monorepo 根。
+_ROOT = Path(__file__).resolve().parents[3]
+load_dotenv(_ROOT / ".env", override=False)
 
 app = FastAPI(title="GoWith AI Worker", version="0.1.0")
 
@@ -529,16 +536,19 @@ def _representative_items(items: list[dict[str, Any]], limit: int) -> list[dict[
     return [item for index, item in enumerate(items) if index in indexes]
 
 
-def _input_payload(request: VideoAnalysisRequest) -> dict[str, Any]:
+def _input_payload(
+    request: VideoAnalysisRequest, *, include_raw_comments: bool = False
+) -> dict[str, Any]:
     transcript_segments = [
         segment.model_dump(mode="json") for segment in request.transcript_segments
     ]
     comment_samples = [comment.model_dump(mode="json") for comment in request.comment_samples]
     if request.previous_stage_outputs:
         transcript_segments = _representative_items(transcript_segments, 240)
-        # The structure stage consumes the dedicated comment-signal result instead of
-        # paying for the same raw comments a second time.
-        comment_samples = []
+        if not include_raw_comments:
+            # The structure stage consumes the dedicated comment-signal result instead of
+            # paying for the same raw comments a second time.
+            comment_samples = []
     return {
         "video_metadata": _metadata_dict(request),
         "transcript_segments": transcript_segments,
@@ -862,6 +872,12 @@ def _normalize_shop_candidate(
         card["recommended_dishes"] = insights.get("recommended_dishes")
     if not _conclusion_items(card.get("avoid_points"), "text"):
         card["avoid_points"] = insights.get("avoid_points")
+    if card.get("recommendation_score") is None:
+        card["recommendation_score"] = insights.get("recommendation_score")
+    if not _string_list(card.get("recommendation_score_evidence_ids")):
+        card["recommendation_score_evidence_ids"] = insights.get(
+            "recommendation_score_evidence_ids"
+        )
 
     candidate_name = (
         _string_or_none(candidate.get("candidate_name"))
@@ -952,6 +968,14 @@ def _normalize_shop_candidate(
             "display_title": display_title,
             "subtitle": _string_or_none(card.get("subtitle")),
             "recommend_reason": recommend_reason,
+            "recommendation_score": (
+                _confidence_value(card.get("recommendation_score"), 0.0)
+                if card.get("recommendation_score") is not None
+                else None
+            ),
+            "recommendation_score_evidence_ids": _string_list(
+                card.get("recommendation_score_evidence_ids")
+            ),
             "avg_price_hint": _string_or_none(card.get("avg_price_hint")),
             "cover_source": _string_or_none(card.get("cover_source")),
             "tags": [],
@@ -959,7 +983,9 @@ def _normalize_shop_candidate(
             "avoid_points": _conclusion_items(card.get("avoid_points"), "text"),
             "suitable_scenes": _string_list(card.get("suitable_scenes"), 5),
         },
-        "review_dimensions": _normalize_review_dimensions(candidate.get("review_dimensions")),
+        "review_dimensions": _normalize_review_dimensions(
+            comment_signals.get("aspect_sentiments")
+        ),
         "comment_summary": comment_summary,
         "missing_fields": _filtered_string_list(
             candidate.get("missing_fields"), ALLOWED_MISSING_FIELDS
@@ -1242,6 +1268,11 @@ def _structure_semantic_issues(
     if not result.video.evidence_ids:
         issues.append("video_missing_evidence")
     for candidate in result.shop_candidates:
+        if (
+            candidate.card_payload.recommendation_score is not None
+            and not candidate.card_payload.recommendation_score_evidence_ids
+        ):
+            issues.append(f"{candidate.candidate_id}:recommendation_score_missing_evidence")
         for dish in candidate.card_payload.recommended_dishes:
             if not dish.evidence_ids:
                 issues.append(f"{candidate.candidate_id}:dish_missing_evidence")
@@ -1291,7 +1322,7 @@ async def comment_signals(request: VideoAnalysisRequest) -> AiResponseEnvelope:
     )
     result = await _prompt_call(
         "comment_analysis",
-        _input_payload(filtered_request),
+        _input_payload(filtered_request, include_raw_comments=True),
         CommentSignalResponse,
         subcalls,
         lambda parsed: _normalize_common_payload("comment_signal", parsed, filtered_request),
