@@ -201,7 +201,6 @@ function infoWindowHtml(shop: MapShop) {
       <div style="font-weight:700;font-size:15px;margin-bottom:4px;">${escapeHtml(shop.display_name)}</div>
       <div style="font-size:12px;color:#756b62;line-height:1.5;">${escapeHtml(shopLocation(shop))}</div>
       <div style="font-size:12px;color:#2b2520;line-height:1.55;margin-top:8px;">${escapeHtml(shopSummary(shop))}</div>
-      <div style="font-size:11px;color:#9a341f;margin-top:8px;">AI 总结，仅供参考</div>
       <div style="display:flex;gap:10px;margin-top:8px;font-size:12px;">
         <a href="/shops/${escapeHtml(shop.id)}" style="color:#c15f3c;font-weight:600;">店铺详情</a>
         ${videoLink}
@@ -594,7 +593,6 @@ export function AmapCanvas() {
             <div className="mt-1 text-xs text-muted">
               {shopLocation(selectedShop)}
             </div>
-            <div className="mt-2 text-xs text-[#9a341f]">AI 总结，仅供参考</div>
           </div>
         ) : null}
 
@@ -619,7 +617,6 @@ export function AmapCanvas() {
                       {shopSummary(shop)}
                     </p>
                     <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
-                      <span className="text-[#9a341f]">AI 总结，仅供参考</span>
                       <a
                         href={`/shops/${shop.id}`}
                         className="inline-flex items-center gap-1 font-medium text-brand"

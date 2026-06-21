@@ -3,14 +3,13 @@ import {
   ExternalLink,
   MapPin,
   Navigation,
-  ShieldCheck,
   Star,
 } from "lucide-react";
-import { formatConfidence, type ShopCardData } from "@/lib/api";
+import { formatRecommendationScore, type ShopCardData } from "@/lib/api";
 
 export function ShopCard({ shop }: { shop: ShopCardData }) {
   const card = shop.card_payload ?? {};
-  const confidence = shop.quality?.shop_confidence;
+  const recommendationScore = card.recommendation_score;
   const sourceVideo = shop.source_videos?.[0];
 
   return (
@@ -46,12 +45,8 @@ export function ShopCard({ shop }: { shop: ShopCardData }) {
                 "位置待确认"}
             </span>
             <span className="inline-flex items-center gap-1">
-              <ShieldCheck size={14} />
-              AI 总结，仅供参考
-            </span>
-            <span className="inline-flex items-center gap-1">
               <Star size={14} />
-              置信度 {formatConfidence(confidence)}
+              AI 评分 {formatRecommendationScore(recommendationScore)}
             </span>
             {sourceVideo ? (
               <a

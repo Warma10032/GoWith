@@ -267,7 +267,7 @@ export function CreatorPageClient({
       </div>
 
       <footer className="mt-8 text-center text-xs text-muted">
-        AI 总结，仅供参考 · 数据来源：B 站 / 高德地图
+        数据来源：B 站 / 高德地图
       </footer>
     </section>
   );

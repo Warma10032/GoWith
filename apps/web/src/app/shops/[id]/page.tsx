@@ -4,12 +4,15 @@ import {
   ExternalLink,
   MapPin,
   RotateCcw,
-  ShieldCheck,
   Star,
   MessageSquareText,
 } from "lucide-react";
 import { TopNav } from "@/components/top-nav";
-import { apiFetch, formatConfidence, type ShopCardData } from "@/lib/api";
+import {
+  apiFetch,
+  formatRecommendationScore,
+  type ShopCardData,
+} from "@/lib/api";
 
 interface ShopMention {
   video_id: string;
@@ -137,7 +140,7 @@ export default async function ShopPage({
   }
 
   const card = data.shop.card_payload ?? {};
-  const confidence = data.shop.quality?.shop_confidence;
+  const recommendationScore = card.recommendation_score;
   const location = [data.shop.city, data.shop.district, data.shop.address]
     .filter(Boolean)
     .join(" · ");
@@ -165,15 +168,11 @@ export default async function ShopPage({
             </div>
             <span className="inline-flex items-center gap-1 rounded-md bg-[#f7efe8] px-2 py-1 text-xs font-medium text-brand">
               <Star size={13} />
-              置信度 {formatConfidence(confidence)}
+              AI 评分 {formatRecommendationScore(recommendationScore)}
             </span>
           </div>
           <div className="mt-5 rounded-lg bg-[#f7efe8] p-4">
-            <div className="flex items-center gap-2 text-sm font-semibold text-brand">
-              <ShieldCheck size={16} />
-              AI 总结，仅供参考
-            </div>
-            <p className="mt-2 leading-7">
+            <p className="leading-7">
               {card.recommend_reason ?? "暂无推荐摘要。"}
             </p>
           </div>
