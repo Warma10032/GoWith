@@ -20,6 +20,13 @@ export function findStructuredAnalysisIssues(result: VideoStructuredAnalysis): s
       issues.push(`${candidate.candidate_id}:recommend_reason_too_long`);
     }
 
+    if (
+      candidate.card_payload.recommendation_score !== null &&
+      !candidate.card_payload.recommendation_score_evidence_ids.length
+    ) {
+      issues.push(`${candidate.candidate_id}:recommendation_score_missing_evidence`);
+    }
+
     for (const dish of candidate.card_payload.recommended_dishes) {
       if (!dish.evidence_ids.length) {
         issues.push(`${candidate.candidate_id}:dish_missing_evidence`);

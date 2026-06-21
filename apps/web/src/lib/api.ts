@@ -40,6 +40,8 @@ export interface ShopCardData {
     display_title?: string;
     subtitle?: string;
     recommend_reason?: string;
+    recommendation_score?: number | null;
+    recommendation_score_evidence_ids?: string[];
     avg_price_hint?: string;
     recommended_dishes?: Array<{ name?: string; reason?: string }>;
     avoid_points?: Array<{ text?: string }>;
@@ -58,18 +60,13 @@ export interface ShopCardData {
   score?: number;
 }
 
-/**
- * 把 jsonb 里可能混存的 number / string 数字统一格式化。pg numeric
- * 列会被 Kysely 当字符串返回（4dfbe65 留下的 gotcha），jsonb 字段则
- * 视 producer 而定；调用方读 quality.shop_confidence 时两种都可能拿到。
- */
-export function formatConfidence(value: unknown, fractionDigits = 2): string {
+export function formatRecommendationScore(value: unknown): string {
   if (typeof value === "number" && Number.isFinite(value)) {
-    return value.toFixed(fractionDigits);
+    return String(Math.round(value * 100));
   }
   if (typeof value === "string" && value.trim() !== "") {
     const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed.toFixed(fractionDigits);
+    if (Number.isFinite(parsed)) return String(Math.round(parsed * 100));
   }
-  return "待评估";
+  return "暂无";
 }

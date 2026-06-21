@@ -186,6 +186,8 @@ export const videoStructuredAnalysisSchema = z.object({
         display_title: z.string(),
         subtitle: z.string().nullable().optional(),
         recommend_reason: z.string(),
+        recommendation_score: confidenceSchema.nullable(),
+        recommendation_score_evidence_ids: z.array(z.string()).default([]),
         avg_price_hint: z.string().nullable().optional(),
         cover_source: z.string().nullable().optional(),
         tags: z.array(z.string()).default([]),

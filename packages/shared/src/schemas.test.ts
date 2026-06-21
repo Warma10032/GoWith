@@ -4,7 +4,11 @@ import {
   videoClassificationResultSchema,
   videoStructuredAnalysisSchema,
 } from "./schemas";
-import { evaluateClassificationReviewNeed } from "./validation";
+import {
+  evaluateClassificationReviewNeed,
+  findStructuredAnalysisIssues,
+} from "./validation";
+import type { VideoStructuredAnalysis } from "./schemas";
 
 describe("video classification schema", () => {
   it("requires review for low confidence classification", () => {
@@ -62,5 +66,28 @@ describe("structured analysis strict schema", () => {
       shop_name: "旧字段",
     });
     expect(result.success).toBe(false);
+  });
+
+  it("rejects an AI recommendation score without evidence", () => {
+    const result = {
+      video: { evidence_ids: ["ev_1"] },
+      shop_candidates: [
+        {
+          candidate_id: "candidate_1",
+          candidate_name: "测试店",
+          risk_flags: [],
+          card_payload: {
+            recommend_reason: "博主明确推荐。",
+            recommendation_score: 0.9,
+            recommendation_score_evidence_ids: [],
+            recommended_dishes: [],
+          },
+        },
+      ],
+    } as unknown as VideoStructuredAnalysis;
+
+    expect(findStructuredAnalysisIssues(result)).toContain(
+      "candidate_1:recommendation_score_missing_evidence",
+    );
   });
 });

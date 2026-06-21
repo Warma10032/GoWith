@@ -1,40 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { formatConfidence } from "./api";
+import { formatRecommendationScore } from "./api";
 
-describe("formatConfidence", () => {
-  it("把 number 格式化为两位小数", () => {
-    expect(formatConfidence(0.86)).toBe("0.86");
-    expect(formatConfidence(1)).toBe("1.00");
-    expect(formatConfidence(0)).toBe("0.00");
+describe("formatRecommendationScore", () => {
+  it("formats fractional scores as whole-number percentages", () => {
+    expect(formatRecommendationScore(0.86)).toBe("86");
+    expect(formatRecommendationScore(1)).toBe("100");
+    expect(formatRecommendationScore(0)).toBe("0");
   });
 
-  it("兼容 numeric-as-string（Kysely + pg numeric 字段）", () => {
-    expect(formatConfidence("0.86")).toBe("0.86");
-    expect(formatConfidence("1")).toBe("1.00");
-    expect(formatConfidence("  0.5  ")).toBe("0.50");
+  it("accepts numeric strings", () => {
+    expect(formatRecommendationScore("0.86")).toBe("86");
+    expect(formatRecommendationScore("1")).toBe("100");
+    expect(formatRecommendationScore("  0.5  ")).toBe("50");
   });
 
-  it("缺失或非法值返回「待评估」", () => {
-    expect(formatConfidence(undefined)).toBe("待评估");
-    expect(formatConfidence(null)).toBe("待评估");
-    expect(formatConfidence("")).toBe("待评估");
-    expect(formatConfidence("   ")).toBe("待评估");
-    expect(formatConfidence("not-a-number")).toBe("待评估");
+  it("returns an empty-state label for missing or invalid values", () => {
+    expect(formatRecommendationScore(undefined)).toBe("暂无");
+    expect(formatRecommendationScore(null)).toBe("暂无");
+    expect(formatRecommendationScore("")).toBe("暂无");
+    expect(formatRecommendationScore("   ")).toBe("暂无");
+    expect(formatRecommendationScore("not-a-number")).toBe("暂无");
   });
 
-  it("拒绝 Infinity / NaN", () => {
-    expect(formatConfidence(Number.NaN)).toBe("待评估");
-    expect(formatConfidence(Number.POSITIVE_INFINITY)).toBe("待评估");
-    expect(formatConfidence(Number.NEGATIVE_INFINITY)).toBe("待评估");
-  });
-
-  it("支持自定义小数位数", () => {
-    expect(formatConfidence(0.8642, 3)).toBe("0.864");
-    expect(formatConfidence("0.5", 0)).toBe("1");
-  });
-
-  it("string 中带前导零与负数也能正确解析", () => {
-    expect(formatConfidence("0.001")).toBe("0.00");
-    expect(formatConfidence("-0.5")).toBe("-0.50");
+  it("rejects non-finite numeric values", () => {
+    expect(formatRecommendationScore(Number.NaN)).toBe("暂无");
+    expect(formatRecommendationScore(Number.POSITIVE_INFINITY)).toBe("暂无");
+    expect(formatRecommendationScore(Number.NEGATIVE_INFINITY)).toBe("暂无");
   });
 });
