@@ -96,7 +96,7 @@ export function AdminShell({
   return (
     <section className="min-h-[calc(100vh-64px)] bg-[#eef1f4]">
       <div className="mx-auto grid max-w-[1520px] gap-4 px-4 py-4 lg:grid-cols-[248px_1fr]">
-        <aside className="sticky top-4 h-[calc(100vh-96px)] overflow-hidden rounded-lg border border-[#202834] bg-[#111820] text-white shadow-card">
+        <aside className="sticky top-4 z-30 h-[calc(100vh-96px)] overflow-hidden rounded-lg border border-[#202834] bg-[#111820] text-white shadow-card lg:fixed lg:left-[max(1rem,calc(50vw-744px))] lg:top-[72px] lg:w-[248px]">
           <Link
             href="/admin"
             className="block border-b border-white/10 px-4 py-4"
@@ -134,7 +134,7 @@ export function AdminShell({
           </div>
         </aside>
 
-        <div className="min-w-0">
+        <div className="min-w-0 lg:col-start-2">
           <div className="rounded-lg border border-[#d7dde5] bg-white p-4 shadow-[0_12px_32px_rgba(26,34,43,0.06)]">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -162,41 +162,43 @@ export function AdminShell({
             </div>
             {counts ? (
               <>
-                <div className="mt-4 grid gap-2 md:grid-cols-3 xl:grid-cols-6">
-                  <Metric
-                    label="博主"
-                    value={counts.creators}
-                    hint="creators"
-                  />
-                  <Metric label="视频" value={counts.videos} hint="videos" />
-                  <Metric
-                    label="候选"
-                    value={counts.shop_candidates}
-                    hint="candidates"
-                  />
-                  <Metric
-                    label="审核"
-                    value={counts.open_reviews}
-                    hint="open tasks"
-                    tone={counts.open_reviews ? "warn" : "normal"}
-                  />
-                  <Metric
-                    label="店铺"
-                    value={counts.published_shops}
-                    hint="published"
-                  />
-                  <Metric
-                    label="Cookie"
-                    value={counts.active_bilibili_cookies}
-                    hint={`${counts.expired_bilibili_cookies + counts.risk_bilibili_cookies} 异常`}
-                    tone={
-                      counts.expired_bilibili_cookies +
-                      counts.risk_bilibili_cookies
-                        ? "warn"
-                        : "normal"
-                    }
-                  />
-                </div>
+                {pathname === "/admin" ? (
+                  <div className="mt-4 grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+                    <Metric
+                      label="博主"
+                      value={counts.creators}
+                      hint="creators"
+                    />
+                    <Metric label="视频" value={counts.videos} hint="videos" />
+                    <Metric
+                      label="候选"
+                      value={counts.shop_candidates}
+                      hint="candidates"
+                    />
+                    <Metric
+                      label="审核"
+                      value={counts.open_reviews}
+                      hint="open tasks"
+                      tone={counts.open_reviews ? "warn" : "normal"}
+                    />
+                    <Metric
+                      label="店铺"
+                      value={counts.published_shops}
+                      hint="published"
+                    />
+                    <Metric
+                      label="Cookie"
+                      value={counts.active_bilibili_cookies}
+                      hint={`${counts.expired_bilibili_cookies + counts.risk_bilibili_cookies} 异常`}
+                      tone={
+                        counts.expired_bilibili_cookies +
+                        counts.risk_bilibili_cookies
+                          ? "warn"
+                          : "normal"
+                      }
+                    />
+                  </div>
+                ) : null}
                 {showActivity ? <RecentActivity runs={recentRuns} /> : null}
               </>
             ) : error ? (
@@ -276,7 +278,7 @@ function RecentActivity({ runs }: { runs: RecentRun[] | null }) {
           <ExternalLink size={11} />
         </Link>
       </div>
-      <ul className="divide-y divide-[#dfe5ec]">
+      <ul className="card-scroll-sm divide-y divide-[#dfe5ec] pr-1">
         {runs.map((run) => (
           <li key={run.id}>
             <Link
