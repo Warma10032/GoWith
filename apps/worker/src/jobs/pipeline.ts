@@ -1254,6 +1254,10 @@ async function structureVideoJob(db: Kysely<DB>, job: Job) {
     analysisInput.evidenceIds,
   );
   for (const candidate of result.shop_candidates) {
+    candidate.card_payload.recommendation_score_evidence_ids = validEvidenceIds(
+      candidate.card_payload.recommendation_score_evidence_ids,
+      analysisInput.evidenceIds,
+    );
     for (const dish of candidate.card_payload.recommended_dishes)
       dish.evidence_ids = validEvidenceIds(
         dish.evidence_ids,
