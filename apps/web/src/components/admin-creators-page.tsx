@@ -97,7 +97,7 @@ export function AdminCreatorsPage() {
             </button>
           </form>
           {error ? <div className="mt-3 rounded-lg border border-[#f2c7bd] bg-[#fff1ee] px-3 py-2 text-sm text-[#9a341f]">{error}</div> : null}
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <div className="card-scroll-md mt-4 grid gap-3 md:grid-cols-2">
             {creators.map((creator) => (
               <article key={creator.id} className="rounded-lg border border-line p-3">
                 <div className="flex gap-3">

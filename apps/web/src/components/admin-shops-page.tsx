@@ -132,8 +132,8 @@ export function AdminShopsPage() {
             <div
               className={
                 showInlineLoading
-                  ? "divide-y divide-line opacity-60"
-                  : "divide-y divide-line"
+                  ? "card-scroll-md divide-y divide-line opacity-60"
+                  : "card-scroll-md divide-y divide-line"
               }
             >
               {shops.map((shop) => {
@@ -141,16 +141,13 @@ export function AdminShopsPage() {
                   title?: string;
                   subtitle?: string;
                   recommend_reason?: string;
+                  recommendation_score?: number | null;
                   avg_price_hint?: string;
                 };
-                const rawConfidence = shop.quality?.shop_confidence;
-                const qualityScore =
-                  typeof rawConfidence === "number"
-                    ? (rawConfidence * 100).toFixed(0)
-                    : typeof rawConfidence === "string" &&
-                        rawConfidence.trim() !== ""
-                      ? (Number(rawConfidence) * 100).toFixed(0)
-                      : "—";
+                const recommendationScore =
+                  typeof card.recommendation_score === "number"
+                    ? (card.recommendation_score * 100).toFixed(0)
+                    : "—";
                 return (
                   <div key={shop.id} className="flex gap-3 py-3">
                     <div className="min-w-0 flex-1">
@@ -173,7 +170,7 @@ export function AdminShopsPage() {
                           {lookupLabel(SHOP_STATUS_LABELS, shop.status)}
                         </span>
                         <span className="text-[11px] text-muted">
-                          AI 评分 {qualityScore}
+                          AI 评分 {recommendationScore}
                         </span>
                       </div>
                       <div className="mt-1 text-xs text-muted">

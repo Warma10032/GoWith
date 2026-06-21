@@ -35,6 +35,34 @@ select {
   scrollbar-width: thin;
 }
 
+/**
+ * 后台列表/卡片用的「最大高度 + 内部滚动」工具类。
+ * - card-scroll：默认高度，使用 min() 同时满足小屏自适应与大屏不过分撑大
+ * - card-scroll-sm / md / lg：固定像素高度，便于表格、网格等需要精确行数的场景
+ *   （如 480px ≈ 10 行表格、640px ≈ 3 行视频网格）
+ */
+@layer components {
+  .card-scroll {
+    @apply overflow-y-auto;
+    max-height: min(60vh, 640px);
+  }
+
+  .card-scroll-sm {
+    @apply overflow-y-auto;
+    max-height: 320px;
+  }
+
+  .card-scroll-md {
+    @apply overflow-y-auto;
+    max-height: 480px;
+  }
+
+  .card-scroll-lg {
+    @apply overflow-y-auto;
+    max-height: 640px;
+  }
+}
+
 @layer components {
   .op-btn {
     @apply inline-flex items-center gap-1 rounded-md border border-[#d7dde5] bg-white px-2 py-1 text-xs font-semibold text-[#263241] transition hover:border-brand hover:text-brand disabled:cursor-not-allowed disabled:opacity-50;

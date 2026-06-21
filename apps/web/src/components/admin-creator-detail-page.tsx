@@ -149,7 +149,7 @@ export function AdminCreatorDetailPage({ creatorId }: { creatorId: string }) {
               </button>
             </form>
             {error ? <div className="mb-3 rounded-lg border border-[#f2c7bd] bg-[#fff1ee] px-3 py-2 text-sm text-[#9a341f]">{error}</div> : null}
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <div className="card-scroll-lg grid gap-3 md:grid-cols-2 xl:grid-cols-3 pr-1">
               {videos.map((video) => (
                 <article key={video.id} className="overflow-hidden rounded-lg border border-line bg-white">
                   {video.cover_url ? (

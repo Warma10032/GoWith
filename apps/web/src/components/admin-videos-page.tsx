@@ -134,8 +134,8 @@ export function AdminVideosPage() {
             <div
               className={
                 showInlineLoading
-                  ? "divide-y divide-line opacity-60"
-                  : "divide-y divide-line"
+                  ? "card-scroll-md divide-y divide-line opacity-60"
+                  : "card-scroll-md divide-y divide-line"
               }
             >
               {videos.map((video) => (
