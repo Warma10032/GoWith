@@ -9,6 +9,7 @@ import { useDebouncedEffect } from "@/lib/use-debounced-effect";
 import { useAdminRealtimeRefresh } from "./admin-realtime-provider";
 import {
   AI_RUN_STAGE_LABELS,
+  ENTITY_TYPE_LABELS,
   PIPELINE_RUN_TYPE_LABELS,
   RUN_STATUS_LABELS,
   lookupLabel,
@@ -90,7 +91,7 @@ export function AdminRunsPage({ mode }: { mode: "pipeline" | "ai" }) {
       title={title}
       description={
         isAi
-          ? "查看 AI 阶段、模型、prompt version 与状态。"
+          ? "查看 AI 阶段、模型、提示词版本与状态。"
           : "查看可视化处理 run，可按状态排障。"
       }
     >
@@ -142,7 +143,9 @@ export function AdminRunsPage({ mode }: { mode: "pipeline" | "ai" }) {
         ) : (
           <div
             className={
-              loading ? "overflow-x-auto opacity-60" : "overflow-x-auto"
+              loading
+                ? "card-scroll-md overflow-x-auto opacity-60"
+                : "card-scroll-md overflow-x-auto"
             }
           >
             <table className="w-full min-w-[760px] text-left text-sm">
@@ -164,7 +167,7 @@ export function AdminRunsPage({ mode }: { mode: "pipeline" | "ai" }) {
                         : lookupLabel(PIPELINE_RUN_TYPE_LABELS, (row as PipelineRun).run_type)}
                     </td>
                     <td className="px-3 py-3">
-                      {row.entity_type}:{row.entity_id.slice(0, 8)}
+                      {lookupLabel(ENTITY_TYPE_LABELS, row.entity_type)}:{row.entity_id.slice(0, 8)}
                     </td>
                     <td className="px-3 py-3">
                       {lookupLabel(RUN_STATUS_LABELS, row.status)}

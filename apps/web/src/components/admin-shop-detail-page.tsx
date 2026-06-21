@@ -16,6 +16,7 @@ import { AdminShell } from "./admin-shell";
 import { adminFetch } from "@/lib/admin-api";
 import { useAdminRealtimeRefresh } from "./admin-realtime-provider";
 import {
+  COORD_TYPE_LABELS,
   MENTION_TYPE_LABELS,
   SENTIMENT_LABELS,
   SHOP_STATUS_LABELS,
@@ -176,6 +177,8 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
     display_title?: string;
     subtitle?: string;
     recommend_reason?: string;
+    recommendation_score?: number | null;
+    recommendation_score_evidence_ids?: string[];
     avg_price_hint?: string;
     recommended_dishes?: { name: string; reason?: string }[];
     avoid_points?: { text: string }[];
@@ -185,6 +188,9 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
     string,
     unknown
   >;
+  const traceableCommentEvidenceIds = new Set(
+    data.review_comments.map((comment) => comment.evidence_id),
+  );
   const review = Object.entries(aggregatedReview).flatMap(([aspect, info]) => {
     if (
       ["comment_summary", "comment_signals"].includes(aspect) ||
@@ -199,9 +205,13 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
       confidence?: number;
       evidence_ids?: string[];
     };
+    const hasTraceableComment = (dimension.evidence_ids ?? []).some((id) =>
+      traceableCommentEvidenceIds.has(id),
+    );
     return typeof dimension.summary === "string" &&
       Number(dimension.confidence ?? 0) > 0.4 &&
-      !dimension.summary.includes("无明确评价")
+      !dimension.summary.includes("无明确评价") &&
+      hasTraceableComment
       ? [[aspect, dimension] as const]
       : [];
   });
@@ -212,7 +222,7 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
   const selectedComments = data.review_comments.filter((comment) =>
     selectedEvidenceIds.has(comment.evidence_id),
   );
-  const qualityScore = readNumber(shop.quality, "shop_confidence");
+  const recommendationScore = readNumber(card, "recommendation_score");
   const creatorCount = (() => {
     const stats = readArray(shop.source_stats, "creator_count");
     return typeof stats[0] === "number" ? stats[0] : null;
@@ -243,23 +253,27 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
       <section className="grid gap-3 md:grid-cols-3">
         <SummaryCard
           label="AI 评分"
-          value={qualityScore !== null ? (qualityScore * 100).toFixed(0) : "—"}
-          hint="shop_confidence"
+          value={
+            recommendationScore !== null
+              ? (recommendationScore * 100).toFixed(0)
+              : "—"
+          }
+          hint="博主观点与评论综合推荐度"
         />
         <SummaryCard
           label="覆盖博主"
           value={creatorCount !== null ? String(creatorCount) : "—"}
-          hint="creator_count"
+          hint="覆盖博主数量"
         />
         <SummaryCard
           label="覆盖视频"
           value={videoCount !== null ? String(videoCount) : "—"}
-          hint="video_count"
+          hint="覆盖视频数量"
         />
         <SummaryCard
           label="评论线索"
           value={commentCount !== null ? String(commentCount) : "—"}
-          hint="comment_signal_count"
+          hint="被采纳为证据的评论条数"
         />
         <SummaryCard
           label="发布于"
@@ -268,7 +282,7 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
               ? new Date(shop.published_at).toLocaleString("zh-CN")
               : "—"
           }
-          hint="published_at"
+          hint="前台首次发布时间"
         />
         <SummaryCard
           label="最近审核"
@@ -277,7 +291,7 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
               ? new Date(shop.last_reviewed_at).toLocaleString("zh-CN")
               : "—"
           }
-          hint="last_reviewed_at"
+          hint="最近一次人工审核时间"
         />
       </section>
 
@@ -285,9 +299,6 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
         <h2 className="text-sm font-semibold text-ink">
           AI 识别的店铺基本信息
         </h2>
-        <p className="mt-1 text-xs text-muted">
-          AI 总结，仅供参考；所有数据来自卡片 JSON 字段。
-        </p>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
           <Field label="店名" value={card.display_title ?? shop.display_name} />
           <Field label="副标题" value={card.subtitle ?? "—"} />
@@ -303,7 +314,7 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
           <Field label="地址" value={shop.address ?? "—"} />
           <Field
             label="坐标"
-            value={`${shop.lng}, ${shop.lat} (${shop.coord_type})`}
+            value={`${shop.lng}, ${shop.lat} · ${lookupLabel(COORD_TYPE_LABELS, shop.coord_type)}`}
           />
           <Field
             label="人均"
@@ -347,12 +358,12 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
 
       <section className="mt-4 rounded-lg border border-line bg-white p-4">
         <h2 className="text-sm font-semibold text-ink">
-          评论分析（aggregated_review）
+          评论分析（按维度聚合）
         </h2>
         <p className="mt-1 text-xs text-muted">
           按维度聚合评论正负面，置信度越高质量越好。
         </p>
-        <div className="mt-3 grid gap-2 md:grid-cols-2">
+        <div className="card-scroll-md mt-3 grid gap-2 md:grid-cols-2 pr-1">
           {review.map(([aspect, info]) => (
             <button
               key={aspect}
@@ -387,7 +398,11 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
               ) : null}
               <span className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-brand">
                 <MessageSquareText size={12} />
-                查看 {info.evidence_ids?.length ?? 0} 条原评论
+                查看{" "}
+                {(info.evidence_ids ?? []).filter((id) =>
+                  traceableCommentEvidenceIds.has(id),
+                ).length}{" "}
+                条原评论
               </span>
             </button>
           ))}
@@ -406,7 +421,7 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
                   {selectedReview[0]} · 原评论证据
                 </h2>
                 <p className="mt-1 text-xs text-muted">
-                  {selectedComments.length} 条可追溯评论，AI 总结仅供参考
+                  {selectedComments.length} 条可追溯评论
                 </p>
               </div>
               <button
@@ -495,9 +510,9 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
       <section className="mt-4 rounded-lg border border-line bg-white p-4">
         <h2 className="text-sm font-semibold text-ink">来源视频与博主</h2>
         <p className="mt-1 text-xs text-muted">
-          通过 shop_video_mentions 关联。点击进入视频处理控制台查看证据链。
+          通过店铺-视频引用表关联。点击进入视频处理控制台查看证据链。
         </p>
-        <div className="mt-3 divide-y divide-line">
+        <div className="card-scroll-md mt-3 divide-y divide-line">
           {mentions.map((mention) => {
             const video = videoById.get(mention.video_id);
             const creator = video ? creatorById.get(video.creator_id) : null;
@@ -566,9 +581,9 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
       </section>
 
       <section className="mt-4 rounded-lg border border-line bg-white p-4">
-        <h2 className="text-sm font-semibold text-ink">完整 JSON</h2>
+        <h2 className="text-sm font-semibold text-ink">完整 JSON（开发者参考）</h2>
         <p className="mt-1 text-xs text-muted">
-          质量与来源统计的原始数据，便于排查。
+          质量、来源统计、评论聚合的原始字段，便于排查。键名沿用数据库字段。
         </p>
         <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-[#0d131a] p-3 text-[11px] leading-5 text-[#d9e1ea]">
           {JSON.stringify(

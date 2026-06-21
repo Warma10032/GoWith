@@ -23,12 +23,14 @@ import {
 } from "./admin-realtime-provider";
 import { SafeImage } from "./safe-image";
 import {
+  AI_RUN_STAGE_LABELS,
   POI_MATCH_STATUS_LABELS,
   RISK_FLAG_LABELS,
   RUN_STATUS_LABELS,
   SHOP_CANDIDATE_STATUS_LABELS,
   VIDEO_CONTENT_TYPE_LABELS,
   VIDEO_WORKFLOW_STATUS_LABELS,
+  formatPromptVersion,
   lookupLabel,
   lookupLabels,
 } from "@/lib/labels";
@@ -298,13 +300,15 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
                 <div className="h-full bg-brand" style={{ width: `${progress}%` }} />
               </div>
               {error ? <div className="mt-3 rounded-lg border border-[#f2c7bd] bg-[#fff1ee] px-3 py-2 text-sm text-[#9a341f]">{error}</div> : null}
-              <div className="mt-4 space-y-3">
+              <div className="card-scroll mt-4 space-y-3 pr-1">
                 {events.length ? (
                   events.map((event) => (
                     <div key={event.id} className={`rounded-lg border p-3 text-sm ${event.level === "error" ? "border-[#f2c7bd] bg-[#fff1ee]" : event.level === "success" ? "border-[#c9dfc8] bg-[#eef7ed]" : "border-line bg-white"}`}>
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="font-semibold">{event.title}</div>
-                        <div className="text-xs text-muted">{event.stage} · {event.event_type} · {formatTime(event.created_at)}</div>
+                        <div className="text-xs text-muted">
+                          阶段 {lookupLabel(AI_RUN_STAGE_LABELS, event.stage)} · 类型 {event.event_type.split(".").pop()} · {formatTime(event.created_at)}
+                        </div>
                       </div>
                       {event.message ? <p className="mt-1 text-sm text-muted">{event.message}</p> : null}
                       {event.detail_json && Object.keys(event.detail_json).length ? (
@@ -330,17 +334,17 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
               {!detail.assets.length ? <Empty text="暂无字幕或 ASR 文本。" /> : null}
             </Panel>
 
-            <Panel title="AI 运行">
+            <Panel title="AI 运行" bodyClassName="card-scroll-md min-w-0 space-y-2 pr-1">
               {detail.ai_runs.slice(0, 6).map((run) => (
                 <div key={run.id} className="rounded-lg border border-line p-3 text-sm">
                   <div className="font-medium">{run.stage} · {run.status}</div>
-                  <div className="mt-1 text-xs text-muted">{run.provider}/{run.model} · {run.prompt_version}</div>
+                  <div className="mt-1 text-xs text-muted">{run.provider}/{run.model} · {formatPromptVersion(run.prompt_version)}</div>
                 </div>
               ))}
               {!detail.ai_runs.length ? <Empty text="暂无 AI 运行记录。" /> : null}
             </Panel>
 
-            <Panel title="候选店铺（POI / 晋升 / 驳回）">
+            <Panel title="候选店铺（POI / 晋升 / 驳回）" bodyClassName="card-scroll min-w-0 space-y-2 pr-1">
               {dedupeCandidates(detail.candidates).map((candidate) => (
                 <div key={candidate.id} className="rounded-lg border border-line p-3 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -442,11 +446,22 @@ function dedupeCandidates(candidates: VideoCandidateRow[]): VideoCandidateRow[] 
   return Array.from(byKey.values());
 }
 
-function Panel({ title, children }: { title: string; children: ReactNode }) {
+function Panel({
+  title,
+  children,
+  bodyClassName,
+}: {
+  title: string;
+  children: ReactNode;
+  /**
+   * 覆盖 Panel 内容区 className，用于给长列表卡片加 `card-scroll*` 限高。
+   */
+  bodyClassName?: string;
+}) {
   return (
     <section className="overflow-hidden rounded-lg border border-line bg-white p-4">
       <h2 className="mb-3 font-semibold">{title}</h2>
-      <div className="min-w-0 space-y-2">{children}</div>
+      <div className={bodyClassName ?? "min-w-0 space-y-2"}>{children}</div>
     </section>
   );
 }
@@ -501,7 +516,7 @@ function CandidatePanel({
         <Field label="地址线索" value={c.address_hint ?? "—"} />
         <Field label="城市" value={[c.city, c.district, c.business_area].filter(Boolean).join(" · ") || "—"} />
         <Field label="选中 POI" value={c.selected_poi_id ?? "未选"} />
-        <Field label="置信度" value={`name ${fmtPct(c.name_confidence)} · loc ${fmtPct(c.location_confidence)} · sum ${fmtPct(c.summary_confidence)}`} />
+        <Field label="置信度" value={`店名 ${fmtPct(c.name_confidence)} · 位置 ${fmtPct(c.location_confidence)} · 摘要 ${fmtPct(c.summary_confidence)}`} />
       </div>
       <div className="flex flex-wrap gap-2">
         <button onClick={onEdit} className="rounded-md border border-line px-2 py-1 text-xs font-medium" disabled={isBusy}>

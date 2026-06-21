@@ -16,6 +16,7 @@ import {
   AI_RUN_STAGE_LABELS,
   PIPELINE_RUN_TYPE_LABELS,
   RUN_STATUS_LABELS,
+  formatPromptVersion,
   lookupLabel,
 } from "@/lib/labels";
 
@@ -175,12 +176,12 @@ export function AdminRunDetailPage({ runId }: AdminRunDetailPageProps) {
 
           {data.type === "ai" ? (
             <dl className="mt-4 grid gap-2 text-xs sm:grid-cols-3">
-              <Meta label="provider" value={data.run.provider} />
-              <Meta label="model" value={data.run.model} />
-              <Meta label="prompt_version" value={data.run.prompt_version} />
+              <Meta label="模型提供方" value={data.run.provider} />
+              <Meta label="模型" value={data.run.model} />
+              <Meta label="提示词版本" value={formatPromptVersion(data.run.prompt_version)} />
               {"input_hash" in data.run && data.run.input_hash ? (
                 <Meta
-                  label="input_hash"
+                  label="输入指纹"
                   value={data.run.input_hash.slice(0, 16)}
                 />
               ) : null}
@@ -192,7 +193,7 @@ export function AdminRunDetailPage({ runId }: AdminRunDetailPageProps) {
           Object.keys(data.run.summary_json).length ? (
             <details className="mt-4 rounded-md border border-line bg-[#f8fafc] p-3">
               <summary className="cursor-pointer text-xs font-semibold text-[#5f6b79]">
-                summary_json
+                摘要 JSON
               </summary>
               <pre className="mt-2 max-h-60 overflow-auto rounded-md bg-white p-2 text-[11px] text-[#16202b]">
                 {JSON.stringify(data.run.summary_json, null, 2)}
@@ -203,7 +204,7 @@ export function AdminRunDetailPage({ runId }: AdminRunDetailPageProps) {
           {data.type === "ai" && data.run.output_payload ? (
             <details className="mt-4 rounded-md border border-line bg-[#f8fafc] p-3">
               <summary className="cursor-pointer text-xs font-semibold text-[#5f6b79]">
-                output_payload
+                原始输出
               </summary>
               <pre className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap break-all rounded-md bg-white p-2 text-[11px] text-[#16202b]">
                 {JSON.stringify(data.run.output_payload, null, 2)}
@@ -217,10 +218,10 @@ export function AdminRunDetailPage({ runId }: AdminRunDetailPageProps) {
             <h2 className="text-sm font-semibold">
               事件流（{data.events.length} 条）
             </h2>
-            <span className="text-[11px] text-muted">按 created_at asc</span>
+            <span className="text-[11px] text-muted">按创建时间升序</span>
           </div>
           {data.events.length ? (
-            <ol className="space-y-3">
+            <ol className="card-scroll space-y-3 pr-1">
               {data.events.map((event) => (
                 <li
                   key={event.id}
