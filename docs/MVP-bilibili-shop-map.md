@@ -432,6 +432,8 @@ flowchart TD
         "title": "某某牛肉面",
         "subtitle": "适合想吃实惠面馆的人",
         "recommend_reason": "牛肉分量足，汤底浓，评论区也多次提到性价比不错。",
+        "recommendation_score": 0.86,
+        "recommendation_score_evidence_ids": ["ev_201"],
         "avg_price_hint": "约30元",
         "category": "面馆",
         "recommended_dishes": ["牛肉面", "卤味"],
@@ -479,6 +481,7 @@ flowchart TD
 - 信息没提及就输出 `unknown`，不能编。
 - 每个重要结论必须有证据来源。
 - 推荐理由必须能支撑店铺卡片。
+- AI 总评分表达基于博主观点的推荐程度，不得使用店铺信息置信度代替；无足够观点证据时不评分。
 - 缺失字段必须显式列出。
 - 风险标记进入后台审核。
 

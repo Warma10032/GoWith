@@ -327,6 +327,8 @@ MVP 建议混合抽样：
     "display_title": "某某牛肉面",
     "subtitle": "适合一人食的日常面馆",
     "recommend_reason": "博主推荐牛肉面，认为牛肉分量足、汤底浓郁，适合一人食。",
+    "recommendation_score": 0.86,
+    "recommendation_score_evidence_ids": ["ev_201"],
     "avg_price_hint": "约30元",
     "cover_source": "video_cover",
     "tags": [],
@@ -397,13 +399,15 @@ MVP 建议混合抽样：
 
 `recommend_reason` 必须来自字幕中的博主结论，至少表达“是否推荐、推荐或不推荐什么菜、具体原因”中的可确认部分。评论只能进入 `comment_summary` / `aggregated_review`，不得替代博主推荐结论。
 
+`recommendation_score` 是 0-1 的 AI 综合推荐度，不是店铺信息置信度。评分以博主字幕态度为主，评论只能在不反转博主观点的前提下辅助校准：0.80-1.00 为强烈推荐，0.60-0.79 为正向但有条件，0.40-0.59 为中性或褒贬不一，0.20-0.39 为负面，0.00-0.19 为明确不推荐。没有足够的博主态度证据时为 `null`；非空评分必须提供 `recommendation_score_evidence_ids`。`shop_confidence` 仅用于信息质量与发布门槛，不在前台作为推荐评分展示。
+
 `structure_video.v3` 先用小 Schema 从字幕提炼店名、城市、博主态度与推荐菜，再进入完整结构化调用。若完整调用对已确认的探店视频返回空 `shop_candidates`，仅在小 Schema 有店名字幕证据时生成一个候选，避免出现“分析成功但没有 POI 候选”的断链。
 
-`comment_analysis.v4` 使用两段式评论分析：`comment_relevance_filter.v1` 从最多 80 条样本中只返回与当前店铺直接相关的 `comment_id`，随后 M3 仅分析这些评论。维度仍使用 `sentiment / summary / confidence / evidence_ids`，`summary` 禁止出现评论编号，编号只保存在 `evidence_ids`。后台点击整个评价维度后，通过 `evidence.source_ref_id -> video_comments.id` 展示关联原评论。
+`comment_analysis.v5` 使用两段式评论分析：`comment_relevance_filter.v1` 从最多 80 条样本中只返回与当前店铺直接相关的 `comment_id`，随后 M3 仅接收并分析这些筛选结果。维度仍使用 `sentiment / summary / confidence / evidence_ids`，`summary` 禁止出现评论编号，编号只保存在 `evidence_ids`。结构化综合不得用字幕证据覆盖评论维度；后台点击整个评价维度后，通过 `evidence.source_ref_id -> video_comments.id` 展示关联原评论。
 
 AI Worker 采用双层模型：视频分类、评论相关性筛选、JSON 修复等预处理任务使用 `MINIMAX_SIMPLE_MODEL`（默认 `MiniMax-M2.7`）；字幕洞察、评论维度结论、视频结构化总结等分析任务使用 `MINIMAX_COMPLEX_MODEL`（默认 `MiniMax-M3`）。两段式调用的子模型写入 `usage.model`，顶层 `ai_runs.model` 记录产出最终阶段结果的模型。
 
-全部 Prompt 集中在 `apps/ai-worker/app/prompts.py`，由注册表保存 key、版本、模型层级、任务目标、证据优先级、决策规则和 Pydantic JSON Schema 输出契约。结构化阶段依次执行 `transcript_fact_extraction.v1`、`transcript_opinion_analysis.v1`、`structure_synthesis.v4`；若单店探店缺少候选、视频缺少证据或推荐菜缺少字幕证据，则执行一次 `structure_semantic_retry.v1`。`json_repair.v2` 只能修复 JSON 语法和字段形状，禁止改变业务语义。
+全部 Prompt 集中在 `apps/ai-worker/app/prompts.py`，由注册表保存 key、版本、模型层级、任务目标、证据优先级、决策规则和 Pydantic JSON Schema 输出契约。结构化阶段依次执行 `transcript_fact_extraction.v1`、`transcript_opinion_analysis.v2`、`structure_synthesis.v5`；若单店探店缺少候选、视频缺少证据、推荐评分缺少字幕证据或推荐菜缺少字幕证据，则执行一次 `structure_semantic_retry.v2`。`json_repair.v2` 只能修复 JSON 语法和字段形状，禁止改变业务语义。
 
 AI Worker envelope 的 `subcalls` 按调用顺序返回每次模型调用的 stage、model、prompt_version、input_hash、输入摘要、原始输出、解析输出、usage、status 与错误。Worker 将顶层阶段写为父 `ai_runs`，子调用通过 `parent_ai_run_id` 与 `call_index` 关联；失败 HTTP 响应也携带已发生的 subcalls 并落库。
 
@@ -411,17 +415,18 @@ AI Worker envelope 的 `subcalls` 按调用顺序返回每次模型调用的 sta
 
 ### 7.3 字段要求
 
-| 字段                            | 要求                                            |
-| ------------------------------- | ----------------------------------------------- |
-| `candidate_name`                | 不能确定时为 `null`，并添加 `shop_name_missing` |
-| `normalized_name`               | 清洗后的名称，不能凭空补充分店名                |
-| `location_hints.city`           | 能判断城市就必须输出；不能判断则为 `null`       |
-| `time_range`                    | 多店铺视频必须尽量输出                          |
-| `card_payload.recommend_reason` | 必须适合首页卡片，控制在 60 字以内              |
-| `review_dimensions`             | 信息不足时使用 `unknown`                        |
-| `evidence_ids`                  | 重要结论必须非空                                |
-| `missing_fields`                | 缺什么写什么，不能沉默                          |
-| `risk_flags`                    | 触发审核的重要依据                              |
+| 字段                                | 要求                                            |
+| ----------------------------------- | ----------------------------------------------- |
+| `candidate_name`                    | 不能确定时为 `null`，并添加 `shop_name_missing` |
+| `normalized_name`                   | 清洗后的名称，不能凭空补充分店名                |
+| `location_hints.city`               | 能判断城市就必须输出；不能判断则为 `null`       |
+| `time_range`                        | 多店铺视频必须尽量输出                          |
+| `card_payload.recommend_reason`     | 必须适合首页卡片，控制在 60 字以内              |
+| `card_payload.recommendation_score` | 推荐程度，非空时必须引用字幕证据                |
+| `review_dimensions`                 | 信息不足时使用 `unknown`                        |
+| `evidence_ids`                      | 重要结论必须非空                                |
+| `missing_fields`                    | 缺什么写什么，不能沉默                          |
+| `risk_flags`                        | 触发审核的重要依据                              |
 
 ## 8. POI 匹配 Schema
 

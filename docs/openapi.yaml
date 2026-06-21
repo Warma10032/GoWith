@@ -19,6 +19,10 @@ info:
   title: GoWith API
   version: 0.1.0
   description: MVP REST API for Bilibili shop discovery, admin review, publishing, and recommendation logging.
+  x-shop-card-contract: >-
+    card_payload.recommendation_score is a nullable 0-1 AI recommendation degree backed by
+    card_payload.recommendation_score_evidence_ids. quality.shop_confidence remains an internal
+    information-quality signal and is not a user-facing recommendation score.
 servers:
   - url: http://localhost:4000
 paths:
