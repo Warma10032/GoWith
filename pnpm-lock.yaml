@@ -59,6 +59,9 @@ importers:
       bullmq:
         specifier: ^5.34.4
         version: 5.78.1
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
       fastify:
         specifier: ^5.2.1
         version: 5.8.5
@@ -142,6 +145,9 @@ importers:
       bullmq:
         specifier: ^5.34.4
         version: 5.78.1
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
       kysely:
         specifier: ^0.27.5
         version: 0.27.6
@@ -1200,6 +1206,10 @@ packages:
 
   dlv@1.1.3:
     resolution: {integrity: sha512-+HlytyjlPKnIG8XuRG8WvmBP8xs8P71y+SKKS6ZXWoEgLuePxtDoUEiH7WkdePWrQ5JBpE6aoVqfZfJUQkjXwA==}
+
+  dotenv@16.6.1:
+    resolution: {integrity: sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow==}
+    engines: {node: '>=12'}
 
   electron-to-chromium@1.5.373:
     resolution: {integrity: sha512-G2Hym8JIf/QreuseqkDibgH8Ci8KfJzqGDKdakbhSx9UltwRBH2cBLAWU/lBX0sCdv0TlhyxQyDCnSfxgMWsjA==}
@@ -2762,6 +2772,8 @@ snapshots:
   didyoumean@1.2.2: {}
 
   dlv@1.1.3: {}
+
+  dotenv@16.6.1: {}
 
   electron-to-chromium@1.5.373: {}
 
