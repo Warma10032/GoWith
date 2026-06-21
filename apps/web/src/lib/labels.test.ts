@@ -7,6 +7,7 @@ import {
   SHOP_STATUS_LABELS,
   VIDEO_CONTENT_TYPE_LABELS,
   VIDEO_WORKFLOW_STATUS_LABELS,
+  formatPromptVersion,
   lookupLabel,
   lookupLabels,
 } from "./labels";
@@ -70,5 +71,28 @@ describe("table coverage sanity", () => {
   test("POI match status covers selected / rejected", () => {
     expect(POI_MATCH_STATUS_LABELS.selected).toBe("已选用");
     expect(POI_MATCH_STATUS_LABELS.rejected).toBe("已驳回");
+  });
+});
+
+describe("formatPromptVersion", () => {
+  test("translates known prompt keys and keeps version suffix", () => {
+    expect(formatPromptVersion("comment_analysis.v5")).toBe("评论分析 v5");
+    expect(formatPromptVersion("comment_relevance_filter.v1")).toBe(
+      "评论相关性筛选 v1",
+    );
+    expect(formatPromptVersion("transcript_fact_extraction.v1")).toBe(
+      "转写事实抽取 v1",
+    );
+    expect(formatPromptVersion("structure_synthesis.v5")).toBe("结构化综合 v5");
+  });
+
+  test("falls back to raw key for unknown prompt names", () => {
+    expect(formatPromptVersion("future_module.v9")).toBe("future_module v9");
+  });
+
+  test("returns em dash for empty / null / undefined", () => {
+    expect(formatPromptVersion(null)).toBe("—");
+    expect(formatPromptVersion(undefined)).toBe("—");
+    expect(formatPromptVersion("")).toBe("—");
   });
 });

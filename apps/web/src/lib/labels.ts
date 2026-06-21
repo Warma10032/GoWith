@@ -77,10 +77,42 @@ export const PIPELINE_RUN_TYPE_LABELS: Readonly<Record<string, string>> = {
 };
 
 export const AI_RUN_STAGE_LABELS: Readonly<Record<string, string>> = {
+  // 老 pipeline stage 名（向后兼容，ai_runs.stage 历史值）
   classify_video: "探店分类",
   extract_shop_candidates: "抽取候选店铺",
   comment_signal: "评论线索",
   structure_video: "结构化总结",
+  match_poi: "POI 匹配",
+  // 新 ai-worker 把 sub-call 的 prompt key 直接写入 stage 字段
+  comment_relevance_filter: "评论相关性筛选",
+  comment_analysis: "评论分析",
+  transcript_fact_extraction: "转写事实抽取",
+  transcript_opinion_analysis: "转写观点分析",
+  structure_synthesis: "结构化综合",
+  structure_semantic_retry: "结构化语义重试",
+  json_repair: "JSON 修复",
+};
+
+/**
+ * AI 子任务（prompt key）→ 中文标签。
+ *
+ * 后端在 comment_signal / structure_video 等大阶段下又拆出若干 sub-call
+ * prompt，每个 prompt 有独立版本号（key.vN）。详情页的「提示词版本」字段会
+ * 把完整 key.vN 字符串直接展示出来，这里维护 key 到中文的映射，并配合
+ * {@link formatPromptVersion} 工具函数做 key.vN → 「中文 vN」格式化。
+ */
+export const AI_PROMPT_LABELS: Readonly<Record<string, string>> = {
+  classify_video: "探店分类",
+  comment_relevance_filter: "评论相关性筛选",
+  comment_analysis: "评论分析",
+  transcript_fact_extraction: "转写事实抽取",
+  transcript_opinion_analysis: "转写观点分析",
+  structure_synthesis: "结构化综合",
+  structure_semantic_retry: "结构化语义重试",
+  json_repair: "JSON 修复",
+  extract_shop_candidates: "抽取候选店铺",
+  structure_video: "结构化总结",
+  match_poi: "POI 匹配",
 };
 
 export const REVIEW_TASK_TYPE_LABELS: Readonly<Record<string, string>> = {
@@ -146,6 +178,26 @@ export const BILIBILI_ERROR_CODE_LABELS: Readonly<Record<string, string>> = {
   region_locked: "区域受限",
 };
 
+export const ENTITY_TYPE_LABELS: Readonly<Record<string, string>> = {
+  video: "视频",
+  creator: "博主",
+  shop: "店铺",
+  shop_candidate: "店铺候选",
+  poi: "POI",
+  ai_run: "AI 运行",
+  pipeline_run: "处理任务",
+};
+
+/**
+ * 坐标系标识：高德/腾讯/谷歌中国 → GCJ-02，国际 GPS → WGS-84，百度 → BD-09。
+ * 详情页「坐标」字段后缀展示，让 admin 一眼看清地图数据来源类型。
+ */
+export const COORD_TYPE_LABELS: Readonly<Record<string, string>> = {
+  gcj02: "GCJ-02（高德 / 谷歌中国）",
+  wgs84: "WGS-84（GPS）",
+  bd09: "BD-09（百度）",
+};
+
 /**
  * 在映射表里查中文标签；找不到时返回传入的原始值（开发期便于识别新枚举），
  * 不会把 undefined 渲染到 UI。
@@ -171,4 +223,18 @@ export function lookupLabels(
     .map((item) => lookupLabel(table, item))
     .filter((item) => item !== "—");
   return mapped.length > 0 ? mapped.join("，") : "无";
+}
+
+/**
+ * 把后端返回的 prompt_version 字符串（形如 `comment_analysis.v5`）格式化为
+ * 「中文标签 v5」。找不到 key 时回退为原始字符串，避免把脏数据渲染成空白。
+ */
+export function formatPromptVersion(version: string | null | undefined): string {
+  if (!version) return "—";
+  // 后端 prompt_version 形如 `comment_analysis.v5`，版本段已带 `v` 前缀。
+  // 因此只补一个空格分隔，不重复 `v`。
+  const [key = "", ...rest] = version.split(".");
+  const label = AI_PROMPT_LABELS[key] ?? key;
+  const versionTail = rest.length > 0 ? ` ${rest.join(".")}` : "";
+  return `${label}${versionTail}`;
 }
