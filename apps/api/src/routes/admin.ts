@@ -129,15 +129,12 @@ function reviewEvidenceIds(review: unknown) {
 }
 
 function mergeAggregatedReview(
-  candidateReview: unknown,
   candidateCommentSummary: unknown,
   commentSignals: unknown,
 ) {
   const signals = asRecord(commentSignals);
-  const signalReview = asRecord(signals.aspect_sentiments);
-  const review = { ...signalReview, ...asRecord(candidateReview) };
   return {
-    ...review,
+    ...asRecord(signals.aspect_sentiments),
     comment_summary: candidateCommentSummary,
     comment_signals: {
       shop_name_mentions: signals.shop_name_mentions ?? [],
@@ -1110,7 +1107,6 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
           .executeTakeFirst();
         const commentSignalCount = countCommentSignals(commentSignals);
         const aggregatedReview = mergeAggregatedReview(
-          candidate.review_dimensions,
           candidate.comment_summary,
           commentSignals,
         );

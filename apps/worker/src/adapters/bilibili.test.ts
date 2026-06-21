@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { mapViewDetailToVideoMetadata, normalizeSubtitleBody, signWbiParams } from "./bilibili";
+import {
+  mapViewDetailToVideoMetadata,
+  normalizeSubtitleBody,
+  resolveVideoCategory,
+  signWbiParams,
+} from "./bilibili";
+import { BILIBILI_CATEGORY_BY_TID } from "./bilibili-categories";
 
 describe("bilibili adapter helpers", () => {
   it("signs WBI params deterministically", () => {
@@ -43,6 +49,19 @@ describe("bilibili adapter helpers", () => {
     expect(video.aid).toBe("123");
     expect(video.cid).toBe("456");
     expect(video.raw_payload_id).toBe("raw_1");
+  });
+
+  it("resolves a food category from tid when Bilibili omits its names", () => {
+    expect(resolveVideoCategory({ tid: 212, tid_v2: 2150, tname: "", tname_v2: "" })).toBe(
+      "美食侦探",
+    );
+  });
+
+  it("contains the complete CSV category mapping", () => {
+    expect(BILIBILI_CATEGORY_BY_TID.size).toBe(152);
+    expect(BILIBILI_CATEGORY_BY_TID.get(24)).toBe("MAD·AMV");
+    expect(BILIBILI_CATEGORY_BY_TID.get(212)).toBe("美食侦探");
+    expect(BILIBILI_CATEGORY_BY_TID.get(250)).toBe("出行");
   });
 
   it("normalizes subtitle body segments", () => {

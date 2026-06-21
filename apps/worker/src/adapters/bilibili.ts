@@ -5,6 +5,7 @@ import path from "node:path";
 import type { Kysely } from "kysely";
 import type { DB, Json } from "@gowith/db";
 import { env } from "../env";
+import { BILIBILI_CATEGORY_BY_TID } from "./bilibili-categories";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -145,6 +146,13 @@ function firstString(...values: unknown[]): string | null {
     if (parsed && parsed.trim()) return parsed;
   }
   return null;
+}
+
+export function resolveVideoCategory(view: JsonRecord): string | null {
+  const category = firstString(view.tname_v2, view.tname, view.type_name);
+  if (category) return category;
+  const tid = asNumber(view.tid);
+  return tid === null ? null : (BILIBILI_CATEGORY_BY_TID.get(tid) ?? null);
 }
 
 function uniqueStrings(values: string[]): string[] {
@@ -432,7 +440,7 @@ export function mapViewDetailToVideoMetadata(
     duration_sec: parseDurationSeconds(view.duration ?? firstPage.duration),
     published_at: publishedAtFromSeconds(view.pubdate),
     tags,
-    category: firstString(view.tname_v2, view.tname, view.type_name),
+    category: resolveVideoCategory(view),
     stats,
     raw_payload_id: rawPayloadId,
     transcript: [],

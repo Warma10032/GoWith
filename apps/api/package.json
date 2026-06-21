@@ -20,6 +20,7 @@
     "@gowith/shared": "workspace:*",
     "bcryptjs": "^2.4.3",
     "bullmq": "^5.34.4",
+    "dotenv": "^16.4.5",
     "fastify": "^5.2.1",
     "kysely": "^0.27.5",
     "zod": "^3.24.1"

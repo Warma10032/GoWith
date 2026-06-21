@@ -1,10 +1,15 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { config as dotenvConfig } from "dotenv";
 
 // 用 import.meta.url 锚定源文件位置，而不是 cwd —— 这样无论
 // `pnpm dev`（concurrently，从 monorepo 根启动）还是 `pnpm dev:api`
 // （从 apps/api 启动）都能解析到同一个 uploads 目录。
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenvConfig({
+  path: path.resolve(__dirname, "..", "..", "..", "..", ".env"),
+  override: false,
+});
 
 export const env = {
   port: Number(process.env.PORT ?? 4000),
