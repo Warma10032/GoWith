@@ -1,19 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CheckCircle2,
   ExternalLink,
+  Link2,
   LoaderCircle,
   MessageSquareText,
   RefreshCw,
+  Search,
   Send,
   ThumbsUp,
+  Trash2,
   X,
 } from "lucide-react";
 import { AdminShell } from "./admin-shell";
 import { adminFetch } from "@/lib/admin-api";
+import { buildDianpingSearchUrl } from "@/lib/dianping-search";
 import { useAdminRealtimeRefresh } from "./admin-realtime-provider";
 import {
   COORD_TYPE_LABELS,
@@ -93,6 +97,29 @@ type ShopResponse = {
   videos: ShopVideo[];
   creators: ShopCreator[];
   review_comments: ReviewComment[];
+  external_links: ShopExternalLink[];
+  poi_business: PoiBusiness | null;
+};
+
+type ShopExternalLink = {
+  id: string;
+  platform: "dianping" | "meituan";
+  external_shop_id: string | null;
+  external_url: string;
+  source: "manual" | "official_api";
+  status: "confirmed" | "removed";
+  confirmed_at: string | null;
+};
+
+type PoiBusiness = {
+  provider: "amap" | "tencent" | "baidu";
+  rating: number | string | null;
+  avg_cost: number | string | null;
+  phone: string | null;
+  business_hours: string | null;
+  tags: string[];
+  photos: Array<{ title?: string | null; url: string }>;
+  provider_updated_at: string | null;
 };
 
 type ReviewComment = {
@@ -113,16 +140,12 @@ function readNumber(obj: Record<string, unknown>, key: string): number | null {
   return typeof v === "number" ? v : null;
 }
 
-function readArray(obj: Record<string, unknown>, key: string): unknown[] {
-  const v = obj[key];
-  return Array.isArray(v) ? v : [];
-}
-
 export function AdminShopDetailPage({ shopId }: { shopId: string }) {
   const [data, setData] = useState<ShopResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [dianpingUrl, setDianpingUrl] = useState("");
   const [selectedReviewAspect, setSelectedReviewAspect] = useState<
     string | null
   >(null);
@@ -133,6 +156,11 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
         `/api/admin/shops/${shopId}`,
       );
       setData(payload);
+      setDianpingUrl(
+        payload.external_links.find(
+          (link) => link.platform === "dianping" && link.status === "confirmed",
+        )?.external_url ?? "",
+      );
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
@@ -143,6 +171,13 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
     void load();
   }, [load]);
   useAdminRealtimeRefresh(load);
+
+  // 必须在 `if (!data) return ...` 之前调用，否则 hooks 顺序在两次 render 之间不一致。
+  const dianpingSearchUrl = useMemo(
+    () =>
+      buildDianpingSearchUrl(data?.shop.city, data?.shop.display_name),
+    [data?.shop.city, data?.shop.display_name],
+  );
 
   async function runAction(label: string, action: () => Promise<void>) {
     setBusy(label);
@@ -173,6 +208,9 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
   }
 
   const { shop, mentions, videos, creators } = data;
+  const dianpingLink = data.external_links.find(
+    (link) => link.platform === "dianping" && link.status === "confirmed",
+  );
   const card = (shop.card_payload ?? {}) as {
     display_title?: string;
     subtitle?: string;
@@ -223,18 +261,9 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
     selectedEvidenceIds.has(comment.evidence_id),
   );
   const recommendationScore = readNumber(card, "recommendation_score");
-  const creatorCount = (() => {
-    const stats = readArray(shop.source_stats, "creator_count");
-    return typeof stats[0] === "number" ? stats[0] : null;
-  })();
-  const videoCount = (() => {
-    const stats = readArray(shop.source_stats, "video_count");
-    return typeof stats[0] === "number" ? stats[0] : null;
-  })();
-  const commentCount = (() => {
-    const stats = readArray(shop.source_stats, "comment_signal_count");
-    return typeof stats[0] === "number" ? stats[0] : null;
-  })();
+  const creatorCount = readNumber(shop.source_stats, "creator_count");
+  const videoCount = readNumber(shop.source_stats, "video_count");
+  const commentCount = readNumber(shop.source_stats, "comment_signal_count");
 
   const videoById = new Map(videos.map((v) => [v.id, v]));
   const creatorById = new Map(creators.map((c) => [c.id, c]));
@@ -295,6 +324,165 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
         />
       </section>
 
+      <section className="mt-4 flex flex-wrap gap-2 rounded-lg border border-line bg-white p-4">
+        {shop.status === "draft" ? (
+          <button
+            onClick={() =>
+              void runAction("通过审核", async () => {
+                await adminFetch(`/api/admin/shops/${shop.id}/approve`, {
+                  method: "POST",
+                });
+              })
+            }
+            className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-sm font-semibold text-white"
+            disabled={!!busy}
+          >
+            {busy === "通过审核" ? (
+              <LoaderCircle size={14} className="animate-spin" />
+            ) : (
+              <CheckCircle2 size={14} />
+            )}
+            通过审核
+          </button>
+        ) : null}
+        {shop.status === "approved" ? (
+          <button
+            onClick={() =>
+              void runAction("发布", async () => {
+                await adminFetch(`/api/admin/shops/${shop.id}/publish`, {
+                  method: "POST",
+                });
+              })
+            }
+            className="inline-flex items-center gap-2 rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white"
+            disabled={!!busy}
+          >
+            {busy === "发布" ? (
+              <LoaderCircle size={14} className="animate-spin" />
+            ) : (
+              <Send size={14} />
+            )}
+            发布
+          </button>
+        ) : null}
+        <button
+          onClick={() => void load()}
+          className="inline-flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm font-medium"
+          disabled={!!busy}
+        >
+          <RefreshCw size={14} />
+          刷新
+        </button>
+      </section>
+
+      <section className="mt-4 rounded-lg border border-line bg-white p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-ink">大众点评门店链接</h2>
+            <p className="mt-1 text-xs leading-5 text-muted">
+              仅保存管理员确认的 HTTPS 点评链接，不请求或抓取页面数据。
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            {dianpingSearchUrl ? (
+              <a
+                href={dianpingSearchUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 rounded-md border border-line bg-white px-2.5 py-1.5 text-xs font-medium text-ink transition-colors hover:border-brand hover:text-brand"
+              >
+                <Search size={12} />
+                在大众点评搜索「{shop.display_name}」
+                <ExternalLink size={10} />
+              </a>
+            ) : (
+              <span
+                title={
+                  shop.city
+                    ? `暂未配置城市「${shop.city}」的大众点评 ID，请联系研发补全 cityId 字典。`
+                    : "店铺尚未写入城市信息，无法构造搜索 URL。"
+                }
+                className="inline-flex cursor-not-allowed items-center gap-1 rounded-md border border-dashed border-line bg-white px-2.5 py-1.5 text-xs font-medium text-muted"
+              >
+                <Search size={12} />
+                缺少城市信息
+              </span>
+            )}
+            {dianpingLink ? (
+              <a
+                href={dianpingLink.external_url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-xs font-medium text-brand"
+              >
+                打开当前链接
+                <ExternalLink size={12} />
+              </a>
+            ) : null}
+          </div>
+        </div>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+          <input
+            type="url"
+            value={dianpingUrl}
+            onChange={(event) => setDianpingUrl(event.target.value)}
+            placeholder="https://www.dianping.com/shop/..."
+            className="min-w-0 flex-1 rounded-md border border-line px-3 py-2 text-sm"
+            disabled={!!busy}
+          />
+          <button
+            type="button"
+            onClick={() =>
+              void runAction("绑定大众点评", async () => {
+                await adminFetch(
+                  `/api/admin/shops/${shop.id}/external-links/dianping`,
+                  {
+                    method: "PUT",
+                    body: JSON.stringify({ url: dianpingUrl }),
+                  },
+                );
+              })
+            }
+            className="inline-flex items-center justify-center gap-2 rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            disabled={!!busy || !dianpingUrl.trim()}
+          >
+            {busy === "绑定大众点评" ? (
+              <LoaderCircle size={14} className="animate-spin" />
+            ) : (
+              <Link2 size={14} />
+            )}
+            {dianpingLink ? "更新链接" : "绑定链接"}
+          </button>
+          {dianpingLink ? (
+            <button
+              type="button"
+              onClick={() =>
+                void runAction("移除大众点评", async () => {
+                  await adminFetch(
+                    `/api/admin/shops/${shop.id}/external-links/dianping`,
+                    { method: "DELETE" },
+                  );
+                })
+              }
+              className="inline-flex items-center justify-center gap-2 rounded-md border border-[#f2c7bd] px-3 py-2 text-sm font-medium text-[#9a341f] disabled:opacity-50"
+              disabled={!!busy}
+            >
+              {busy === "移除大众点评" ? (
+                <LoaderCircle size={14} className="animate-spin" />
+              ) : (
+                <Trash2 size={14} />
+              )}
+              移除
+            </button>
+          ) : null}
+        </div>
+        {dianpingLink?.external_shop_id ? (
+          <p className="mt-2 text-xs text-muted">
+            点评店铺 ID：{dianpingLink.external_shop_id}
+          </p>
+        ) : null}
+      </section>
+
       <section className="mt-4 rounded-lg border border-line bg-white p-4">
         <h2 className="text-sm font-semibold text-ink">
           AI 识别的店铺基本信息
@@ -319,6 +507,29 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
           <Field
             label="人均"
             value={shop.avg_price_hint ?? card.avg_price_hint ?? "—"}
+          />
+          <Field
+            label="高德评分"
+            value={
+              data.poi_business?.rating !== null &&
+              data.poi_business?.rating !== undefined
+                ? String(data.poi_business.rating)
+                : "—"
+            }
+          />
+          <Field
+            label="高德人均"
+            value={
+              data.poi_business?.avg_cost !== null &&
+              data.poi_business?.avg_cost !== undefined
+                ? `¥${Math.round(Number(data.poi_business.avg_cost))}`
+                : "—"
+            }
+          />
+          <Field label="高德电话" value={data.poi_business?.phone ?? "—"} />
+          <Field
+            label="高德营业时间"
+            value={data.poi_business?.business_hours ?? "—"}
           />
         </div>
         {Array.isArray(card.recommended_dishes) &&
@@ -399,9 +610,11 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
               <span className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-brand">
                 <MessageSquareText size={12} />
                 查看{" "}
-                {(info.evidence_ids ?? []).filter((id) =>
-                  traceableCommentEvidenceIds.has(id),
-                ).length}{" "}
+                {
+                  (info.evidence_ids ?? []).filter((id) =>
+                    traceableCommentEvidenceIds.has(id),
+                  ).length
+                }{" "}
                 条原评论
               </span>
             </button>
@@ -581,7 +794,9 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
       </section>
 
       <section className="mt-4 rounded-lg border border-line bg-white p-4">
-        <h2 className="text-sm font-semibold text-ink">完整 JSON（开发者参考）</h2>
+        <h2 className="text-sm font-semibold text-ink">
+          完整 JSON（开发者参考）
+        </h2>
         <p className="mt-1 text-xs text-muted">
           质量、来源统计、评论聚合的原始字段，便于排查。键名沿用数据库字段。
         </p>
@@ -608,57 +823,6 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
           {message}
         </div>
       ) : null}
-
-      <section className="mt-4 flex flex-wrap gap-2 rounded-lg border border-line bg-white p-4">
-        {shop.status === "draft" ? (
-          <button
-            onClick={() =>
-              void runAction("通过审核", async () => {
-                await adminFetch(`/api/admin/shops/${shop.id}/approve`, {
-                  method: "POST",
-                });
-              })
-            }
-            className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-sm font-semibold text-white"
-            disabled={!!busy}
-          >
-            {busy === "通过审核" ? (
-              <LoaderCircle size={14} className="animate-spin" />
-            ) : (
-              <CheckCircle2 size={14} />
-            )}
-            通过审核
-          </button>
-        ) : null}
-        {shop.status === "approved" ? (
-          <button
-            onClick={() =>
-              void runAction("发布", async () => {
-                await adminFetch(`/api/admin/shops/${shop.id}/publish`, {
-                  method: "POST",
-                });
-              })
-            }
-            className="inline-flex items-center gap-2 rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white"
-            disabled={!!busy}
-          >
-            {busy === "发布" ? (
-              <LoaderCircle size={14} className="animate-spin" />
-            ) : (
-              <Send size={14} />
-            )}
-            发布
-          </button>
-        ) : null}
-        <button
-          onClick={() => void load()}
-          className="inline-flex items-center gap-2 rounded-md border border-line px-3 py-2 text-sm font-medium"
-          disabled={!!busy}
-        >
-          <RefreshCw size={14} />
-          刷新
-        </button>
-      </section>
     </AdminShell>
   );
 }
