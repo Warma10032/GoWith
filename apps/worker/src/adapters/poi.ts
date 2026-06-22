@@ -32,7 +32,12 @@ type AmapPoi = {
     opentime_today?: string;
     cost?: string;
     rating?: string;
+    tag?: string;
   };
+  photos?: Array<{
+    title?: string;
+    url?: string;
+  }>;
 };
 
 type AmapTextResponse = {
@@ -119,6 +124,28 @@ function parseLocation(
   const lat = Number(latText);
   if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
   return { lng, lat };
+}
+
+function parseOptionalNumber(value: string | undefined): number | null {
+  if (!value?.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseTags(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(/[|,，]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizePhotos(photos: AmapPoi["photos"]) {
+  return (photos ?? []).flatMap((photo) =>
+    photo.url?.trim()
+      ? [{ title: photo.title?.trim() || null, url: photo.url.trim() }]
+      : [],
+  );
 }
 
 function buildQuery(
@@ -269,6 +296,15 @@ export function normalizeAmapTextResponse(
         location: { ...location, coord_type: "gcj02" as const },
         category: poi.type ?? null,
         category_code: poi.typecode ?? null,
+        phone: poi.business?.tel?.trim() || null,
+        business_hours:
+          poi.business?.opentime_week?.trim() ||
+          poi.business?.opentime_today?.trim() ||
+          null,
+        rating: parseOptionalNumber(poi.business?.rating),
+        avg_cost: parseOptionalNumber(poi.business?.cost),
+        tags: parseTags(poi.business?.tag),
+        photos: normalizePhotos(poi.photos),
         match_features: features,
         match_score: scoreFeatures(features, query.forced_review),
       };
@@ -303,6 +339,12 @@ export function normalizeAmapTextResponse(
           business_area: selected.business_area,
           location: selected.location,
           category: selected.category,
+          phone: selected.phone,
+          business_hours: selected.business_hours,
+          rating: selected.rating,
+          avg_cost: selected.avg_cost,
+          tags: selected.tags,
+          photos: selected.photos,
           raw_provider_payload_id: rawPayloadId,
         }
       : null,

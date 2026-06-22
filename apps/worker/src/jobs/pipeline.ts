@@ -578,7 +578,8 @@ async function buildAnalysisInput(
     TranscriptSegment & { segment_id: string; confidence?: number | null }
   > = [];
   const commentSamples: CommentSample[] = [];
-  const metadataEvidence: VideoAnalysisRequest["video_metadata"]["evidence"] = [];
+  const metadataEvidence: VideoAnalysisRequest["video_metadata"]["evidence"] =
+    [];
 
   const titleEvidenceId = await addTextEvidence(db, evidenceIds, {
     videoId: video.id,
@@ -611,7 +612,11 @@ async function buildAnalysisInput(
       sourceRefId: `${video.id}:tag:${tag}`,
       text: tag,
     });
-    metadataEvidence.push({ evidence_id: tagEvidenceId, source: "tag", text: tag });
+    metadataEvidence.push({
+      evidence_id: tagEvidenceId,
+      source: "tag",
+      text: tag,
+    });
   }
 
   const textRows = await db
@@ -825,7 +830,8 @@ async function saveFailedAiCalls(
       entity_id: videoId,
       provider: "minimax",
       model: error.subcalls.at(-1)?.model ?? "unknown",
-      prompt_version: error.subcalls.at(-1)?.prompt_version ?? `${stage}.failed`,
+      prompt_version:
+        error.subcalls.at(-1)?.prompt_version ?? `${stage}.failed`,
       input_hash: crypto
         .createHash("sha256")
         .update(JSON.stringify(request))
@@ -1589,8 +1595,16 @@ async function matchPoiJob(db: Kysely<DB>, job: Job) {
         lng: candidate.location.lng,
         lat: candidate.location.lat,
         coord_type: candidate.location.coord_type,
-        phone: null,
-        business_hours: null,
+        phone: candidate.phone ?? null,
+        business_hours: candidate.business_hours ?? null,
+        rating: candidate.rating ?? null,
+        avg_cost: candidate.avg_cost ?? null,
+        tags: candidate.tags,
+        // node-postgres treats a JavaScript array as a PostgreSQL array. The
+        // target column is jsonb, so serialize explicitly to keep the value a
+        // valid JSON array instead of producing `{"..."},{"..."}`.
+        photos: JSON.stringify(candidate.photos),
+        provider_updated_at: new Date(),
         raw_payload_id: result.raw_payload_id,
         created_at: new Date(),
         updated_at: new Date(),
@@ -1605,6 +1619,13 @@ async function matchPoiJob(db: Kysely<DB>, job: Job) {
           business_area: candidate.business_area ?? null,
           category: candidate.category ?? null,
           category_code: candidate.category_code ?? null,
+          phone: candidate.phone ?? null,
+          business_hours: candidate.business_hours ?? null,
+          rating: candidate.rating ?? null,
+          avg_cost: candidate.avg_cost ?? null,
+          tags: candidate.tags,
+          photos: JSON.stringify(candidate.photos),
+          provider_updated_at: new Date(),
           raw_payload_id: result.raw_payload_id,
           updated_at: new Date(),
         }),

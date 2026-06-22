@@ -34,7 +34,15 @@ describe("poi adapter helpers", () => {
             pname: "上海市",
             cityname: "上海市",
             adname: "黄浦区",
-            business: { business_area: "南京东路" },
+            business: {
+              business_area: "南京东路",
+              tel: "021-12345678",
+              opentime_week: "周一至周日 10:00-22:00",
+              rating: "4.7",
+              cost: "42",
+              tag: "牛肉面|一人食",
+            },
+            photos: [{ title: "门头", url: "https://example.com/shop.jpg" }],
           },
         ],
       },
@@ -62,6 +70,12 @@ describe("poi adapter helpers", () => {
       name: "阿强牛肉面",
       location: { lng: 121.4826, lat: 31.2382, coord_type: "gcj02" },
       category_code: "050100",
+      phone: "021-12345678",
+      business_hours: "周一至周日 10:00-22:00",
+      rating: 4.7,
+      avg_cost: 42,
+      tags: ["牛肉面", "一人食"],
+      photos: [{ title: "门头", url: "https://example.com/shop.jpg" }],
     });
     expect(result.match_score).toBeGreaterThanOrEqual(0.9);
     expect(result.match_status).toBe("auto_matched");
