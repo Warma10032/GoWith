@@ -36,7 +36,9 @@ export const adminTaskEventSchema = z.object({
   run_type: z.enum(pipelineRunTypes).optional(),
   entity_type: z.string(),
   entity_id: uuidSchema,
-  status: z.enum(["queued", "running", "success", "failed", "cancelled"]).optional(),
+  status: z
+    .enum(["queued", "running", "success", "failed", "cancelled"])
+    .optional(),
   event_id: uuidSchema.optional(),
   stage: z.string().optional(),
   event_type: z.string().optional(),
@@ -110,106 +112,129 @@ export const commentSignalExtractionSchema = z.object({
     )
     .default([]),
   status_mentions: z.array(z.record(z.unknown())).default([]),
-  aspect_sentiments: z.record(
-    z.object({
-      sentiment: z.enum(sentiments),
-      summary: z.string(),
-      confidence: confidenceSchema,
-      evidence_ids: z.array(z.string()).default([]),
-    }),
-  ).default({}),
+  aspect_sentiments: z
+    .record(
+      z.object({
+        sentiment: z.enum(sentiments),
+        summary: z.string(),
+        confidence: confidenceSchema,
+        evidence_ids: z.array(z.string()).default([]),
+      }),
+    )
+    .default({}),
   risk_flags: z.array(z.enum(riskFlags)).default([]),
 });
 
-const conclusionSchema = z.object({
-  name: z.string().optional(),
-  text: z.string().optional(),
-  reason: z.string().optional(),
-  confidence: confidenceSchema,
-  evidence_ids: z.array(z.string()).default([]),
-}).strict();
-
-const reviewDimensionSchema = z.object({
-  sentiment: z.enum(sentiments),
-  summary: z.string(),
-  confidence: confidenceSchema,
-  evidence_ids: z.array(z.string()).default([]),
-}).strict();
-
-export const videoStructuredAnalysisSchema = z.object({
-  schema_version: z.literal("video_structured_analysis.v1"),
-  video: z.object({
-    video_id: z.string(),
-    bvid: z.string(),
-    creator_id: z.string(),
-    title: z.string(),
-    content_type: z.enum(contentTypes),
-    is_shop_visit: z.boolean(),
-    overall_summary: z.string(),
-    primary_city: z.string().nullable().optional(),
-    primary_categories: z.array(z.string()).default([]),
-    analysis_confidence: confidenceSchema,
-    risk_flags: z.array(z.enum(riskFlags)).default([]),
+const conclusionSchema = z
+  .object({
+    name: z.string().optional(),
+    text: z.string().optional(),
+    reason: z.string().optional(),
+    confidence: confidenceSchema,
     evidence_ids: z.array(z.string()).default([]),
-  }).strict(),
-  shop_candidates: z.array(
-    z.object({
-      candidate_id: z.string(),
-      candidate_name: z.string().nullable(),
-      normalized_name: z.string().nullable(),
-      name_confidence: confidenceSchema,
-      alias_names: z.array(z.string()).default([]),
-      candidate_type: z.enum(["physical_shop", "unknown", "not_shop"]),
-      category: z.object({
-        primary: z.string().nullable(),
-        secondary: z.string().nullable(),
-        confidence: confidenceSchema,
-      }).strict(),
-      location_hints: z.object({
-        country: z.string().nullable().optional(),
-        province: z.string().nullable().optional(),
-        city: z.string().nullable().optional(),
-        district: z.string().nullable().optional(),
-        business_area: z.string().nullable().optional(),
-        address_text: z.string().nullable().optional(),
-        landmarks: z.array(z.string()).default([]),
-        confidence: confidenceSchema,
-      }).strict(),
-      time_range: z
-        .object({
-          start_sec: z.number().nullable().optional(),
-          end_sec: z.number().nullable().optional(),
-        }).strict()
-        .nullable()
-        .optional(),
-      card_payload: z.object({
-        display_title: z.string(),
-        subtitle: z.string().nullable().optional(),
-        recommend_reason: z.string(),
-        recommendation_score: confidenceSchema.nullable(),
-        recommendation_score_evidence_ids: z.array(z.string()).default([]),
-        avg_price_hint: z.string().nullable().optional(),
-        cover_source: z.string().nullable().optional(),
-        tags: z.array(z.string()).default([]),
-        recommended_dishes: z.array(conclusionSchema).default([]),
-        avoid_points: z.array(conclusionSchema).default([]),
-        suitable_scenes: z.array(z.string()).default([]),
-      }).strict(),
-      review_dimensions: z.record(reviewDimensionSchema).default({}),
-      comment_summary: z.object({
-        positive_points: z.array(z.string()).default([]),
-        negative_points: z.array(z.string()).default([]),
-        controversial_points: z.array(z.string()).default([]),
-        recent_status_points: z.array(z.string()).default([]),
-        confidence: confidenceSchema,
+  })
+  .strict();
+
+const reviewDimensionSchema = z
+  .object({
+    sentiment: z.enum(sentiments),
+    summary: z.string(),
+    confidence: confidenceSchema,
+    evidence_ids: z.array(z.string()).default([]),
+  })
+  .strict();
+
+export const videoStructuredAnalysisSchema = z
+  .object({
+    schema_version: z.literal("video_structured_analysis.v1"),
+    video: z
+      .object({
+        video_id: z.string(),
+        bvid: z.string(),
+        creator_id: z.string(),
+        title: z.string(),
+        content_type: z.enum(contentTypes),
+        is_shop_visit: z.boolean(),
+        overall_summary: z.string(),
+        primary_city: z.string().nullable().optional(),
+        primary_categories: z.array(z.string()).default([]),
+        analysis_confidence: confidenceSchema,
+        risk_flags: z.array(z.enum(riskFlags)).default([]),
         evidence_ids: z.array(z.string()).default([]),
-      }).strict(),
-      missing_fields: z.array(z.enum(missingFields)).default([]),
-      risk_flags: z.array(z.enum(riskFlags)).default([]),
-      manual_review_reasons: z.array(z.string()).default([]),
-    }).strict(),
-  ),
-}).strict();
+      })
+      .strict(),
+    shop_candidates: z.array(
+      z
+        .object({
+          candidate_id: z.string(),
+          candidate_name: z.string().nullable(),
+          normalized_name: z.string().nullable(),
+          name_confidence: confidenceSchema,
+          alias_names: z.array(z.string()).default([]),
+          candidate_type: z.enum(["physical_shop", "unknown", "not_shop"]),
+          category: z
+            .object({
+              primary: z.string().nullable(),
+              secondary: z.string().nullable(),
+              confidence: confidenceSchema,
+            })
+            .strict(),
+          location_hints: z
+            .object({
+              country: z.string().nullable().optional(),
+              province: z.string().nullable().optional(),
+              city: z.string().nullable().optional(),
+              district: z.string().nullable().optional(),
+              business_area: z.string().nullable().optional(),
+              address_text: z.string().nullable().optional(),
+              landmarks: z.array(z.string()).default([]),
+              confidence: confidenceSchema,
+            })
+            .strict(),
+          time_range: z
+            .object({
+              start_sec: z.number().nullable().optional(),
+              end_sec: z.number().nullable().optional(),
+            })
+            .strict()
+            .nullable()
+            .optional(),
+          card_payload: z
+            .object({
+              display_title: z.string(),
+              subtitle: z.string().nullable().optional(),
+              recommend_reason: z.string(),
+              recommendation_score: confidenceSchema.nullable(),
+              recommendation_score_evidence_ids: z
+                .array(z.string())
+                .default([]),
+              avg_price_hint: z.string().nullable().optional(),
+              cover_source: z.string().nullable().optional(),
+              tags: z.array(z.string()).default([]),
+              recommended_dishes: z.array(conclusionSchema).default([]),
+              avoid_points: z.array(conclusionSchema).default([]),
+              suitable_scenes: z.array(z.string()).default([]),
+            })
+            .strict(),
+          review_dimensions: z.record(reviewDimensionSchema).default({}),
+          comment_summary: z
+            .object({
+              positive_points: z.array(z.string()).default([]),
+              negative_points: z.array(z.string()).default([]),
+              controversial_points: z.array(z.string()).default([]),
+              recent_status_points: z.array(z.string()).default([]),
+              confidence: confidenceSchema,
+              evidence_ids: z.array(z.string()).default([]),
+            })
+            .strict(),
+          missing_fields: z.array(z.enum(missingFields)).default([]),
+          risk_flags: z.array(z.enum(riskFlags)).default([]),
+          manual_review_reasons: z.array(z.string()).default([]),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
 
 export const poiMatchResultSchema = z.object({
   schema_version: z.literal("poi_match.v1"),
@@ -230,29 +255,57 @@ export const poiMatchResultSchema = z.object({
         coord_type: z.enum(["gcj02", "bd09", "wgs84"]),
       }),
       category: z.string().nullable().optional(),
+      phone: z.string().nullable().optional(),
+      business_hours: z.string().nullable().optional(),
+      rating: z.number().nullable().optional(),
+      avg_cost: z.number().nullable().optional(),
+      tags: z.array(z.string()).default([]),
+      photos: z
+        .array(
+          z.object({
+            title: z.string().nullable().optional(),
+            url: z.string(),
+          }),
+        )
+        .default([]),
       raw_provider_payload_id: z.string().nullable().optional(),
     })
     .nullable(),
-  candidates: z.array(
-    z.object({
-      provider_poi_id: z.string(),
-      name: z.string(),
-      address: z.string().nullable().optional(),
-      province: z.string().nullable().optional(),
-      city: z.string().nullable().optional(),
-      district: z.string().nullable().optional(),
-      business_area: z.string().nullable().optional(),
-      location: z.object({
-        lng: z.number(),
-        lat: z.number(),
-        coord_type: z.enum(["gcj02", "bd09", "wgs84"]),
+  candidates: z
+    .array(
+      z.object({
+        provider_poi_id: z.string(),
+        name: z.string(),
+        address: z.string().nullable().optional(),
+        province: z.string().nullable().optional(),
+        city: z.string().nullable().optional(),
+        district: z.string().nullable().optional(),
+        business_area: z.string().nullable().optional(),
+        location: z.object({
+          lng: z.number(),
+          lat: z.number(),
+          coord_type: z.enum(["gcj02", "bd09", "wgs84"]),
+        }),
+        category: z.string().nullable().optional(),
+        category_code: z.string().nullable().optional(),
+        phone: z.string().nullable().optional(),
+        business_hours: z.string().nullable().optional(),
+        rating: z.number().nullable().optional(),
+        avg_cost: z.number().nullable().optional(),
+        tags: z.array(z.string()).default([]),
+        photos: z
+          .array(
+            z.object({
+              title: z.string().nullable().optional(),
+              url: z.string(),
+            }),
+          )
+          .default([]),
+        match_features: z.record(z.number()).default({}),
+        match_score: z.number().min(0).max(1),
       }),
-      category: z.string().nullable().optional(),
-      category_code: z.string().nullable().optional(),
-      match_features: z.record(z.number()).default({}),
-      match_score: z.number().min(0).max(1),
-    }),
-  ).default([]),
+    )
+    .default([]),
   match_score: z.number().min(0).max(1),
   match_status: z.enum(poiMatchStatuses),
   risk_flags: z.array(z.enum(riskFlags)).default([]),
@@ -312,15 +365,47 @@ export const mapShopSchema = z.object({
   card_payload: z.record(z.unknown()).nullable().optional(),
   quality: z.record(z.unknown()).nullable().optional(),
   source_videos: z.array(sourceVideoSchema).default([]),
+  external_links: z
+    .array(
+      z.object({
+        id: z.string(),
+        platform: z.enum(["dianping", "meituan"]),
+        url: z.string().url(),
+      }),
+    )
+    .default([]),
+  poi_business: z
+    .object({
+      provider: z.enum(["amap", "tencent", "baidu"]),
+      rating: z.number().nullable(),
+      avg_cost: z.number().nullable(),
+      phone: z.string().nullable(),
+      business_hours: z.string().nullable(),
+      tags: z.array(z.string()),
+      photos: z.array(
+        z.object({
+          title: z.string().nullable().optional(),
+          url: z.string(),
+        }),
+      ),
+    })
+    .nullable()
+    .optional(),
 });
 
 export const shopSearchResultSchema = mapShopSchema.extend({
   rank_score: z.number().optional(),
 });
 
-export type VideoClassificationResult = z.infer<typeof videoClassificationResultSchema>;
-export type CommentSignalExtraction = z.infer<typeof commentSignalExtractionSchema>;
-export type VideoStructuredAnalysis = z.infer<typeof videoStructuredAnalysisSchema>;
+export type VideoClassificationResult = z.infer<
+  typeof videoClassificationResultSchema
+>;
+export type CommentSignalExtraction = z.infer<
+  typeof commentSignalExtractionSchema
+>;
+export type VideoStructuredAnalysis = z.infer<
+  typeof videoStructuredAnalysisSchema
+>;
 export type PoiMatchResult = z.infer<typeof poiMatchResultSchema>;
 export type PublishedShopSnapshot = z.infer<typeof publishedShopSnapshotSchema>;
 export type MapShop = z.infer<typeof mapShopSchema>;
