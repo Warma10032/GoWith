@@ -1,10 +1,4 @@
-import {
-  Compass,
-  MapPin,
-  Store,
-  UserRound,
-  Video,
-} from "lucide-react";
+import { Compass, MapPin, Store, UserRound, Video } from "lucide-react";
 import { TopNav } from "@/components/top-nav";
 import { ShopCard } from "@/components/shop-card";
 import { HomeFilters } from "@/components/home-filters";
@@ -62,7 +56,13 @@ export default async function HomePage() {
           ) : (
             <div className="space-y-3">
               {shops.map((shop) => (
-                <ShopCard key={shop.id} shop={shop} />
+                <ShopCard
+                  key={shop.id}
+                  shop={shop}
+                  recommendationRequestId={
+                    recommended.recommendation_request_id
+                  }
+                />
               ))}
             </div>
           )}

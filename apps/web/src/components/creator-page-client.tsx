@@ -233,7 +233,7 @@ export function CreatorPageClient({
             <div className="space-y-3">
               {shops.map((shop) => (
                 <div key={shop.id} className="space-y-1">
-                  <ShopCard shop={shop} />
+                  <ShopCard shop={shop} surface="creator_page" />
                   {shop.latest_video?.published_at ? (
                     <p className="px-1 text-[11px] text-muted">
                       出自视频 · {formatTime(shop.latest_video.published_at)} ·{" "}

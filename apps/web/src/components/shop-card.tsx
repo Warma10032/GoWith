@@ -1,16 +1,29 @@
 import Link from "next/link";
-import {
-  ExternalLink,
-  MapPin,
-  Navigation,
-  Star,
-} from "lucide-react";
+import { ExternalLink, MapPin, Navigation, Star } from "lucide-react";
 import { formatRecommendationScore, type ShopCardData } from "@/lib/api";
+import { ExternalPlatformLink } from "./external-platform-link";
 
-export function ShopCard({ shop }: { shop: ShopCardData }) {
+export function ShopCard({
+  shop,
+  surface = "home",
+  recommendationRequestId,
+}: {
+  shop: ShopCardData;
+  surface?: "home" | "creator_page";
+  recommendationRequestId?: string;
+}) {
   const card = shop.card_payload ?? {};
   const recommendationScore = card.recommendation_score;
   const sourceVideo = shop.source_videos?.[0];
+  const dianpingLink = shop.external_links?.find(
+    (link) => link.platform === "dianping",
+  );
+  const providerPrice = shop.poi_business?.avg_cost;
+  const priceLabel =
+    card.avg_price_hint ??
+    (providerPrice !== null && providerPrice !== undefined
+      ? `高德人均 ¥${Math.round(providerPrice)}`
+      : "人均待确认");
 
   return (
     <article className="rounded-lg border border-line bg-white p-4 shadow-card">
@@ -32,7 +45,7 @@ export function ShopCard({ shop }: { shop: ShopCardData }) {
               </p>
             </div>
             <span className="shrink-0 rounded-md bg-[#f7efe8] px-2 py-1 text-xs font-medium text-brand">
-              {card.avg_price_hint ?? "人均待确认"}
+              {priceLabel}
             </span>
           </div>
           <p className="mt-3 text-sm leading-6 text-ink">
@@ -59,6 +72,20 @@ export function ShopCard({ shop }: { shop: ShopCardData }) {
                 <ExternalLink size={14} />
                 <span className="max-w-[160px] truncate">原视频</span>
               </a>
+            ) : null}
+            {dianpingLink ? (
+              <ExternalPlatformLink
+                href={dianpingLink.url}
+                linkId={dianpingLink.id}
+                shopId={shop.id}
+                surface={surface}
+                recommendationRequestId={recommendationRequestId}
+                recommendationItemId={shop.recommendation_item_id}
+                className="inline-flex items-center gap-1 font-medium text-brand"
+              >
+                <ExternalLink size={14} />
+                大众点评
+              </ExternalPlatformLink>
             ) : null}
             <Link
               href={`/shops/${shop.id}`}

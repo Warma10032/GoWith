@@ -58,6 +58,20 @@ export interface ShopCardData {
   }>;
   recommendation_item_id?: string;
   score?: number;
+  external_links?: Array<{
+    id: string;
+    platform: "dianping" | "meituan";
+    url: string;
+  }>;
+  poi_business?: {
+    provider: "amap" | "tencent" | "baidu";
+    rating: number | null;
+    avg_cost: number | null;
+    phone: string | null;
+    business_hours: string | null;
+    tags: string[];
+    photos: Array<{ title?: string | null; url: string }>;
+  } | null;
 }
 
 export function formatRecommendationScore(value: unknown): string {

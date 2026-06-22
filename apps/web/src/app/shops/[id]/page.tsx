@@ -8,6 +8,7 @@ import {
   MessageSquareText,
 } from "lucide-react";
 import { TopNav } from "@/components/top-nav";
+import { ExternalPlatformLink } from "@/components/external-platform-link";
 import {
   apiFetch,
   formatRecommendationScore,
@@ -151,6 +152,10 @@ export default async function ShopPage({
     .map((dish) => dish.name)
     .filter((dish): dish is string => Boolean(dish));
   const review = reviewData(data.shop.aggregated_review);
+  const poiBusiness = data.shop.poi_business;
+  const dianpingLink = data.shop.external_links?.find(
+    (link) => link.platform === "dianping",
+  );
 
   return (
     <main>
@@ -185,7 +190,63 @@ export default async function ShopPage({
               value={recommendedDishes.join(" / ") || "暂无"}
             />
             <Info title="证据条数" value={`${data.evidence.length} 条`} />
+            <Info
+              title="高德评分"
+              value={
+                poiBusiness?.rating !== null &&
+                poiBusiness?.rating !== undefined
+                  ? String(poiBusiness.rating)
+                  : "暂无"
+              }
+            />
+            <Info
+              title="高德人均"
+              value={
+                poiBusiness?.avg_cost !== null &&
+                poiBusiness?.avg_cost !== undefined
+                  ? `¥${Math.round(poiBusiness.avg_cost)}`
+                  : "暂无"
+              }
+            />
+            <Info title="电话" value={poiBusiness?.phone ?? "暂无"} />
+            <Info
+              title="营业时间"
+              value={poiBusiness?.business_hours ?? "暂无"}
+            />
           </div>
+          {poiBusiness?.tags.length ? (
+            <div className="mt-4 flex flex-wrap gap-2">
+              {poiBusiness.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-md bg-[#f7efe8] px-2 py-1 text-xs text-brand"
+                >
+                  高德 · {tag}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {poiBusiness?.photos.length ? (
+            <section className="mt-6 border-t border-line pt-5">
+              <h2 className="font-semibold">高德店铺图片</h2>
+              <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {poiBusiness.photos.slice(0, 6).map((photo) => (
+                  <a
+                    key={photo.url}
+                    href={photo.url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img
+                      src={photo.url}
+                      alt={photo.title ?? `${data.shop.display_name} 店铺图片`}
+                      className="aspect-[4/3] w-full rounded-lg border border-line object-cover"
+                    />
+                  </a>
+                ))}
+              </div>
+            </section>
+          ) : null}
           <section className="mt-6 border-t border-line pt-5">
             <div className="flex items-center gap-2 font-semibold">
               <MessageSquareText size={17} />
@@ -220,6 +281,24 @@ export default async function ShopPage({
         </article>
 
         <aside className="space-y-5">
+          {dianpingLink ? (
+            <section className="rounded-lg border border-line bg-white p-5">
+              <h2 className="font-semibold">更多店铺信息</h2>
+              <p className="mt-2 text-sm leading-6 text-muted">
+                前往大众点评查看平台门店页；点评信息不参与 GoWith 的 AI 评分。
+              </p>
+              <ExternalPlatformLink
+                href={dianpingLink.url}
+                linkId={dianpingLink.id}
+                shopId={data.shop.id}
+                surface="shop_detail"
+                className="mt-3 inline-flex items-center gap-2 rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white"
+              >
+                <ExternalLink size={14} />
+                去大众点评查看
+              </ExternalPlatformLink>
+            </section>
+          ) : null}
           <section className="rounded-lg border border-line bg-white p-5">
             <h2 className="font-semibold">来源视频</h2>
             <div className="mt-3 space-y-3">

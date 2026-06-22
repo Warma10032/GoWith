@@ -47,6 +47,16 @@ type MapShop = {
   quality?: Record<string, unknown> | null;
   source_videos?: SourceVideo[];
   rank_score?: number;
+  external_links?: Array<{
+    id: string;
+    platform: "dianping" | "meituan";
+    url: string;
+  }>;
+  poi_business?: {
+    provider: string;
+    rating: number | null;
+    avg_cost: number | null;
+  } | null;
 };
 
 type LngLat = {
@@ -193,8 +203,14 @@ function shopLocation(shop: MapShop) {
 
 function infoWindowHtml(shop: MapShop) {
   const video = shop.source_videos?.[0];
+  const dianpingLink = shop.external_links?.find(
+    (link) => link.platform === "dianping",
+  );
   const videoLink = video?.source_url
     ? `<a href="${escapeHtml(video.source_url)}" target="_blank" rel="noreferrer" style="color:#c15f3c;font-weight:600;">来源视频</a>`
+    : "";
+  const dianpingAnchor = dianpingLink
+    ? `<a href="${escapeHtml(dianpingLink.url)}" target="_blank" rel="noreferrer" data-dianping-link-id="${escapeHtml(dianpingLink.id)}" data-shop-id="${escapeHtml(shop.id)}" style="color:#c15f3c;font-weight:600;">大众点评</a>`
     : "";
   return `
     <div style="min-width:220px;max-width:280px;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
@@ -204,6 +220,7 @@ function infoWindowHtml(shop: MapShop) {
       <div style="display:flex;gap:10px;margin-top:8px;font-size:12px;">
         <a href="/shops/${escapeHtml(shop.id)}" style="color:#c15f3c;font-weight:600;">店铺详情</a>
         ${videoLink}
+        ${dianpingAnchor}
       </div>
     </div>
   `;
@@ -256,6 +273,46 @@ export function AmapCanvas() {
       }),
     }).catch(() => undefined);
   }, []);
+
+  const postDianpingNavigation = useCallback(
+    (shopId: string, linkId: string) => {
+      void fetch(`${apiBaseUrl}/api/users/events`, {
+        method: "POST",
+        credentials: "include",
+        keepalive: true,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          event_name: "navigation_click",
+          entity_type: "shop",
+          entity_id: shopId,
+          shop_id: shopId,
+          surface: "map",
+          client_type: "web",
+          event_payload: {
+            destination_platform: "dianping",
+            external_link_id: linkId,
+          },
+        }),
+      }).catch(() => undefined);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    function trackInfoWindowNavigation(event: MouseEvent) {
+      if (!(event.target instanceof Element)) return;
+      const link = event.target.closest<HTMLAnchorElement>(
+        "a[data-dianping-link-id][data-shop-id]",
+      );
+      if (!link) return;
+      const shopId = link.dataset.shopId;
+      const linkId = link.dataset.dianpingLinkId;
+      if (shopId && linkId) postDianpingNavigation(shopId, linkId);
+    }
+    document.addEventListener("click", trackInfoWindowNavigation);
+    return () =>
+      document.removeEventListener("click", trackInfoWindowNavigation);
+  }, [postDianpingNavigation]);
 
   const openShop = useCallback(
     (shop: MapShop, shouldPan = false) => {
@@ -634,6 +691,30 @@ export function AmapCanvas() {
                           onClick={(event) => event.stopPropagation()}
                         >
                           来源视频
+                          <ExternalLink size={12} />
+                        </a>
+                      ) : null}
+                      {shop.external_links?.find(
+                        (link) => link.platform === "dianping",
+                      ) ? (
+                        <a
+                          href={
+                            shop.external_links.find(
+                              (link) => link.platform === "dianping",
+                            )?.url
+                          }
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 font-medium text-brand"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            const link = shop.external_links?.find(
+                              (item) => item.platform === "dianping",
+                            );
+                            if (link) postDianpingNavigation(shop.id, link.id);
+                          }}
+                        >
+                          大众点评
                           <ExternalLink size={12} />
                         </a>
                       ) : null}
