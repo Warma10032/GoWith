@@ -374,7 +374,27 @@ export interface PoisTable {
   coord_type: "gcj02" | "bd09" | "wgs84";
   phone: string | null;
   business_hours: string | null;
+  rating: number | null;
+  avg_cost: number | null;
+  tags: string[];
+  photos: Json;
+  provider_updated_at: Timestamp | null;
   raw_payload_id: string | null;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+
+export interface ShopExternalLinksTable {
+  id: GeneratedUuid;
+  shop_id: string;
+  platform: "dianping" | "meituan";
+  external_shop_id: string | null;
+  external_url: string;
+  source: "manual" | "official_api";
+  status: "confirmed" | "removed";
+  confirmed_by: string | null;
+  confirmed_at: Timestamp | null;
+  last_verified_at: Timestamp | null;
   created_at: Timestamp;
   updated_at: Timestamp;
 }
@@ -588,6 +608,7 @@ export interface DB {
   poi_match_attempts: PoiMatchAttemptsTable;
   poi_match_candidates: PoiMatchCandidatesTable;
   shops: ShopsTable;
+  shop_external_links: ShopExternalLinksTable;
   shop_aliases: ShopAliasesTable;
   shop_video_mentions: ShopVideoMentionsTable;
   shop_insights: ShopInsightsTable;
