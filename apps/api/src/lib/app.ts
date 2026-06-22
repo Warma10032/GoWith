@@ -26,7 +26,15 @@ export function buildApp() {
   });
 
   app.register(cors, {
-    origin: [env.webOrigin, "http://localhost:3000"],
+    origin: [
+      env.webOrigin,
+      // Docker compose 把 web 映射到宿主机 3170（3000 在 Windows 保留段）。
+      "http://localhost:3170",
+      // 本机直跑 next dev（pnpm dev:web）时的默认端口，保留兼容。
+      "http://localhost:3000",
+      "http://127.0.0.1:8765",
+      "http://localhost:8765",
+    ],
     credentials: true,
   });
   app.register(cookie);

@@ -5,8 +5,10 @@ services:
       POSTGRES_DB: gowith
       POSTGRES_USER: gowith
       POSTGRES_PASSWORD: gowith
+    # Windows 上 5432 处于 Hyper-V 动态端口排除范围（5426-5531），
+    # 改用 5540 避开；.env DATABASE_URL 同步指向 5540。
     ports:
-      - "5432:5432"
+      - "5540:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -88,13 +90,18 @@ services:
     # NEXT_PUBLIC_API_BASE_URL in .env.
     command: sh -c "corepack enable && pnpm config set store-dir /pnpm/store && pnpm install --frozen-lockfile && pnpm --dir apps/web exec next dev -p 3000 -H 0.0.0.0"
     ports:
-      - "3000:3000"
+      # 宿主机 3000 落在 Windows Hyper-V 保留段（TCP 2970-3069），
+      # 改映射到 3170 避开；容器内部 next dev 仍跑 3000。
+      - "3170:3000"
     env_file:
       - .env
     environment:
       CI: "true"
+      # 服务端 fetch（SSR / API proxy）走 Docker 网络内的服务名。
       API_BASE_URL: http://api:4000
-      NEXT_PUBLIC_API_BASE_URL: http://api:4000
+      # 浏览器端 fetch 不能解析 Docker 服务名，让 .env 的 localhost:4000 生效。
+      # 如需覆盖请改 .env 而不是这里。
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4000}
     volumes:
       - .:/workspace
       - node_modules:/workspace/node_modules
@@ -120,7 +127,9 @@ services:
     profiles: ["production"]
     command: sh -c "corepack enable && pnpm config set store-dir /pnpm/store && pnpm install --frozen-lockfile && pnpm --dir apps/web build && pnpm --dir apps/web exec next start -p 3000 -H 0.0.0.0"
     ports:
-      - "3000:3000"
+      # 宿主机 3000 落在 Windows Hyper-V 保留段（TCP 2970-3069），
+      # 改映射到 3170 避开；容器内部 next dev 仍跑 3000。
+      - "3170:3000"
     env_file:
       - .env
     environment:
