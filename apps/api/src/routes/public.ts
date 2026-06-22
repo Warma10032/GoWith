@@ -15,6 +15,117 @@ type SourceVideo = {
   creator_name: string;
 };
 
+type ShopExternalLink = {
+  id: string;
+  platform: "dianping" | "meituan";
+  url: string;
+};
+
+type PoiPhoto = {
+  title?: string | null;
+  url: string;
+};
+
+type PoiBusiness = {
+  provider: "amap" | "tencent" | "baidu";
+  rating: number | null;
+  avg_cost: number | null;
+  phone: string | null;
+  business_hours: string | null;
+  tags: string[];
+  photos: PoiPhoto[];
+};
+
+type ShopSupplement = {
+  external_links: ShopExternalLink[];
+  poi_business: PoiBusiness | null;
+};
+
+function finiteNumber(value: unknown): number | null {
+  const parsed = Number(value);
+  return value !== null && value !== "" && Number.isFinite(parsed)
+    ? parsed
+    : null;
+}
+
+function poiPhotos(value: unknown): PoiPhoto[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const photo = item as Record<string, unknown>;
+    if (typeof photo.url !== "string" || !photo.url.trim()) return [];
+    let url: URL;
+    try {
+      url = new URL(photo.url);
+    } catch {
+      return [];
+    }
+    if (url.protocol !== "https:" && url.protocol !== "http:") return [];
+    return [
+      {
+        title: typeof photo.title === "string" ? photo.title : null,
+        url: url.toString(),
+      },
+    ];
+  });
+}
+
+async function getShopSupplementsByIds(
+  app: Parameters<FastifyPluginAsync>[0],
+  shopIds: string[],
+) {
+  const supplements = new Map<string, ShopSupplement>();
+  if (!shopIds.length) return supplements;
+  const [links, poiRows] = await Promise.all([
+    app.db
+      .selectFrom("shop_external_links")
+      .select(["id", "shop_id", "platform", "external_url"])
+      .where("shop_id", "in", shopIds)
+      .where("status", "=", "confirmed")
+      .execute(),
+    app.db
+      .selectFrom("shops")
+      .innerJoin("pois", "pois.id", "shops.primary_poi_id")
+      .select([
+        "shops.id as shop_id",
+        "pois.provider",
+        "pois.rating",
+        "pois.avg_cost",
+        "pois.phone",
+        "pois.business_hours",
+        "pois.tags",
+        "pois.photos",
+      ])
+      .where("shops.id", "in", shopIds)
+      .execute(),
+  ]);
+
+  for (const shopId of shopIds) {
+    supplements.set(shopId, { external_links: [], poi_business: null });
+  }
+  for (const link of links) {
+    supplements.get(link.shop_id)?.external_links.push({
+      id: link.id,
+      platform: link.platform,
+      url: link.external_url,
+    });
+  }
+  for (const poi of poiRows) {
+    const supplement = supplements.get(poi.shop_id);
+    if (!supplement) continue;
+    supplement.poi_business = {
+      provider: poi.provider,
+      rating: finiteNumber(poi.rating),
+      avg_cost: finiteNumber(poi.avg_cost),
+      phone: poi.phone,
+      business_hours: poi.business_hours,
+      tags: poi.tags,
+      photos: poiPhotos(poi.photos),
+    };
+  }
+  return supplements;
+}
+
 async function getSourceVideosByShopIds(
   app: Parameters<FastifyPluginAsync>[0],
   shopIds: string[],
@@ -62,6 +173,19 @@ function attachSourceVideos<T extends { id: string }>(
   return shops.map((shop) => ({
     ...shop,
     source_videos: videosByShop.get(shop.id) ?? [],
+  }));
+}
+
+function attachShopSupplements<T extends { id: string }>(
+  shops: T[],
+  supplements: Map<string, ShopSupplement>,
+) {
+  return shops.map((shop) => ({
+    ...shop,
+    ...(supplements.get(shop.id) ?? {
+      external_links: [],
+      poi_business: null,
+    }),
   }));
 }
 
@@ -153,13 +277,17 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
       .orderBy("videos.published_at", "desc")
       .limit(100)
       .execute();
-    const videosByShop = await getSourceVideosByShopIds(
-      app,
-      shops.map((shop) => shop.id),
-    );
+    const shopIds = shops.map((shop) => shop.id);
+    const [videosByShop, supplements] = await Promise.all([
+      getSourceVideosByShopIds(app, shopIds),
+      getShopSupplementsByIds(app, shopIds),
+    ]);
     return {
       creator,
-      shops: attachSourceVideos(shops, videosByShop).map((shop) => ({
+      shops: attachShopSupplements(
+        attachSourceVideos(shops, videosByShop),
+        supplements,
+      ).map((shop) => ({
         ...shop,
         latest_video: {
           id: shop.latest_video_id,
@@ -264,13 +392,17 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
       items.push({ ...shop, recommendation_item_id: itemId, score });
     }
 
-    const videosByShop = await getSourceVideosByShopIds(
-      app,
-      items.map((shop) => shop.id),
-    );
+    const shopIds = items.map((shop) => shop.id);
+    const [videosByShop, supplements] = await Promise.all([
+      getSourceVideosByShopIds(app, shopIds),
+      getShopSupplementsByIds(app, shopIds),
+    ]);
     return {
       recommendation_request_id: requestId,
-      shops: attachSourceVideos(items, videosByShop),
+      shops: attachShopSupplements(
+        attachSourceVideos(items, videosByShop),
+        supplements,
+      ),
     };
   });
 
@@ -298,11 +430,17 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
       LIMIT ${limit}
     `.execute(app.db);
     const mapShops = shops.rows as Array<{ id: string }>;
-    const videosByShop = await getSourceVideosByShopIds(
-      app,
-      mapShops.map((shop) => shop.id),
-    );
-    return { shops: attachSourceVideos(mapShops, videosByShop) };
+    const shopIds = mapShops.map((shop) => shop.id);
+    const [videosByShop, supplements] = await Promise.all([
+      getSourceVideosByShopIds(app, shopIds),
+      getShopSupplementsByIds(app, shopIds),
+    ]);
+    return {
+      shops: attachShopSupplements(
+        attachSourceVideos(mapShops, videosByShop),
+        supplements,
+      ),
+    };
   });
 
   app.get("/shops/search", async (request) => {
@@ -332,11 +470,17 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
       LIMIT ${limit}
     `.execute(app.db);
     const searchShops = shops.rows as Array<{ id: string }>;
-    const videosByShop = await getSourceVideosByShopIds(
-      app,
-      searchShops.map((shop) => shop.id),
-    );
-    return { shops: attachSourceVideos(searchShops, videosByShop) };
+    const shopIds = searchShops.map((shop) => shop.id);
+    const [videosByShop, supplements] = await Promise.all([
+      getSourceVideosByShopIds(app, shopIds),
+      getShopSupplementsByIds(app, shopIds),
+    ]);
+    return {
+      shops: attachShopSupplements(
+        attachSourceVideos(searchShops, videosByShop),
+        supplements,
+      ),
+    };
   });
 
   app.get("/shops/:id", async (request) => {
@@ -352,7 +496,7 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
       .where("status", "=", "published")
       .executeTakeFirst();
     if (!shop) throw new HttpError(404, "shop_not_found", "Shop not found");
-    const [mentions, evidence] = await Promise.all([
+    const [mentions, evidence, supplements] = await Promise.all([
       app.db
         .selectFrom("shop_video_mentions")
         .innerJoin("videos", "videos.id", "shop_video_mentions.video_id")
@@ -379,8 +523,13 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
         .where("shop_id", "=", params.data.id)
         .limit(20)
         .execute(),
+      getShopSupplementsByIds(app, [shop.id]),
     ]);
-    return { shop, mentions, evidence };
+    return {
+      shop: attachShopSupplements([shop], supplements)[0],
+      mentions,
+      evidence,
+    };
   });
 
   app.post("/users/events", async (request) => {

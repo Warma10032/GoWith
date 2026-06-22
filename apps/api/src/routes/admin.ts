@@ -14,6 +14,10 @@ import { HttpError } from "../lib/http";
 import { encryptSecret } from "../services/crypto";
 import { requireAdmin } from "../services/auth";
 import { enqueuePipelineRunJob } from "../services/queue";
+import {
+  InvalidDianpingUrlError,
+  parseDianpingUrl,
+} from "../services/shop-external-links";
 
 const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
@@ -762,14 +766,22 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
       "Access-Control-Allow-Credentials": "true",
-      "Access-Control-Allow-Origin": String(request.headers.origin ?? "http://localhost:3000"),
+      "Access-Control-Allow-Origin": String(
+        request.headers.origin ?? "http://127.0.0.1:8765",
+      ),
     });
-    reply.raw.write(`event: ready\ndata: ${JSON.stringify({ connected_at: new Date().toISOString() })}\n\n`);
+    reply.raw.write(
+      `event: ready\ndata: ${JSON.stringify({ connected_at: new Date().toISOString() })}\n\n`,
+    );
     const unsubscribe = app.taskEvents.subscribe((event) => {
-      reply.raw.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+      reply.raw.write(
+        `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
+      );
     });
     const heartbeat = setInterval(() => {
-      reply.raw.write(`event: heartbeat\ndata: ${JSON.stringify({ at: new Date().toISOString() })}\n\n`);
+      reply.raw.write(
+        `event: heartbeat\ndata: ${JSON.stringify({ at: new Date().toISOString() })}\n\n`,
+      );
     }, 15_000);
     request.raw.on("close", () => {
       clearInterval(heartbeat);
@@ -1306,6 +1318,28 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       .where("id", "=", params.id)
       .executeTakeFirst();
     if (!shop) throw new HttpError(404, "shop_not_found", "Shop not found");
+    const [externalLinks, poiBusiness] = await Promise.all([
+      app.db
+        .selectFrom("shop_external_links")
+        .selectAll()
+        .where("shop_id", "=", params.id)
+        .orderBy("created_at", "asc")
+        .execute(),
+      app.db
+        .selectFrom("pois")
+        .select([
+          "provider",
+          "rating",
+          "avg_cost",
+          "phone",
+          "business_hours",
+          "tags",
+          "photos",
+          "provider_updated_at",
+        ])
+        .where("id", "=", shop.primary_poi_id)
+        .executeTakeFirst(),
+    ]);
     const reviewEvidenceIdList = reviewEvidenceIds(shop.aggregated_review);
     const reviewEvidence = reviewEvidenceIdList.length
       ? await app.db
@@ -1385,7 +1419,188 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       videos,
       creators,
       review_comments: reviewComments,
+      external_links: externalLinks,
+      poi_business: poiBusiness ?? null,
     };
+  });
+
+  app.put("/shops/:id/external-links/dianping", async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = z.object({ url: z.string() }).parse(request.body);
+    const admin = await requireAdmin(app.db, request);
+    let parsed: ReturnType<typeof parseDianpingUrl>;
+    try {
+      parsed = parseDianpingUrl(body.url);
+    } catch (error) {
+      if (error instanceof InvalidDianpingUrlError) {
+        throw new HttpError(400, "invalid_dianping_url", error.message);
+      }
+      throw error;
+    }
+
+    const link = await runAdminActionWithLock(
+      app,
+      {
+        jobType: "bind_shop_external_link",
+        entityType: "shop",
+        entityId: params.id,
+      },
+      async (trx) => {
+        const shop = await trx
+          .selectFrom("shops")
+          .select(["id"])
+          .where("id", "=", params.id)
+          .executeTakeFirst();
+        if (!shop) throw new HttpError(404, "shop_not_found", "Shop not found");
+
+        const before = await trx
+          .selectFrom("shop_external_links")
+          .selectAll()
+          .where("shop_id", "=", params.id)
+          .where("platform", "=", "dianping")
+          .executeTakeFirst();
+        if (parsed.externalShopId) {
+          const duplicate = await trx
+            .selectFrom("shop_external_links")
+            .select(["shop_id"])
+            .where("platform", "=", "dianping")
+            .where("external_shop_id", "=", parsed.externalShopId)
+            .where("status", "=", "confirmed")
+            .where("shop_id", "!=", params.id)
+            .executeTakeFirst();
+          if (duplicate) {
+            throw new HttpError(
+              409,
+              "dianping_shop_already_bound",
+              `Dianping shop is already bound to shop:${duplicate.shop_id}`,
+            );
+          }
+        }
+
+        const now = new Date();
+        const saved = await trx
+          .insertInto("shop_external_links")
+          .values({
+            id: crypto.randomUUID(),
+            shop_id: params.id,
+            platform: "dianping",
+            external_shop_id: parsed.externalShopId,
+            external_url: parsed.externalUrl,
+            source: "manual",
+            status: "confirmed",
+            confirmed_by: admin.id,
+            confirmed_at: now,
+            last_verified_at: null,
+            created_at: now,
+            updated_at: now,
+          })
+          .onConflict((conflict) =>
+            conflict.columns(["shop_id", "platform"]).doUpdateSet({
+              external_shop_id: parsed.externalShopId,
+              external_url: parsed.externalUrl,
+              source: "manual",
+              status: "confirmed",
+              confirmed_by: admin.id,
+              confirmed_at: now,
+              last_verified_at: null,
+              updated_at: now,
+            }),
+          )
+          .returningAll()
+          .executeTakeFirstOrThrow();
+        await trx
+          .insertInto("review_events")
+          .values({
+            id: crypto.randomUUID(),
+            review_task_id: null,
+            entity_type: "shop",
+            entity_id: params.id,
+            action: before ? "replace_external_link" : "bind_external_link",
+            before_json: before
+              ? {
+                  platform: before.platform,
+                  external_shop_id: before.external_shop_id,
+                  external_url: before.external_url,
+                  status: before.status,
+                }
+              : null,
+            after_json: {
+              platform: saved.platform,
+              external_shop_id: saved.external_shop_id,
+              external_url: saved.external_url,
+              status: saved.status,
+            },
+            reason: "Admin confirmed Dianping shop link",
+            reviewer_id: admin.id,
+            created_at: now,
+          })
+          .execute();
+        return saved;
+      },
+    );
+    return { link };
+  });
+
+  app.delete("/shops/:id/external-links/dianping", async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const admin = await requireAdmin(app.db, request);
+    const link = await runAdminActionWithLock(
+      app,
+      {
+        jobType: "remove_shop_external_link",
+        entityType: "shop",
+        entityId: params.id,
+      },
+      async (trx) => {
+        const before = await trx
+          .selectFrom("shop_external_links")
+          .selectAll()
+          .where("shop_id", "=", params.id)
+          .where("platform", "=", "dianping")
+          .executeTakeFirst();
+        if (!before) {
+          throw new HttpError(
+            404,
+            "dianping_link_not_found",
+            "Dianping link not found",
+          );
+        }
+        const now = new Date();
+        const removed = await trx
+          .updateTable("shop_external_links")
+          .set({ status: "removed", updated_at: now })
+          .where("id", "=", before.id)
+          .returningAll()
+          .executeTakeFirstOrThrow();
+        await trx
+          .insertInto("review_events")
+          .values({
+            id: crypto.randomUUID(),
+            review_task_id: null,
+            entity_type: "shop",
+            entity_id: params.id,
+            action: "remove_external_link",
+            before_json: {
+              platform: before.platform,
+              external_shop_id: before.external_shop_id,
+              external_url: before.external_url,
+              status: before.status,
+            },
+            after_json: {
+              platform: removed.platform,
+              external_shop_id: removed.external_shop_id,
+              external_url: removed.external_url,
+              status: removed.status,
+            },
+            reason: "Admin removed Dianping shop link",
+            reviewer_id: admin.id,
+            created_at: now,
+          })
+          .execute();
+        return removed;
+      },
+    );
+    return { link };
   });
 
   app.post("/shops/:id/approve", async (request) => {
