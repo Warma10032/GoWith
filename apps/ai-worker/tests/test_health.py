@@ -334,3 +334,21 @@ def test_minimax_invalid_json_repairs_once(monkeypatch) -> None:
     assert response.json()["output"]["is_shop_visit"] is False
     assert calls == 2
     assert called_models == ["MiniMax-M2.7", "MiniMax-M2.7"]
+
+
+def test_parse_json_output_repairs_unescaped_quotes_in_prose() -> None:
+    parsed = main._parse_json_output(
+        '{"recommend_reason":"标题以"不好找无环境但好吃"点明核心卖点。",'
+        '"recommendation_score":0.88}'
+    )
+
+    assert parsed["recommend_reason"] == '标题以"不好找无环境但好吃"点明核心卖点。'
+    assert parsed["recommendation_score"] == 0.88
+
+
+def test_normalize_transcript_fact_payload_replaces_null_landmarks() -> None:
+    parsed = main._normalize_transcript_fact_payload(
+        {"location_hints": {"city": "乌鲁木齐", "landmarks": None}}
+    )
+
+    assert parsed == {"location_hints": {"city": "乌鲁木齐", "landmarks": []}}

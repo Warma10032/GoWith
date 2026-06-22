@@ -570,14 +570,77 @@ def _extract_json_text(text: str) -> str:
     return stripped
 
 
+def _escape_unescaped_string_quotes(text: str) -> str:
+    """Escape obvious prose quotes inside JSON strings.
+
+    MiniMax occasionally emits Chinese prose such as `标题以"不好找"点明`,
+    where the inner ASCII quotes are not escaped. A quote can only terminate a
+    JSON string when the next non-whitespace character is structural. Keep the
+    repair deliberately narrow; the caller still requires json.loads to accept
+    the entire repaired document.
+    """
+    repaired: list[str] = []
+    in_string = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "\\" and in_string:
+            repaired.append(char)
+            index += 1
+            if index < len(text):
+                repaired.append(text[index])
+            index += 1
+            continue
+        if char != '"':
+            repaired.append(char)
+            index += 1
+            continue
+        if not in_string:
+            in_string = True
+            repaired.append(char)
+            index += 1
+            continue
+
+        lookahead = index + 1
+        while lookahead < len(text) and text[lookahead].isspace():
+            lookahead += 1
+        next_char = text[lookahead] if lookahead < len(text) else None
+        if next_char is None or next_char in ",:}]":
+            in_string = False
+            repaired.append(char)
+        else:
+            repaired.append('\\"')
+        index += 1
+    return "".join(repaired)
+
+
 def _parse_json_output(text: str) -> dict[str, Any]:
+    extracted = _extract_json_text(text)
     try:
-        value = json.loads(_extract_json_text(text))
+        value = json.loads(extracted)
     except json.JSONDecodeError as error:
-        raise HTTPException(status_code=502, detail=f"minimax_invalid_json: {error}") from error
+        try:
+            value = json.loads(_escape_unescaped_string_quotes(extracted))
+        except json.JSONDecodeError:
+            raise HTTPException(
+                status_code=502, detail=f"minimax_invalid_json: {error}"
+            ) from error
     if not isinstance(value, dict):
         raise HTTPException(status_code=502, detail="minimax_json_not_object")
     return value
+
+
+def _normalize_transcript_fact_payload(parsed: dict[str, Any]) -> dict[str, Any]:
+    location = parsed.get("location_hints")
+    if not isinstance(location, dict) or isinstance(location.get("landmarks"), list):
+        return parsed
+    return {
+        **parsed,
+        "location_hints": {
+            **location,
+            "landmarks": [],
+        },
+    }
 
 
 def _normalize_review_dimensions(value: object) -> dict[str, dict[str, Any]]:
@@ -1348,6 +1411,7 @@ async def structure_video(request: VideoAnalysisRequest) -> AiResponseEnvelope:
         },
         TranscriptFactResponse,
         subcalls,
+        _normalize_transcript_fact_payload,
     )
     opinions = await _prompt_call(
         "transcript_opinion_analysis",
