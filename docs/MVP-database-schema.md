@@ -95,6 +95,7 @@ erDiagram
   pois ||--o{ poi_match_candidates : candidate
 
   pois ||--o{ shops : primary_location
+  shops ||--o{ shop_external_links : links_to
   shops ||--o{ shop_video_mentions : mentioned_in
   videos ||--o{ shop_video_mentions : mentions
   creators ||--o{ shop_video_mentions : source
@@ -429,27 +430,27 @@ CREATE INDEX video_comments_content_trgm_idx ON video_comments USING GIN (conten
 
 所有 AI 调用统一记录，便于成本、调试和回放。
 
-| 字段              | 类型             | 说明                                                                                |
-| ----------------- | ---------------- | ----------------------------------------------------------------------------------- |
-| `id`              | uuid PK          | AI 调用 ID                                                                          |
-| `parent_ai_run_id` | uuid/null FK    | 递进式调用的父阶段；顶层调用为空                                                    |
+| 字段               | 类型             | 说明                                                                                |
+| ------------------ | ---------------- | ----------------------------------------------------------------------------------- |
+| `id`               | uuid PK          | AI 调用 ID                                                                          |
+| `parent_ai_run_id` | uuid/null FK     | 递进式调用的父阶段；顶层调用为空                                                    |
 | `call_index`       | integer/null     | 同一父阶段内的调用顺序                                                              |
-| `stage`           | text             | `classify_video` / `extract_shop_candidates` / `comment_signal` / `structure_video` |
-| `entity_type`     | text             | `video` / `shop_candidate`                                                          |
-| `entity_id`       | uuid             | 关联实体                                                                            |
-| `provider`        | text             | `openai` / `groq` 等                                                                |
-| `model`           | text             | 模型名                                                                              |
-| `prompt_version`  | text             | Prompt 版本                                                                         |
-| `input_hash`      | text             | 输入 hash                                                                           |
-| `input_payload`   | jsonb            | 输入摘要，避免过大                                                                  |
-| `output_payload`  | jsonb/null       | 模型 JSON 输出                                                                      |
-| `raw_output_text` | text/null        | 原始输出                                                                            |
-| `usage`           | jsonb            | token/音频秒数/成本                                                                 |
-| `status`          | text             | `success` / `failed` / `invalid_json` / `schema_error`                              |
-| `error_message`   | text/null        | 错误                                                                                |
-| `started_at`      | timestamptz      | 开始时间                                                                            |
-| `finished_at`     | timestamptz/null | 结束时间                                                                            |
-| `created_at`      | timestamptz      | 创建时间                                                                            |
+| `stage`            | text             | `classify_video` / `extract_shop_candidates` / `comment_signal` / `structure_video` |
+| `entity_type`      | text             | `video` / `shop_candidate`                                                          |
+| `entity_id`        | uuid             | 关联实体                                                                            |
+| `provider`         | text             | `openai` / `groq` 等                                                                |
+| `model`            | text             | 模型名                                                                              |
+| `prompt_version`   | text             | Prompt 版本                                                                         |
+| `input_hash`       | text             | 输入 hash                                                                           |
+| `input_payload`    | jsonb            | 输入摘要，避免过大                                                                  |
+| `output_payload`   | jsonb/null       | 模型 JSON 输出                                                                      |
+| `raw_output_text`  | text/null        | 原始输出                                                                            |
+| `usage`            | jsonb            | token/音频秒数/成本                                                                 |
+| `status`           | text             | `success` / `failed` / `invalid_json` / `schema_error`                              |
+| `error_message`    | text/null        | 错误                                                                                |
+| `started_at`       | timestamptz      | 开始时间                                                                            |
+| `finished_at`      | timestamptz/null | 结束时间                                                                            |
+| `created_at`       | timestamptz      | 创建时间                                                                            |
 
 索引：
 
@@ -621,28 +622,33 @@ CREATE INDEX shop_candidates_risk_gin_idx ON shop_candidates USING GIN (risk_fla
 
 地图服务商 POI 表。MVP 以高德为主，但要保留 provider 抽象。
 
-| 字段              | 类型                  | 说明                         |
-| ----------------- | --------------------- | ---------------------------- |
-| `id`              | uuid PK               | 内部 POI ID                  |
-| `provider`        | text                  | `amap` / `tencent` / `baidu` |
-| `provider_poi_id` | text                  | 服务商 POI ID                |
-| `name`            | text                  | POI 名称                     |
-| `address`         | text/null             | 地址                         |
-| `province`        | text/null             | 省                           |
-| `city`            | text/null             | 市                           |
-| `district`        | text/null             | 区                           |
-| `business_area`   | text/null             | 商圈                         |
-| `category`        | text/null             | 服务商品类                   |
-| `category_code`   | text/null             | 服务商品类码                 |
-| `lng`             | numeric(10,6)         | 经度                         |
-| `lat`             | numeric(10,6)         | 纬度                         |
-| `coord_type`      | text                  | `gcj02` / `bd09` / `wgs84`   |
-| `geom`            | geometry(Point, 4326) | 用 provider 坐标生成的点     |
-| `phone`           | text/null             | 电话，如服务商返回           |
-| `business_hours`  | text/null             | 营业时间，如服务商返回       |
-| `raw_payload_id`  | uuid/null             | 原始响应                     |
-| `created_at`      | timestamptz           | 创建时间                     |
-| `updated_at`      | timestamptz           | 更新时间                     |
+| 字段                  | 类型                  | 说明                         |
+| --------------------- | --------------------- | ---------------------------- |
+| `id`                  | uuid PK               | 内部 POI ID                  |
+| `provider`            | text                  | `amap` / `tencent` / `baidu` |
+| `provider_poi_id`     | text                  | 服务商 POI ID                |
+| `name`                | text                  | POI 名称                     |
+| `address`             | text/null             | 地址                         |
+| `province`            | text/null             | 省                           |
+| `city`                | text/null             | 市                           |
+| `district`            | text/null             | 区                           |
+| `business_area`       | text/null             | 商圈                         |
+| `category`            | text/null             | 服务商品类                   |
+| `category_code`       | text/null             | 服务商品类码                 |
+| `lng`                 | numeric(10,6)         | 经度                         |
+| `lat`                 | numeric(10,6)         | 纬度                         |
+| `coord_type`          | text                  | `gcj02` / `bd09` / `wgs84`   |
+| `geom`                | geometry(Point, 4326) | 用 provider 坐标生成的点     |
+| `phone`               | text/null             | 电话，如服务商返回           |
+| `business_hours`      | text/null             | 营业时间，如服务商返回       |
+| `rating`              | numeric(3,2)/null     | 服务商评分，展示时标注来源   |
+| `avg_cost`            | numeric(10,2)/null    | 服务商人均，展示时标注来源   |
+| `tags`                | text[]                | 服务商特色标签               |
+| `photos`              | jsonb                 | 服务商图片标题与 URL         |
+| `provider_updated_at` | timestamptz/null      | 商业字段最近同步时间         |
+| `raw_payload_id`      | uuid/null             | 原始响应                     |
+| `created_at`          | timestamptz           | 创建时间                     |
+| `updated_at`          | timestamptz           | 更新时间                     |
 
 约束与索引：
 
@@ -846,6 +852,27 @@ CREATE INDEX shop_insights_sentiment_idx ON shop_insights (dimension, sentiment)
 CREATE UNIQUE INDEX published_shop_snapshots_current_uidx ON published_shop_snapshots (shop_id) WHERE is_current;
 CREATE INDEX published_shop_snapshots_shop_version_idx ON published_shop_snapshots (shop_id, version DESC);
 ```
+
+### 10.6 `shop_external_links`
+
+人工确认或官方 API 返回的外部平台门店映射。大众点评仅作为补充出口，不能替代主 POI 或覆盖 AI 证据结论。
+
+| 字段               | 类型             | 说明                                  |
+| ------------------ | ---------------- | ------------------------------------- |
+| `id`               | uuid PK          | 映射 ID                               |
+| `shop_id`          | uuid FK          | GoWith 店铺                           |
+| `platform`         | text             | `dianping` / `meituan`                |
+| `external_shop_id` | text/null        | 平台稳定店铺 ID；分享链接可能无法提取 |
+| `external_url`     | text             | 已确认的 HTTPS 平台链接               |
+| `source`           | text             | `manual` / `official_api`             |
+| `status`           | text             | `confirmed` / `removed`               |
+| `confirmed_by`     | uuid FK/null     | 确认管理员                            |
+| `confirmed_at`     | timestamptz/null | 确认时间                              |
+| `last_verified_at` | timestamptz/null | 官方接口复核时间；人工链接初始为空    |
+| `created_at`       | timestamptz      | 创建时间                              |
+| `updated_at`       | timestamptz      | 更新时间                              |
+
+同一店铺每个平台只保留一条当前映射；标准点评 `/shop/{id}` 在不同 GoWith 店铺之间不可重复确认。绑定、替换和移除必须写 `review_events`。
 
 ## 11. 后台审核
 
@@ -1208,6 +1235,7 @@ LIMIT 20;
 - `shop_video_mentions`
 - `shop_insights`
 - `published_shop_snapshots`
+- `shop_external_links`
 - `review_tasks`
 - `review_events`
 - `creator_follows`
@@ -1265,7 +1293,7 @@ LIMIT 20;
 2. 建字幕/ASR、评论、AI 调用和证据表。
 3. 建候选店铺、POI 匹配、正式店铺表。
 4. 建审核任务和审核事件。
-5. 建前台行为与推荐日志。
+5. 建外部平台链接和前台行为与推荐日志。
 6. 再做搜索、向量、画像等增强。
 
 迁移建议：
@@ -1274,6 +1302,7 @@ LIMIT 20;
 - 第二个 migration 加 AI 与候选店铺表。
 - 第三个 migration 加 POI/shops/review。
 - 第四个 migration 加推荐日志。
+- 第五个 migration 加高德商业字段与外部平台链接。
 
 实际落地：
 

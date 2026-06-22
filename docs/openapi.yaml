@@ -485,6 +485,53 @@ paths:
       responses:
         "200":
           description: Shop updated.
+  /api/admin/shops/{id}/external-links/dianping:
+    put:
+      summary: Bind or replace a confirmed Dianping shop link
+      description: |
+        Accepts an HTTPS URL on `dianping.com` or one of its subdomains.
+        The API never fetches the submitted page. A standard `/shop/{id}` URL
+        stores the external shop ID; other official share links keep a null ID.
+        The action writes a `review_events` audit row.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url:
+                  type: string
+                  format: uri
+                  maxLength: 2048
+      responses:
+        "200":
+          description: Dianping link bound and audited.
+        "400":
+          description: invalid_dianping_url
+        "404":
+          description: shop_not_found
+        "409":
+          description: dianping_shop_already_bound or task_already_running
+    delete:
+      summary: Remove the confirmed Dianping shop link
+      description: Marks the link as removed and writes a `review_events` audit row.
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200":
+          description: Dianping link removed and audited.
+        "404":
+          description: dianping_link_not_found
+        "409":
+          description: task_already_running
   /api/admin/shops/{id}/approve:
     post:
       summary: Mark a draft shop as approved (admin review pass)
@@ -540,7 +587,7 @@ paths:
       summary: Get rule-based recommended shops with source videos
       responses:
         "200":
-          description: Recommendation request and ranked shops. Each shop may include `source_videos` for direct Bilibili access.
+          description: Recommendation request and ranked shops. Each shop includes `source_videos`, confirmed `external_links`, and source-labelled `poi_business` data.
   /api/shops/map:
     get:
       summary: Get published shops in a map viewport with source videos
@@ -572,7 +619,7 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 500 }
       responses:
         "200":
-          description: Published shop pins. Each shop may include `source_videos` for direct Bilibili access.
+          description: Published shop pins with `source_videos`, confirmed `external_links`, and source-labelled `poi_business` data.
   /api/shops/search:
     get:
       summary: Search published GoWith shops
@@ -594,7 +641,7 @@ paths:
         - $ref: "#/components/parameters/UuidId"
       responses:
         "200":
-          description: Published shop detail, including source videos that link to Bilibili.
+          description: Published shop detail, including source videos, confirmed external platform links, and source-labelled POI business data.
   /api/creators:
     get:
       summary: List public creators
@@ -650,6 +697,49 @@ components:
         type: string
         format: uuid
   schemas:
+    ShopExternalLink:
+      type: object
+      required: [id, platform, url]
+      properties:
+        id:
+          type: string
+          format: uuid
+        platform:
+          type: string
+          enum: [dianping, meituan]
+        url:
+          type: string
+          format: uri
+    PoiBusiness:
+      type: object
+      required:
+        [provider, rating, avg_cost, phone, business_hours, tags, photos]
+      properties:
+        provider:
+          type: string
+          enum: [amap, tencent, baidu]
+        rating:
+          type: [number, "null"]
+        avg_cost:
+          type: [number, "null"]
+        phone:
+          type: [string, "null"]
+        business_hours:
+          type: [string, "null"]
+        tags:
+          type: array
+          items: { type: string }
+        photos:
+          type: array
+          items:
+            type: object
+            required: [url]
+            properties:
+              title:
+                type: [string, "null"]
+              url:
+                type: string
+                format: uri
     LoginRequest:
       type: object
       required: [email, password]
