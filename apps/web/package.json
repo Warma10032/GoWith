@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev -p 8765 -H localhost",
+    "dev": "next dev -p 13000 -H localhost",
     "build": "next build",
-    "start": "next start -p 8765 -H localhost",
+    "start": "next start -p 13000 -H localhost",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests"

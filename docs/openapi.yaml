@@ -22,9 +22,10 @@ info:
   x-shop-card-contract: >-
     card_payload.recommendation_score is a nullable 0-1 AI recommendation degree backed by
     card_payload.recommendation_score_evidence_ids. quality.shop_confidence remains an internal
-    information-quality signal and is not a user-facing recommendation score.
+    information-quality signal and is not a user-facing recommendation score. Average cost,
+    rating, and shop photos come only from source-labelled poi_business data.
 servers:
-  - url: http://localhost:4000
+  - url: http://localhost:14000
 paths:
   /health:
     get:
@@ -584,10 +585,25 @@ paths:
           description: Merge placeholder acknowledged.
   /api/shops/recommended:
     get:
-      summary: Get rule-based recommended shops with source videos
+      summary: Get location-aware recommended shops with source videos
+      parameters:
+        - name: lng
+          in: query
+          schema: { type: number, minimum: -180, maximum: 180 }
+          description: Exact user longitude. Must be provided together with lat.
+        - name: lat
+          in: query
+          schema: { type: number, minimum: -90, maximum: 90 }
+          description: Exact user latitude. Must be provided together with lng.
+        - name: coord_type
+          in: query
+          schema: { type: string, enum: [wgs84, gcj02], default: wgs84 }
+        - name: anonymous_id
+          in: query
+          schema: { type: string }
       responses:
         "200":
-          description: Recommendation request and ranked shops. Each shop includes `source_videos`, confirmed `external_links`, and source-labelled `poi_business` data.
+          description: Recommendation request and ranked shops. With location, shops are ordered by `distance_m`; otherwise published recency is used. Each shop includes `source_videos`, confirmed `external_links`, and source-labelled `poi_business` data.
   /api/shops/map:
     get:
       summary: Get published shops in a map viewport with source videos
@@ -641,7 +657,7 @@ paths:
         - $ref: "#/components/parameters/UuidId"
       responses:
         "200":
-          description: Published shop detail, including source videos, confirmed external platform links, and source-labelled POI business data.
+          description: Published shop detail, including source videos, `evidence_count`, up to 20 evidence snippets, confirmed external platform links, and source-labelled POI business data. Comment evidence text is redacted.
   /api/creators:
     get:
       summary: List public creators

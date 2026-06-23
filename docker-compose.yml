@@ -5,10 +5,12 @@ services:
       POSTGRES_DB: gowith
       POSTGRES_USER: gowith
       POSTGRES_PASSWORD: gowith
-    # Windows 上 5432 处于 Hyper-V 动态端口排除范围（5426-5531），
-    # 改用 5540 避开；.env DATABASE_URL 同步指向 5540。
+    # 端口统一方案（+10000 偏移）：web 13000、api 14000、ai-worker 18000、
+    # postgres 15432(宿主)/5432(容器)、redis 16379(宿主)/6379(容器)。
+    # PG / Redis 镜像硬编码监听 5432 / 6379，容器内端口不变；
+    # web / api / ai-worker 容器内与宿主同端口，不做映射。
     ports:
-      - "5540:5432"
+      - "15432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -20,7 +22,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6380:6379"
+      - "16379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -32,13 +34,14 @@ services:
     working_dir: /workspace
     command: sh -c "corepack enable && pnpm config set store-dir /pnpm/store && pnpm install --frozen-lockfile && pnpm db:migrate && pnpm db:seed && pnpm --filter @gowith/api dev"
     ports:
-      - "4000:4000"
+      - "14000:14000"
     env_file:
       - .env
     environment:
       CI: "true"
       DATABASE_URL: postgres://gowith:gowith@postgres:5432/gowith
       REDIS_URL: redis://redis:6379
+      PORT: "14000"
     volumes:
       - .:/workspace
       - node_modules:/workspace/node_modules
@@ -64,7 +67,7 @@ services:
       CI: "true"
       DATABASE_URL: postgres://gowith:gowith@postgres:5432/gowith
       REDIS_URL: redis://redis:6379
-      AI_WORKER_URL: http://ai-worker:8000
+      AI_WORKER_URL: http://ai-worker:18000
     volumes:
       - .:/workspace
       - node_modules:/workspace/node_modules
@@ -88,20 +91,18 @@ services:
     # network. For host browser access, run a reverse proxy on the host or
     # set `--add-host host.docker.internal:host-gateway` and override
     # NEXT_PUBLIC_API_BASE_URL in .env.
-    command: sh -c "corepack enable && pnpm config set store-dir /pnpm/store && pnpm install --frozen-lockfile && pnpm --dir apps/web exec next dev -p 3000 -H 0.0.0.0"
+    command: sh -c "corepack enable && pnpm config set store-dir /pnpm/store && pnpm install --frozen-lockfile && pnpm --dir apps/web exec next dev -p 13000 -H 0.0.0.0"
     ports:
-      # 宿主机 3000 落在 Windows Hyper-V 保留段（TCP 2970-3069），
-      # 改映射到 3170 避开；容器内部 next dev 仍跑 3000。
-      - "3170:3000"
+      - "13000:13000"
     env_file:
       - .env
     environment:
       CI: "true"
       # 服务端 fetch（SSR / API proxy）走 Docker 网络内的服务名。
-      API_BASE_URL: http://api:4000
-      # 浏览器端 fetch 不能解析 Docker 服务名，让 .env 的 localhost:4000 生效。
+      API_BASE_URL: http://api:14000
+      # 浏览器端 fetch 不能解析 Docker 服务名，让 .env 的 localhost:14000 生效。
       # 如需覆盖请改 .env 而不是这里。
-      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4000}
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:14000}
     volumes:
       - .:/workspace
       - node_modules:/workspace/node_modules
@@ -118,24 +119,22 @@ services:
   # Optional production profile: builds Next.js once and runs `next start`
   # (much faster first paint than `next dev`). Activate with:
   #   docker compose --profile production up web-built
-  # Stop the dev `web` first to avoid the 3000 port collision.
+  # Stop the dev `web` first to avoid the 13000 port collision.
   # Add a reverse proxy (Caddy / nginx) in front of this for browser
   # access; the baked URL points at the api service inside the network.
   web-built:
     image: node:24-alpine
     working_dir: /workspace
     profiles: ["production"]
-    command: sh -c "corepack enable && pnpm config set store-dir /pnpm/store && pnpm install --frozen-lockfile && pnpm --dir apps/web build && pnpm --dir apps/web exec next start -p 3000 -H 0.0.0.0"
+    command: sh -c "corepack enable && pnpm config set store-dir /pnpm/store && pnpm install --frozen-lockfile && pnpm --dir apps/web build && pnpm --dir apps/web exec next start -p 13000 -H 0.0.0.0"
     ports:
-      # 宿主机 3000 落在 Windows Hyper-V 保留段（TCP 2970-3069），
-      # 改映射到 3170 避开；容器内部 next dev 仍跑 3000。
-      - "3170:3000"
+      - "13000:13000"
     env_file:
       - .env
     environment:
       CI: "true"
-      API_BASE_URL: http://api:4000
-      NEXT_PUBLIC_API_BASE_URL: http://api:4000
+      API_BASE_URL: http://api:14000
+      NEXT_PUBLIC_API_BASE_URL: http://api:14000
     volumes:
       - .:/workspace
       - node_modules:/workspace/node_modules
@@ -155,9 +154,9 @@ services:
       context: .
       dockerfile: apps/ai-worker/Dockerfile
     working_dir: /workspace/apps/ai-worker
-    command: sh -c "uv sync --extra dev --frozen --link-mode=copy && uv run --link-mode=copy uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    command: sh -c "uv sync --extra dev --frozen --link-mode=copy && uv run --link-mode=copy uvicorn app.main:app --host 0.0.0.0 --port 18000 --reload"
     ports:
-      - "8000:8000"
+      - "18000:18000"
     env_file:
       - .env
     volumes:

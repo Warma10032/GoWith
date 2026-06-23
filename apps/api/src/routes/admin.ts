@@ -9,7 +9,10 @@ import {
   type Json,
   type TaskLockKey,
 } from "@gowith/db";
-import { createCreatorRequestSchema } from "@gowith/shared";
+import {
+  collectCandidateEvidenceIds,
+  createCreatorRequestSchema,
+} from "@gowith/shared";
 import { HttpError } from "../lib/http";
 import { encryptSecret } from "../services/crypto";
 import { requireAdmin } from "../services/auth";
@@ -767,7 +770,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       "X-Accel-Buffering": "no",
       "Access-Control-Allow-Credentials": "true",
       "Access-Control-Allow-Origin": String(
-        request.headers.origin ?? "http://127.0.0.1:8765",
+        request.headers.origin ?? "http://127.0.0.1:13000",
       ),
     });
     reply.raw.write(
@@ -1194,7 +1197,6 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
                 id: crypto.randomUUID(),
                 primary_poi_id: poi.id,
                 ...shopValues,
-                avg_price_hint: null,
                 status: "draft",
                 published_at: null,
                 created_at: new Date(),
@@ -1206,6 +1208,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         // declared `number | null` (a known Kysely limitation). We coalesce to
         // 0 (a valid timestamp / neutral confidence) and let downstream readers
         // treat 0 as "not captured" for time fields. SQL columns are unchanged.
+        const mentionEvidenceIds = collectCandidateEvidenceIds(candidate);
         await trx
           .insertInto("shop_video_mentions")
           .values({
@@ -1217,7 +1220,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
             mention_type: "main",
             sentiment: "unknown",
             summary: null,
-            evidence_ids: [],
+            evidence_ids: mentionEvidenceIds,
             time_start_sec: candidate.time_start_sec ?? 0,
             time_end_sec: candidate.time_end_sec ?? 0,
             confidence: candidate.name_confidence ?? 0,
@@ -1229,6 +1232,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
               .doUpdateSet({
                 shop_candidate_id: candidate.id,
                 confidence: candidate.name_confidence ?? 0,
+                evidence_ids: mentionEvidenceIds,
               }),
           )
           .execute();
@@ -1664,7 +1668,6 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       .object({
         display_name: z.string().optional(),
         status: z.string().optional(),
-        avg_price_hint: z.string().nullable().optional(),
         card_payload: z.record(z.unknown()).optional(),
       })
       .parse(request.body);

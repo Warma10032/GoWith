@@ -28,12 +28,10 @@ export function buildApp() {
   app.register(cors, {
     origin: [
       env.webOrigin,
-      // Docker compose 把 web 映射到宿主机 3170（3000 在 Windows 保留段）。
-      "http://localhost:3170",
-      // 本机直跑 next dev（pnpm dev:web）时的默认端口，保留兼容。
-      "http://localhost:3000",
-      "http://127.0.0.1:8765",
-      "http://localhost:8765",
+      // 端口统一到 13000（web）+ 14000（api）+ 18000（ai-worker）。
+      // 不再保留 3000 / 8765 / 3170 等历史端口，全部走 +10000 偏移的高位。
+      "http://localhost:13000",
+      "http://127.0.0.1:13000",
     ],
     credentials: true,
   });

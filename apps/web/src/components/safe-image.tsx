@@ -2,7 +2,7 @@
  * SafeImage：项目里所有第三方 / 跨域图片统一走这个组件。
  *
  * 历史教训：B 站 hdslb.com CDN 默认 Referer 白名单只接受自家域名，
- * 浏览器 `<img>` 默认会带 `Referer: http://localhost:3000/...`，
+ * 浏览器 `<img>` 默认会带 `Referer: http://localhost:13000/...`，
  * 被 B 站 403。这里显式 `referrerPolicy="no-referrer"` 绕过。
  *
  * 现在 avatar_url / cover_url 都已切到自家 /uploads/... 域名，

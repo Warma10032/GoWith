@@ -1,11 +1,11 @@
 export const apiBaseUrl =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000";
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:14000";
 
 function getServerApiBaseUrl() {
   return (
     process.env.API_BASE_URL ??
     process.env.NEXT_PUBLIC_API_BASE_URL ??
-    "http://localhost:4000"
+    "http://localhost:14000"
   );
 }
 
@@ -42,9 +42,8 @@ export interface ShopCardData {
     recommend_reason?: string;
     recommendation_score?: number | null;
     recommendation_score_evidence_ids?: string[];
-    avg_price_hint?: string;
     recommended_dishes?: Array<{ name?: string; reason?: string }>;
-    avoid_points?: Array<{ text?: string }>;
+    avoid_points?: Array<{ text?: string; reason?: string }>;
   };
   quality?: Record<string, unknown>;
   aggregated_review?: Record<string, unknown>;
@@ -58,6 +57,7 @@ export interface ShopCardData {
   }>;
   recommendation_item_id?: string;
   score?: number;
+  distance_m?: number | string | null;
   external_links?: Array<{
     id: string;
     platform: "dianping" | "meituan";

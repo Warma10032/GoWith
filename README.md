@@ -16,11 +16,11 @@ pnpm dev
 
 Default local services:
 
-- Web: http://localhost:3170（容器内 next dev 仍跑 3000，宿主映射 3170 避开 Windows 保留段 2970-3069）
-- API: http://localhost:4000
-- AI Worker: http://localhost:8000
-- Postgres: localhost:5540
-- Redis from Docker Compose: localhost:6380
+- Web: http://localhost:13000
+- API: http://localhost:14000
+- AI Worker: http://localhost:18000
+- Postgres: localhost:15432（容器内仍 5432）
+- Redis from Docker Compose: localhost:16379（容器内仍 6379）
 
 ## Quality Gates
 

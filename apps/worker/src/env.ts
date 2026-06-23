@@ -25,10 +25,10 @@ function booleanFromEnv(name: string, fallback: boolean): boolean {
 // `pnpm dev`（concurrently，从 monorepo 根启动）还是 `pnpm dev:worker`
 // （从 apps/worker 启动）都能解析到同一个 uploads 目录。
 export const env = {
-  redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
+  redisUrl: process.env.REDIS_URL ?? "redis://localhost:16379",
   cookieEncryptionKey:
     process.env.COOKIE_ENCRYPTION_KEY ?? "dev-only-cookie-key-change-me",
-  aiWorkerUrl: process.env.AI_WORKER_URL ?? "http://localhost:8000",
+  aiWorkerUrl: process.env.AI_WORKER_URL ?? "http://localhost:18000",
   amapWebServiceKey: process.env.AMAP_WEB_SERVICE_KEY ?? "",
   // 图片下载到本地的目录；与 apps/api 共享，让 @fastify/static 直接 serve。
   // 默认 = apps/api/uploads/，与 apps/api/src/lib/env.ts 默认值一致，

@@ -12,9 +12,9 @@ dotenvConfig({
 });
 
 export const env = {
-  port: Number(process.env.PORT ?? 4000),
-  webOrigin: process.env.WEB_ORIGIN ?? "http://localhost:3000",
-  redisUrl: process.env.REDIS_URL ?? "redis://localhost:6379",
+  port: Number(process.env.PORT ?? 14000),
+  webOrigin: process.env.WEB_ORIGIN ?? "http://localhost:13000",
+  redisUrl: process.env.REDIS_URL ?? "redis://localhost:16379",
   databaseUrl: process.env.DATABASE_URL,
   authSecret: process.env.AUTH_SECRET ?? "dev-only-auth-secret-change-me",
   cookieEncryptionKey:
