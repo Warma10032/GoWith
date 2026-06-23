@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { ExternalLink, MapPin, Navigation, Star } from "lucide-react";
+import { formatDistance } from "@gowith/shared";
 import { formatRecommendationScore, type ShopCardData } from "@/lib/api";
 import { ExternalPlatformLink } from "./external-platform-link";
+import { ShopCoverImage } from "./shop-cover-image";
 
 export function ShopCard({
   shop,
@@ -19,18 +21,26 @@ export function ShopCard({
     (link) => link.platform === "dianping",
   );
   const providerPrice = shop.poi_business?.avg_cost;
+  const providerRating = shop.poi_business?.rating;
+  const coverUrl = shop.poi_business?.photos[0]?.url;
+  const distanceLabel = formatDistance(
+    shop.distance_m === null || shop.distance_m === undefined
+      ? null
+      : Number(shop.distance_m),
+  );
   const priceLabel =
-    card.avg_price_hint ??
-    (providerPrice !== null && providerPrice !== undefined
+    providerPrice !== null && providerPrice !== undefined
       ? `高德人均 ¥${Math.round(providerPrice)}`
-      : "人均待确认");
+      : null;
 
   return (
     <article className="rounded-lg border border-line bg-white p-4 shadow-card">
       <div className="flex gap-4">
-        <div className="grid size-24 shrink-0 place-items-center rounded-lg bg-[#f0e7dc] text-sm font-semibold text-brand">
-          店铺
-        </div>
+        <ShopCoverImage
+          src={coverUrl}
+          alt={`${shop.display_name} 店铺图片`}
+          className="h-24 w-28 shrink-0 rounded-lg border border-line object-cover sm:w-32"
+        />
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -44,9 +54,11 @@ export function ShopCard({
                 {card.subtitle ?? "AI 已整理为可审核店铺卡片"}
               </p>
             </div>
-            <span className="shrink-0 rounded-md bg-[#f7efe8] px-2 py-1 text-xs font-medium text-brand">
-              {priceLabel}
-            </span>
+            {priceLabel ? (
+              <span className="shrink-0 rounded-md bg-[#f7efe8] px-2 py-1 text-xs font-medium text-brand">
+                {priceLabel}
+              </span>
+            ) : null}
           </div>
           <p className="mt-3 text-sm leading-6 text-ink">
             {card.recommend_reason ?? "等待 AI 总结与人工审核。"}
@@ -57,10 +69,21 @@ export function ShopCard({
               {[shop.city, shop.district].filter(Boolean).join(" · ") ||
                 "位置待确认"}
             </span>
+            {distanceLabel ? (
+              <span className="font-medium text-brand">
+                距离 {distanceLabel}
+              </span>
+            ) : null}
             <span className="inline-flex items-center gap-1">
               <Star size={14} />
               AI 评分 {formatRecommendationScore(recommendationScore)}
             </span>
+            {providerRating !== null && providerRating !== undefined ? (
+              <span className="inline-flex items-center gap-1 font-medium text-[#9a5a16]">
+                <Star size={14} fill="currentColor" />
+                高德评分 {providerRating.toFixed(1)}
+              </span>
+            ) : null}
             {sourceVideo ? (
               <a
                 href={sourceVideo.source_url}

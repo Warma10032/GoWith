@@ -64,7 +64,7 @@ export default async function OpengraphImage() {
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <span
             style={{
-              display: "inline-block",
+              display: "flex",
               width: 14,
               height: 56,
               background: "#d94f30",
@@ -90,7 +90,7 @@ export default async function OpengraphImage() {
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span
             style={{
-              display: "inline-block",
+              display: "flex",
               width: 10,
               height: 10,
               borderRadius: 999,
