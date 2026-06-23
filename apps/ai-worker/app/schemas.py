@@ -47,7 +47,6 @@ MissingField = Literal[
     "business_area",
     "exact_address",
     "poi",
-    "avg_price",
     "opening_hours",
     "phone",
     "recommended_dishes",
@@ -206,7 +205,6 @@ class CardPayload(StrictModel):
     recommend_reason: str
     recommendation_score: Confidence | None
     recommendation_score_evidence_ids: list[str] = Field(default_factory=list)
-    avg_price_hint: str | None = None
     cover_source: str | None = None
     tags: list[str] = Field(default_factory=list)
     recommended_dishes: list[CardConclusion] = Field(default_factory=list)
@@ -264,7 +262,7 @@ class StructuredShopCandidate(StrictModel):
 
 
 class VideoStructuredAnalysisResponse(StrictModel):
-    schema_version: Literal["video_structured_analysis.v1"] = "video_structured_analysis.v1"
+    schema_version: Literal["video_structured_analysis.v2"] = "video_structured_analysis.v2"
     video: StructuredVideoPayload
     shop_candidates: list[StructuredShopCandidate] = Field(default_factory=list)
 

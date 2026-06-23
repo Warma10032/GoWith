@@ -59,7 +59,6 @@ export const missingFields = [
   "business_area",
   "exact_address",
   "poi",
-  "avg_price",
   "opening_hours",
   "phone",
   "recommended_dishes",
@@ -102,9 +101,22 @@ export const shopCandidateStatuses = [
   "rejected",
 ] as const;
 
-export const reviewTaskStatuses = ["open", "in_progress", "resolved", "rejected", "cancelled"] as const;
+export const reviewTaskStatuses = [
+  "open",
+  "in_progress",
+  "resolved",
+  "rejected",
+  "cancelled",
+] as const;
 
-export const shopStatuses = ["draft", "published", "hidden", "needs_recheck", "rejected", "merged"] as const;
+export const shopStatuses = [
+  "draft",
+  "published",
+  "hidden",
+  "needs_recheck",
+  "rejected",
+  "merged",
+] as const;
 
 export const poiMatchStatuses = [
   "not_started",
@@ -126,4 +138,3 @@ export type ShopCandidateStatus = (typeof shopCandidateStatuses)[number];
 export type ReviewTaskStatus = (typeof reviewTaskStatuses)[number];
 export type ShopStatus = (typeof shopStatuses)[number];
 export type PoiMatchStatus = (typeof poiMatchStatuses)[number];
-

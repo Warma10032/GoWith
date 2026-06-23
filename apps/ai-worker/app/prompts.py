@@ -105,7 +105,7 @@ PROMPTS: dict[str, PromptSpec] = {
     ),
     "structure_synthesis": PromptSpec(
         key="structure_synthesis",
-        version="structure_synthesis.v5",
+        version="structure_synthesis.v6",
         model_tier="complex",
         objective="综合分类、店铺事实、博主观点和评论分析，生成唯一主店铺结构化卡片。",
         source_priority=("字幕事实与博主观点", "分类结果", "评论分析仅补充顾客反馈"),
@@ -133,7 +133,7 @@ PROMPTS: dict[str, PromptSpec] = {
     ),
     "structure_semantic_retry": PromptSpec(
         key="structure_semantic_retry",
-        version="structure_semantic_retry.v2",
+        version="structure_semantic_retry.v3",
         model_tier="complex",
         objective="根据语义校验问题重新生成完整的视频与店铺结构化结果。",
         source_priority=("完整递进式分析上下文", "语义校验问题", "上一次结构化输出"),

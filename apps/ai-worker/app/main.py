@@ -70,7 +70,6 @@ ALLOWED_MISSING_FIELDS = {
     "business_area",
     "exact_address",
     "poi",
-    "avg_price",
     "opening_hours",
     "phone",
     "recommended_dishes",
@@ -1039,7 +1038,6 @@ def _normalize_shop_candidate(
             "recommendation_score_evidence_ids": _string_list(
                 card.get("recommendation_score_evidence_ids")
             ),
-            "avg_price_hint": _string_or_none(card.get("avg_price_hint")),
             "cover_source": _string_or_none(card.get("cover_source")),
             "tags": [],
             "recommended_dishes": _conclusion_items(card.get("recommended_dishes"), "name"),
@@ -1077,7 +1075,7 @@ def _normalize_structured_payload(
     primary_categories = _string_list(raw_video.get("primary_categories"), 5)
     if not primary_categories:
         primary_categories = _string_list(classification.get("primary_category_hints"), 5)
-    normalized["schema_version"] = "video_structured_analysis.v1"
+    normalized["schema_version"] = "video_structured_analysis.v2"
     normalized["video"] = {
         "video_id": _string_or_none(raw_video.get("video_id")) or metadata.video_id,
         "bvid": _string_or_none(raw_video.get("bvid")) or metadata.bvid,

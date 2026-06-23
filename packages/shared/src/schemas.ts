@@ -146,7 +146,7 @@ const reviewDimensionSchema = z
 
 export const videoStructuredAnalysisSchema = z
   .object({
-    schema_version: z.literal("video_structured_analysis.v1"),
+    schema_version: z.literal("video_structured_analysis.v2"),
     video: z
       .object({
         video_id: z.string(),
@@ -208,7 +208,6 @@ export const videoStructuredAnalysisSchema = z
               recommendation_score_evidence_ids: z
                 .array(z.string())
                 .default([]),
-              avg_price_hint: z.string().nullable().optional(),
               cover_source: z.string().nullable().optional(),
               tags: z.array(z.string()).default([]),
               recommended_dishes: z.array(conclusionSchema).default([]),
@@ -334,7 +333,6 @@ export const publishedShopSnapshotSchema = z.object({
     title: z.string(),
     subtitle: z.string().nullable().optional(),
     recommend_reason: z.string(),
-    avg_price_hint: z.string().nullable().optional(),
     tags: z.array(z.string()).default([]),
     cover_url: z.string().url().nullable().optional(),
     source_creator_avatars: z.array(z.string()).default([]),

@@ -438,7 +438,6 @@ export interface ShopsTable {
   lng: number;
   lat: number;
   coord_type: "gcj02" | "bd09" | "wgs84";
-  avg_price_hint: string | null;
   card_payload: Json;
   aggregated_review: Json;
   quality: Json;

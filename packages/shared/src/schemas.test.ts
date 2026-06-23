@@ -46,9 +46,64 @@ describe("admin task response schema", () => {
 });
 
 describe("structured analysis strict schema", () => {
+  it("rejects the removed AI average price field", () => {
+    const result = videoStructuredAnalysisSchema.safeParse({
+      schema_version: "video_structured_analysis.v2",
+      video: {
+        video_id: "vid_1",
+        bvid: "BV1",
+        creator_id: "creator_1",
+        title: "探店",
+        content_type: "single_shop_visit",
+        is_shop_visit: true,
+        overall_summary: "探店总结",
+        primary_categories: [],
+        analysis_confidence: 0.9,
+        risk_flags: [],
+        evidence_ids: ["ev_1"],
+      },
+      shop_candidates: [
+        {
+          candidate_id: "candidate_1",
+          candidate_name: "测试店",
+          normalized_name: "测试店",
+          name_confidence: 0.9,
+          alias_names: [],
+          candidate_type: "physical_shop",
+          category: { primary: "餐饮", secondary: null, confidence: 0.8 },
+          location_hints: { landmarks: [], confidence: 0.8 },
+          card_payload: {
+            display_title: "测试店",
+            recommend_reason: "值得尝试",
+            recommendation_score: null,
+            recommendation_score_evidence_ids: [],
+            avg_price_hint: "人均 30 元",
+            tags: [],
+            recommended_dishes: [],
+            avoid_points: [],
+            suitable_scenes: [],
+          },
+          review_dimensions: {},
+          comment_summary: {
+            positive_points: [],
+            negative_points: [],
+            controversial_points: [],
+            recent_status_points: [],
+            confidence: 0,
+            evidence_ids: [],
+          },
+          missing_fields: [],
+          risk_flags: [],
+          manual_review_reasons: [],
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+  });
+
   it("rejects legacy fields", () => {
     const result = videoStructuredAnalysisSchema.safeParse({
-      schema_version: "video_structured_analysis.v1",
+      schema_version: "video_structured_analysis.v2",
       video: {
         video_id: "vid_1",
         bvid: "BV1",

@@ -190,9 +190,9 @@ def test_structure_retries_when_single_shop_candidate_is_missing(monkeypatch) ->
             '"risk_flags":[],"evidence_ids":["ev-1"]}'
         )
         if key == "structure_synthesis":
-            return (f'{{"schema_version":"video_structured_analysis.v1",{video},"shop_candidates":[]}}', {})
+            return (f'{{"schema_version":"video_structured_analysis.v2",{video},"shop_candidates":[]}}', {})
         return (
-            f'{{"schema_version":"video_structured_analysis.v1",{video},'
+            f'{{"schema_version":"video_structured_analysis.v2",{video},'
             '"shop_candidates":[{"candidate_name":"大笑饭堂","candidate_type":"physical_shop",'
             '"card_payload":{"display_title":"大笑饭堂","recommend_reason":"博主推荐鱼饼，认为咸香Q弹。",'
             '"recommendation_score":0.9,"recommendation_score_evidence_ids":["ev-1"],'
