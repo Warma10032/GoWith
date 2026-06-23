@@ -6,6 +6,8 @@ import {
   RotateCcw,
   Star,
   MessageSquareText,
+  ShieldAlert,
+  Utensils,
 } from "lucide-react";
 import { TopNav } from "@/components/top-nav";
 import { ExternalPlatformLink } from "@/components/external-platform-link";
@@ -25,6 +27,7 @@ interface ShopMention {
 }
 
 interface ShopEvidence {
+  id: string;
   source: string;
   text_excerpt: string;
   start_sec?: number | null;
@@ -35,6 +38,7 @@ interface ShopEvidence {
 interface ShopDetailPayload {
   shop: ShopCardData;
   mentions: ShopMention[];
+  evidence_count: number;
   evidence: ShopEvidence[];
 }
 
@@ -148,9 +152,12 @@ export default async function ShopPage({
   const category = [data.shop.category_primary, data.shop.category_secondary]
     .filter(Boolean)
     .join(" · ");
-  const recommendedDishes = (card.recommended_dishes ?? [])
-    .map((dish) => dish.name)
-    .filter((dish): dish is string => Boolean(dish));
+  const recommendedDishes = (card.recommended_dishes ?? []).filter((dish) =>
+    Boolean(dish.name),
+  );
+  const avoidPoints = (card.avoid_points ?? []).filter((point) =>
+    Boolean(point.text),
+  );
   const review = reviewData(data.shop.aggregated_review);
   const poiBusiness = data.shop.poi_business;
   const dianpingLink = data.shop.external_links?.find(
@@ -181,15 +188,60 @@ export default async function ShopPage({
               {card.recommend_reason ?? "暂无推荐摘要。"}
             </p>
           </div>
+          {recommendedDishes.length ? (
+            <section className="mt-6">
+              <div className="flex items-center gap-2 font-semibold">
+                <Utensils size={18} className="text-brand" />
+                推荐菜
+              </div>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {recommendedDishes.map((dish, index) => (
+                  <div
+                    key={`${dish.name}-${index}`}
+                    className="rounded-xl border border-[#eed7c8] bg-[#fffaf6] p-5"
+                  >
+                    <div className="text-lg font-semibold text-ink">
+                      {dish.name}
+                    </div>
+                    {dish.reason ? (
+                      <p className="mt-2 text-sm leading-6 text-muted">
+                        {dish.reason}
+                      </p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+          {avoidPoints.length ? (
+            <section className="mt-6">
+              <div className="flex items-center gap-2 font-semibold text-[#9a341f]">
+                <ShieldAlert size={18} />
+                避雷点
+              </div>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {avoidPoints.map((point, index) => (
+                  <div
+                    key={`${point.text}-${index}`}
+                    className="rounded-xl border border-[#f2c7bd] bg-[#fff7f4] p-4"
+                  >
+                    <div className="font-medium text-[#7f2f1d]">
+                      {point.text}
+                    </div>
+                    {point.reason ? (
+                      <p className="mt-2 text-sm leading-6 text-[#9a5a4a]">
+                        {point.reason}
+                      </p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
             <Info title="位置" icon={MapPin} value={location || "待确认"} />
-            <Info title="人均" value={card.avg_price_hint ?? "待确认"} />
             <Info title="品类" value={category || "暂无"} />
-            <Info
-              title="推荐菜"
-              value={recommendedDishes.join(" / ") || "暂无"}
-            />
-            <Info title="证据条数" value={`${data.evidence.length} 条`} />
+            <Info title="证据条数" value={`${data.evidence_count} 条`} />
             <Info
               title="高德评分"
               value={
@@ -332,7 +384,7 @@ export default async function ShopPage({
               {data.evidence.length ? (
                 data.evidence.map((evidence, index) => (
                   <p
-                    key={`${evidence.source}-${index}`}
+                    key={evidence.id ?? `${evidence.source}-${index}`}
                     className="rounded-lg border border-line p-3"
                   >
                     <span className="mr-2 rounded bg-[#f7efe8] px-1.5 py-0.5 text-xs font-medium text-brand">

@@ -1,13 +1,8 @@
-import { Compass, MapPin, Store, UserRound, Video } from "lucide-react";
+import { MapPin, Store, UserRound, Video } from "lucide-react";
 import { TopNav } from "@/components/top-nav";
-import { ShopCard } from "@/components/shop-card";
 import { HomeFilters } from "@/components/home-filters";
-import { apiFetch, type ShopCardData } from "@/lib/api";
-
-interface RecommendedShopsPayload {
-  recommendation_request_id: string;
-  shops: ShopCardData[];
-}
+import { HomeShopFeed } from "@/components/home-shop-feed";
+import { apiFetch } from "@/lib/api";
 
 interface StatsPayload {
   counts: {
@@ -22,13 +17,7 @@ interface StatsPayload {
 
 export default async function HomePage() {
   // 推荐流与站点统计并发拉取；统计短暂挂掉也不阻塞主推荐流。
-  const [recommended, stats] = await Promise.all([
-    apiFetch<RecommendedShopsPayload>("/api/shops/recommended"),
-    apiFetch<StatsPayload>("/api/stats").catch(() => null),
-  ]);
-
-  const shops = recommended.shops;
-  const isEmpty = shops.length === 0;
+  const stats = await apiFetch<StatsPayload>("/api/stats").catch(() => null);
 
   return (
     <main>
@@ -38,34 +27,7 @@ export default async function HomePage() {
 
         <section className="space-y-4">
           {stats ? <SiteMetrics stats={stats} /> : null}
-
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-2xl font-semibold">店铺卡片流</h2>
-              <p className="mt-1 text-sm text-muted">
-                每张卡片都应该追溯到视频、评论或人工审核。
-              </p>
-            </div>
-            <span className="rounded-md bg-white px-3 py-2 text-sm text-muted">
-              {isEmpty ? "暂无推荐" : `${shops.length} 家店铺`}
-            </span>
-          </div>
-
-          {isEmpty ? (
-            <EmptyState />
-          ) : (
-            <div className="space-y-3">
-              {shops.map((shop) => (
-                <ShopCard
-                  key={shop.id}
-                  shop={shop}
-                  recommendationRequestId={
-                    recommended.recommendation_request_id
-                  }
-                />
-              ))}
-            </div>
-          )}
+          <HomeShopFeed />
         </section>
       </section>
     </main>
@@ -139,26 +101,4 @@ function formatUpdatedAt(value: string | undefined): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function EmptyState() {
-  return (
-    <div className="rounded-lg border border-dashed border-line bg-white p-10 text-center">
-      <div className="mx-auto grid size-12 place-items-center rounded-full bg-[#f7efe8] text-brand">
-        <Compass size={20} />
-      </div>
-      <h3 className="mt-4 text-lg font-semibold">还没有可推荐的店铺</h3>
-      <p className="mt-2 text-sm leading-7 text-muted">
-        发布第一批探店视频后，AI 解析 + 人工审核通过的店铺会出现在这里。
-      </p>
-      <p className="mt-4 inline-flex items-center gap-1 text-xs text-muted">
-        <MapPin size={12} />
-        也可以先去
-        <a href="/map" className="font-medium text-brand hover:underline">
-          地图页
-        </a>
-        看看已发布的店铺。
-      </p>
-    </div>
-  );
 }

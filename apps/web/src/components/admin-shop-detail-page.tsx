@@ -47,7 +47,6 @@ type ShopDetail = {
   district: string | null;
   business_area: string | null;
   address: string | null;
-  avg_price_hint: string | null;
   category_primary: string | null;
   category_secondary: string | null;
   lng: number;
@@ -174,8 +173,7 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
 
   // 必须在 `if (!data) return ...` 之前调用，否则 hooks 顺序在两次 render 之间不一致。
   const dianpingSearchUrl = useMemo(
-    () =>
-      buildDianpingSearchUrl(data?.shop.city, data?.shop.display_name),
+    () => buildDianpingSearchUrl(data?.shop.city, data?.shop.display_name),
     [data?.shop.city, data?.shop.display_name],
   );
 
@@ -217,7 +215,6 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
     recommend_reason?: string;
     recommendation_score?: number | null;
     recommendation_score_evidence_ids?: string[];
-    avg_price_hint?: string;
     recommended_dishes?: { name: string; reason?: string }[];
     avoid_points?: { text: string }[];
     suitable_scenes?: string[];
@@ -503,10 +500,6 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
           <Field
             label="坐标"
             value={`${shop.lng}, ${shop.lat} · ${lookupLabel(COORD_TYPE_LABELS, shop.coord_type)}`}
-          />
-          <Field
-            label="人均"
-            value={shop.avg_price_hint ?? card.avg_price_hint ?? "—"}
           />
           <Field
             label="高德评分"

@@ -17,7 +17,6 @@ type ShopRow = {
   district: string | null;
   business_area: string | null;
   status: string;
-  avg_price_hint: string | null;
   card_payload: Record<string, unknown>;
   quality: Record<string, unknown> | null;
   published_at: string | null;
@@ -142,7 +141,6 @@ export function AdminShopsPage() {
                   subtitle?: string;
                   recommend_reason?: string;
                   recommendation_score?: number | null;
-                  avg_price_hint?: string;
                 };
                 const recommendationScore =
                   typeof card.recommendation_score === "number"
@@ -177,7 +175,6 @@ export function AdminShopsPage() {
                         {[shop.city, shop.district, shop.business_area]
                           .filter(Boolean)
                           .join(" · ") || "位置待确认"}
-                        {shop.avg_price_hint ? ` · ${shop.avg_price_hint}` : ""}
                         {card.recommend_reason
                           ? ` · ${card.recommend_reason.slice(0, 60)}${card.recommend_reason.length > 60 ? "…" : ""}`
                           : ""}

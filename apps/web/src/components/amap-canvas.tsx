@@ -19,7 +19,9 @@ import {
   useRef,
   useState,
 } from "react";
+import { wgs84ToGcj02 } from "@gowith/shared";
 import { apiBaseUrl } from "@/lib/api";
+import { getBrowserLocation } from "@/lib/browser-location";
 
 type SourceVideo = {
   video_id?: string;
@@ -41,7 +43,6 @@ type MapShop = {
   card_payload?: {
     subtitle?: string;
     recommend_reason?: string;
-    avg_price_hint?: string;
     tags?: string[];
   } | null;
   quality?: Record<string, unknown> | null;
@@ -152,6 +153,40 @@ function loadAmapSdk(key: string) {
   return amapLoaderPromise;
 }
 
+function waitForContainerLayout(
+  container: HTMLDivElement,
+  signal: AbortSignal,
+) {
+  return new Promise<void>((resolve, reject) => {
+    let observer: ResizeObserver | null = null;
+
+    const cleanup = () => {
+      observer?.disconnect();
+      signal.removeEventListener("abort", handleAbort);
+    };
+    const handleAbort = () => {
+      cleanup();
+      reject(new DOMException("Map initialization aborted", "AbortError"));
+    };
+    const resolveWhenReady = () => {
+      const { width, height } = container.getBoundingClientRect();
+      if (!container.isConnected || width <= 0 || height <= 0) return;
+      cleanup();
+      resolve();
+    };
+
+    if (signal.aborted) {
+      handleAbort();
+      return;
+    }
+
+    signal.addEventListener("abort", handleAbort, { once: true });
+    observer = new ResizeObserver(resolveWhenReady);
+    observer.observe(container);
+    resolveWhenReady();
+  });
+}
+
 declare global {
   interface Window {
     _AMapSecurityConfig?: {
@@ -161,6 +196,7 @@ declare global {
 }
 
 type MapStatus = "idle" | "loading" | "ready" | "error" | "missing-key";
+type LocationStatus = "locating" | "ready" | "error";
 
 function lngLatValue(value: LngLat, axis: "lng" | "lat") {
   const getter = axis === "lng" ? value.getLng : value.getLat;
@@ -232,6 +268,7 @@ export function AmapCanvas() {
   const amapRef = useRef<AMapNamespace | null>(null);
   const markersRef = useRef<AMapMarker[]>([]);
   const infoWindowRef = useRef<AMapInfoWindow | null>(null);
+  const userMarkerRef = useRef<AMapMarker | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeQueryRef = useRef("");
   const selectedShopIdRef = useRef<string | null>(null);
@@ -243,11 +280,19 @@ export function AmapCanvas() {
   const [selectedShopId, setSelectedShopId] = useState<string | null>(null);
   const [loadingPins, setLoadingPins] = useState(false);
   const [panelError, setPanelError] = useState<string | null>(null);
+  const [locationStatus, setLocationStatus] =
+    useState<LocationStatus>("locating");
 
   const selectedShop = useMemo(
     () => shops.find((shop) => shop.id === selectedShopId) ?? null,
     [selectedShopId, shops],
   );
+  const busyLabel =
+    locationStatus === "locating"
+      ? "正在定位"
+      : loadingPins
+        ? "正在加载店铺点位"
+        : null;
 
   useEffect(() => {
     activeQueryRef.current = activeQuery;
@@ -408,15 +453,43 @@ export function AmapCanvas() {
     }, 350);
   }, [fetchViewportShops]);
 
+  const locateUser = useCallback(async (force = true) => {
+    const map = mapRef.current;
+    const AMap = amapRef.current;
+    if (!map || !AMap) return;
+    setLocationStatus("locating");
+    try {
+      const browserLocation = await getBrowserLocation(force);
+      const location = wgs84ToGcj02({
+        lng: browserLocation.lng,
+        lat: browserLocation.lat,
+      });
+      userMarkerRef.current?.setMap(null);
+      const marker = new AMap.Marker({
+        position: [location.lng, location.lat],
+        title: "我的位置",
+      });
+      marker.setMap(map);
+      userMarkerRef.current = marker;
+      map.setZoomAndCenter(13, [location.lng, location.lat]);
+      setLocationStatus("ready");
+    } catch {
+      setLocationStatus("error");
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     let resizeObserver: ResizeObserver | null = null;
     let initialFetchTimer: ReturnType<typeof setTimeout> | null = null;
+    let postMountFrame: number | null = null;
+    const initializationController = new AbortController();
     const key = process.env.NEXT_PUBLIC_AMAP_WEB_JS_KEY;
     const securityJsCode = process.env.NEXT_PUBLIC_AMAP_SECURITY_JS_CODE;
 
     if (!key) {
       setStatus("missing-key");
+      setLocationStatus("error");
       return undefined;
     }
 
@@ -427,18 +500,36 @@ export function AmapCanvas() {
     setStatus("loading");
     setErrorMessage(null);
 
-    loadAmapSdk(key)
-      .then(async (AMap) => {
-        await new Promise<void>((resolve) =>
-          requestAnimationFrame(() => resolve()),
-        );
-        if (cancelled || !containerRef.current) return;
+    const container = containerRef.current;
+    if (!container) {
+      setStatus("error");
+      setLocationStatus("error");
+      setErrorMessage("地图容器初始化失败");
+      return undefined;
+    }
 
-        const map = new AMap.Map(containerRef.current, {
-          center: [104.195397, 35.86166],
+    Promise.all([
+      loadAmapSdk(key),
+      waitForContainerLayout(container, initializationController.signal),
+      getBrowserLocation().catch(() => null),
+    ])
+      .then(([AMap, _layout, browserLocation]) => {
+        if (cancelled || containerRef.current !== container) return;
+
+        const initialLocation = browserLocation
+          ? wgs84ToGcj02({
+              lng: browserLocation.lng,
+              lat: browserLocation.lat,
+            })
+          : null;
+
+        const map = new AMap.Map(container, {
+          center: initialLocation
+            ? [initialLocation.lng, initialLocation.lat]
+            : [104.195397, 35.86166],
           mapStyle: "amap://styles/normal",
           viewMode: "2D",
-          zoom: 4,
+          zoom: initialLocation ? 13 : 4,
           zooms: [3, 18],
         });
 
@@ -451,6 +542,17 @@ export function AmapCanvas() {
           offset: new AMap.Pixel(0, -28),
           closeWhenClickMap: true,
         });
+        if (initialLocation) {
+          const marker = new AMap.Marker({
+            position: [initialLocation.lng, initialLocation.lat],
+            title: "我的位置",
+          });
+          marker.setMap(map);
+          userMarkerRef.current = marker;
+          setLocationStatus("ready");
+        } else {
+          setLocationStatus("error");
+        }
         setStatus("ready");
 
         let initialFetchStarted = false;
@@ -467,7 +569,8 @@ export function AmapCanvas() {
         map.on("zoomend", scheduleFetch);
 
         resizeObserver = new ResizeObserver(() => map.resize());
-        resizeObserver.observe(containerRef.current);
+        resizeObserver.observe(container);
+        postMountFrame = requestAnimationFrame(() => map.resize());
         initialFetchTimer = setTimeout(fetchInitialViewport, 500);
       })
       .catch((error: unknown) => {
@@ -480,11 +583,15 @@ export function AmapCanvas() {
 
     return () => {
       cancelled = true;
+      initializationController.abort();
       resizeObserver?.disconnect();
+      if (postMountFrame !== null) cancelAnimationFrame(postMountFrame);
       if (initialFetchTimer) clearTimeout(initialFetchTimer);
       if (debounceRef.current) clearTimeout(debounceRef.current);
       for (const marker of markersRef.current) marker.setMap(null);
       markersRef.current = [];
+      userMarkerRef.current?.setMap(null);
+      userMarkerRef.current = null;
       infoWindowRef.current?.close();
       mapRef.current?.destroy();
       mapRef.current = null;
@@ -525,6 +632,12 @@ export function AmapCanvas() {
 
   return (
     <>
+      {busyLabel ? (
+        <div className="lg:col-span-2 flex items-center gap-2 rounded-lg border border-[#f0d89a] bg-[#fffaf0] px-4 py-3 text-sm text-[#7c4a16]">
+          <Loader2 size={15} className="animate-spin" />
+          正在执行：{busyLabel}（其它操作按钮已禁用）
+        </div>
+      ) : null}
       <div className="relative min-h-[420px] overflow-hidden rounded-lg border border-line bg-map md:min-h-[620px]">
         <div
           ref={containerRef}
@@ -576,6 +689,19 @@ export function AmapCanvas() {
               : `当前视窗 ${shops.length} 家已发布店铺`}
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => void locateUser(true)}
+          disabled={status !== "ready" || Boolean(busyLabel)}
+          className="absolute right-4 top-28 z-10 inline-flex items-center gap-2 rounded-lg border border-line bg-white/95 px-3 py-2 text-sm font-medium text-brand shadow-card disabled:cursor-not-allowed disabled:opacity-60 sm:right-6 sm:top-6"
+        >
+          {locationStatus === "locating" ? (
+            <Loader2 size={15} className="animate-spin" />
+          ) : (
+            <LocateFixed size={15} />
+          )}
+          {locationStatus === "ready" ? "已定位" : "重新定位"}
+        </button>
       </div>
 
       <aside className="rounded-lg border border-line bg-white p-4">
@@ -591,6 +717,7 @@ export function AmapCanvas() {
             {searchText ? (
               <button
                 type="button"
+                disabled={Boolean(busyLabel)}
                 onClick={() => {
                   setSearchText("");
                   if (activeQuery) {
@@ -608,6 +735,7 @@ export function AmapCanvas() {
           <button
             className="inline-flex size-10 shrink-0 items-center justify-center rounded-lg bg-brand text-white"
             aria-label="搜索店铺"
+            disabled={Boolean(busyLabel)}
           >
             {loadingPins ? (
               <Loader2 size={16} className="animate-spin" />
@@ -624,12 +752,19 @@ export function AmapCanvas() {
           <button
             onClick={() => void fetchViewportShops()}
             className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-xs font-medium"
-            disabled={loadingPins || status !== "ready"}
+            disabled={Boolean(busyLabel) || status !== "ready"}
           >
             <LocateFixed size={13} />
             刷新范围
           </button>
         </div>
+        <p className="mt-2 text-xs text-muted">
+          {locationStatus === "ready"
+            ? "地图已以当前位置为中心，左下角比例尺会随缩放保持真实距离。"
+            : locationStatus === "locating"
+              ? "正在获取当前位置…"
+              : "未获得定位，当前显示全国视图。"}
+        </p>
 
         {panelError ? (
           <div className="mt-3 rounded-lg border border-[#f2c7bd] bg-[#fff1ee] px-3 py-2 text-xs text-[#9a341f]">
@@ -659,6 +794,7 @@ export function AmapCanvas() {
               <button
                 key={shop.id}
                 onClick={() => openShop(shop, true)}
+                disabled={Boolean(busyLabel)}
                 className="block w-full rounded-lg border border-line p-3 text-left text-sm hover:border-brand/60 hover:bg-[#fffaf0]"
               >
                 <div className="flex items-start gap-2">
@@ -744,6 +880,7 @@ export function AmapCanvas() {
               {activeQuery ? (
                 <button
                   type="button"
+                  disabled={Boolean(busyLabel)}
                   onClick={() => {
                     setActiveQuery("");
                     setSearchText("");
