@@ -2,7 +2,12 @@ import crypto from "node:crypto";
 import type { FastifyPluginAsync } from "fastify";
 import { sql } from "kysely";
 import { z } from "zod";
-import { createUserEventSchema, favoriteRequestSchema } from "@gowith/shared";
+import {
+  createUserEventSchema,
+  collectCandidateEvidenceIds,
+  favoriteRequestSchema,
+  wgs84ToGcj02,
+} from "@gowith/shared";
 import { HttpError } from "../lib/http";
 import { getUserFromRequest, requireUser } from "../services/auth";
 
@@ -40,6 +45,22 @@ type ShopSupplement = {
   external_links: ShopExternalLink[];
   poi_business: PoiBusiness | null;
 };
+
+export const recommendedQuerySchema = z
+  .object({
+    anonymous_id: z.string().optional(),
+    lng: z.coerce.number().min(-180).max(180).optional(),
+    lat: z.coerce.number().min(-90).max(90).optional(),
+    coord_type: z.enum(["wgs84", "gcj02"]).default("wgs84"),
+  })
+  .superRefine((value, context) => {
+    if ((value.lng === undefined) !== (value.lat === undefined)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "lng and lat must be provided together",
+      });
+    }
+  });
 
 function finiteNumber(value: unknown): number | null {
   const parsed = Number(value);
@@ -342,6 +363,13 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get("/shops/recommended", async (request) => {
+    const query = recommendedQuerySchema.parse(request.query);
+    const hasLocation = query.lng !== undefined && query.lat !== undefined;
+    const gcjLocation = hasLocation
+      ? query.coord_type === "wgs84"
+        ? wgs84ToGcj02({ lng: query.lng!, lat: query.lat! })
+        : { lng: query.lng!, lat: query.lat! }
+      : null;
     const user = await getUserFromRequest(app.db, request);
     const requestId = crypto.randomUUID();
     await app.db
@@ -349,23 +377,43 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
       .values({
         id: requestId,
         user_id: user?.id ?? null,
-        anonymous_id:
-          (request.query as { anonymous_id?: string }).anonymous_id ?? null,
+        anonymous_id: query.anonymous_id ?? null,
         surface: "home",
-        request_context: request.query as never,
-        algorithm: "rule_v0",
+        request_context: {
+          ...(hasLocation
+            ? {
+                lng: query.lng,
+                lat: query.lat,
+                coord_type: query.coord_type,
+              }
+            : {}),
+        },
+        algorithm: hasLocation ? "distance_v1" : "rule_v0",
         model_version: null,
         created_at: new Date(),
       })
       .execute();
 
-    const shops = await app.db
+    const baseShopQuery = app.db
       .selectFrom("shops")
       .selectAll()
-      .where("status", "=", "published")
-      .orderBy("published_at", "desc")
-      .limit(30)
-      .execute();
+      .where("status", "=", "published");
+    const shops = gcjLocation
+      ? await baseShopQuery
+          .select(
+            sql<number>`CASE WHEN shops.coord_type = 'gcj02' THEN ST_DistanceSphere(shops.geom, ST_SetSRID(ST_MakePoint(${gcjLocation.lng}, ${gcjLocation.lat}), 4326)) ELSE NULL END`.as(
+              "distance_m",
+            ),
+          )
+          .orderBy(sql`distance_m ASC NULLS LAST`)
+          .orderBy("published_at", "desc")
+          .limit(30)
+          .execute()
+      : await baseShopQuery
+          .select(sql<null>`NULL`.as("distance_m"))
+          .orderBy("published_at", "desc")
+          .limit(30)
+          .execute();
 
     const items = [];
     for (const [index, shop] of shops.entries()) {
@@ -379,12 +427,15 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
           shop_id: shop.id,
           rank: index + 1,
           score,
-          reason_codes: ["published_recently", "rule_v0"],
+          reason_codes: hasLocation
+            ? ["nearby", "distance_v1"]
+            : ["published_recently", "rule_v0"],
           feature_snapshot: {
             shop_confidence:
               (shop.quality as Record<string, unknown>)?.shop_confidence ??
               null,
             published_at: shop.published_at,
+            distance_m: shop.distance_m,
           },
           created_at: new Date(),
         })
@@ -496,7 +547,7 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
       .where("status", "=", "published")
       .executeTakeFirst();
     if (!shop) throw new HttpError(404, "shop_not_found", "Shop not found");
-    const [mentions, evidence, supplements] = await Promise.all([
+    const [mentions, supplements] = await Promise.all([
       app.db
         .selectFrom("shop_video_mentions")
         .innerJoin("videos", "videos.id", "shop_video_mentions.video_id")
@@ -508,27 +559,68 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
           "videos.bvid",
           "videos.cover_url",
           "creators.name as creator_name",
+          "shop_video_mentions.shop_candidate_id",
+          "shop_video_mentions.evidence_ids",
         ])
         .where("shop_video_mentions.shop_id", "=", params.data.id)
         .execute(),
-      app.db
-        .selectFrom("evidence")
-        .select([
-          "source",
-          "text_excerpt",
-          "start_sec",
-          "end_sec",
-          "confidence",
-        ])
-        .where("shop_id", "=", params.data.id)
-        .limit(20)
-        .execute(),
       getShopSupplementsByIds(app, [shop.id]),
     ]);
+    const evidenceIds = new Set(
+      mentions.flatMap((mention) => mention.evidence_ids),
+    );
+    const legacyCandidateIds = mentions.flatMap((mention) =>
+      mention.evidence_ids.length === 0 && mention.shop_candidate_id
+        ? [mention.shop_candidate_id]
+        : [],
+    );
+    if (legacyCandidateIds.length) {
+      const candidates = await app.db
+        .selectFrom("shop_candidates")
+        .select(["card_payload", "review_dimensions", "comment_summary"])
+        .where("id", "in", legacyCandidateIds)
+        .execute();
+      for (const candidate of candidates) {
+        for (const id of collectCandidateEvidenceIds(candidate)) {
+          evidenceIds.add(id);
+        }
+      }
+    }
+    const evidenceRows = evidenceIds.size
+      ? await app.db
+          .selectFrom("evidence")
+          .select([
+            "id",
+            "source",
+            "text_excerpt",
+            "start_sec",
+            "end_sec",
+            "confidence",
+            "created_at",
+          ])
+          .where("id", "in", [...evidenceIds])
+          .orderBy("created_at", "asc")
+          .execute()
+      : [];
     return {
       shop: attachShopSupplements([shop], supplements)[0],
-      mentions,
-      evidence,
+      mentions: mentions.map(
+        ({
+          shop_candidate_id: _candidateId,
+          evidence_ids: _evidenceIds,
+          ...mention
+        }) => mention,
+      ),
+      evidence_count: evidenceRows.length,
+      evidence: evidenceRows
+        .slice(0, 20)
+        .map(({ created_at: _createdAt, ...evidence }) => ({
+          ...evidence,
+          text_excerpt:
+            evidence.source === "comment"
+              ? "评论区聚合证据（原文不公开）"
+              : evidence.text_excerpt,
+        })),
     };
   });
 
