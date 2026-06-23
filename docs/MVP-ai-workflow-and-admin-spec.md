@@ -117,7 +117,6 @@ district
 business_area
 exact_address
 poi
-avg_price
 opening_hours
 phone
 recommended_dishes
@@ -275,7 +274,7 @@ MVP 建议混合抽样：
 
 ```json
 {
-  "schema_version": "video_structured_analysis.v1",
+  "schema_version": "video_structured_analysis.v2",
   "video": {
     "video_id": "vid_01H...",
     "bvid": "BV...",
@@ -329,7 +328,6 @@ MVP 建议混合抽样：
     "recommend_reason": "博主推荐牛肉面，认为牛肉分量足、汤底浓郁，适合一人食。",
     "recommendation_score": 0.86,
     "recommendation_score_evidence_ids": ["ev_201"],
-    "avg_price_hint": "约30元",
     "cover_source": "video_cover",
     "tags": [],
     "recommended_dishes": [
@@ -407,7 +405,7 @@ MVP 建议混合抽样：
 
 AI Worker 采用双层模型：视频分类、评论相关性筛选、JSON 修复等预处理任务使用 `MINIMAX_SIMPLE_MODEL`（默认 `MiniMax-M2.7`）；字幕洞察、评论维度结论、视频结构化总结等分析任务使用 `MINIMAX_COMPLEX_MODEL`（默认 `MiniMax-M3`）。两段式调用的子模型写入 `usage.model`，顶层 `ai_runs.model` 记录产出最终阶段结果的模型。
 
-全部 Prompt 集中在 `apps/ai-worker/app/prompts.py`，由注册表保存 key、版本、模型层级、任务目标、证据优先级、决策规则和 Pydantic JSON Schema 输出契约。结构化阶段依次执行 `transcript_fact_extraction.v1`、`transcript_opinion_analysis.v2`、`structure_synthesis.v5`；若单店探店缺少候选、视频缺少证据、推荐评分缺少字幕证据或推荐菜缺少字幕证据，则执行一次 `structure_semantic_retry.v2`。`json_repair.v2` 只能修复 JSON 语法和字段形状，禁止改变业务语义。
+全部 Prompt 集中在 `apps/ai-worker/app/prompts.py`，由注册表保存 key、版本、模型层级、任务目标、证据优先级、决策规则和 Pydantic JSON Schema 输出契约。结构化阶段依次执行 `transcript_fact_extraction.v1`、`transcript_opinion_analysis.v2`、`structure_synthesis.v6`；若单店探店缺少候选、视频缺少证据、推荐评分缺少字幕证据或推荐菜缺少字幕证据，则执行一次 `structure_semantic_retry.v3`。`json_repair.v2` 只能修复 JSON 语法和字段形状，禁止改变业务语义。
 
 AI Worker envelope 的 `subcalls` 按调用顺序返回每次模型调用的 stage、model、prompt_version、input_hash、输入摘要、原始输出、解析输出、usage、status 与错误。Worker 将顶层阶段写为父 `ai_runs`，子调用通过 `parent_ai_run_id` 与 `call_index` 关联；失败 HTTP 响应也携带已发生的 subcalls 并落库。
 
@@ -545,7 +543,6 @@ manual_rejected
     "title": "某某牛肉面",
     "subtitle": "适合一人食的日常面馆",
     "recommend_reason": "多条视频和评论提到牛肉分量足，适合顺路吃一顿。",
-    "avg_price_hint": "约30元",
     "tags": [],
     "cover_url": "https://...",
     "source_creator_avatars": ["https://..."]
@@ -946,7 +943,7 @@ shop:         draft -> approved -> published
   ],
   "comment_signals": {},
   "previous_stage_outputs": {},
-  "output_schema": "video_structured_analysis.v1"
+  "output_schema": "video_structured_analysis.v2"
 }
 ```
 

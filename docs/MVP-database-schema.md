@@ -521,7 +521,7 @@ CREATE INDEX comment_signal_risk_gin_idx ON comment_signal_extractions USING GIN
 | `id`                   | uuid PK           | 分析 ID                              |
 | `video_id`             | uuid FK           | 视频                                 |
 | `ai_run_id`            | uuid FK           | AI 调用                              |
-| `schema_version`       | text              | 如 `video_structured_analysis.v1`    |
+| `schema_version`       | text              | 如 `video_structured_analysis.v2`    |
 | `analysis_json`        | jsonb             | 完整结构化输出                       |
 | `overall_summary`      | text/null         | 视频总体摘要                         |
 | `analysis_confidence`  | numeric(4,3)/null | 总体置信度                           |
@@ -735,7 +735,6 @@ CREATE INDEX poi_match_candidates_poi_idx ON poi_match_candidates (poi_id);
 | `lat`                | numeric(10,6)         | 纬度                     |
 | `coord_type`         | text                  | 坐标系                   |
 | `geom`               | geometry(Point, 4326) | 空间点                   |
-| `avg_price_hint`     | text/null             | 人均提示                 |
 | `card_payload`       | jsonb                 | 前台卡片展示数据         |
 | `aggregated_review`  | jsonb                 | 聚合评价                 |
 | `quality`            | jsonb                 | 置信度、审核状态等       |
@@ -1135,6 +1134,11 @@ shops(status = published)
 where geom within viewport
 ```
 
+距离推荐：浏览器 WGS-84 定位显式转换为 GCJ-02 后，用
+`ST_DistanceSphere(shops.geom, user_point)` 排序；精确请求坐标保存在
+`recommendation_requests.request_context`，每个 item 的 `feature_snapshot`
+保存当次 `distance_m`。
+
 店铺详情：
 
 ```text
@@ -1146,6 +1150,10 @@ shops
 + creators
 + evidence
 ```
+
+店铺证据通过 `shop_video_mentions.evidence_ids` 精确关联。候选晋升时汇总
+推荐评分、推荐菜、避雷点、评价维度和评论摘要的 evidence ID；旧数据通过
+`pnpm backfill:evidence --apply` 幂等补齐。评论证据计数但公共 API 不返回原文。
 
 后台审核：
 
@@ -1303,6 +1311,7 @@ LIMIT 20;
 - 第三个 migration 加 POI/shops/review。
 - 第四个 migration 加推荐日志。
 - 第五个 migration 加高德商业字段与外部平台链接。
+- 第六个 migration 清理 AI 人均卡片字段并删除 `shops.avg_price_hint`；历史 AI 原始 JSON 与发布快照不回写。
 
 实际落地：
 

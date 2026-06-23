@@ -648,7 +648,6 @@ Shop：
 - district
 - business_area
 - address
-- avg_price
 - status
 - geo_point
 - confidence
@@ -926,4 +925,3 @@ AI 幻觉：
 - 高德地图 Web 服务 API：https://lbs.amap.com/api/webservice/summary
 - 腾讯位置服务 WebService API：https://lbs.qq.com/service/webService/webServiceGuide/webServiceOverview
 - 百度地图开放平台 Web API：https://lbsyun.baidu.com/index.php?title=webapi
-
