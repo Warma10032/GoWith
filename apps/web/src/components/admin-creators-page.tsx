@@ -21,7 +21,6 @@ type Creator = {
   last_synced_at?: string | null;
   updated_at: string;
   deleted_at?: string | null;
-  deletion_reason?: string | null;
 };
 
 export function AdminCreatorsPage() {
@@ -66,13 +65,12 @@ export function AdminCreatorsPage() {
     await run("搜索", load);
   }
 
-  async function handleDelete(reason: string) {
+  async function handleDelete() {
     if (!deleteTarget) return;
     await run("删除", async () => {
       await adminFetch(`/api/admin/creators/${deleteTarget.id}`, {
         method: "DELETE",
         body: JSON.stringify({
-          reason,
           expected_updated_at: deleteTarget.updated_at,
         }),
       });
@@ -158,9 +156,7 @@ export function AdminCreatorsPage() {
                     </Link>
                     <div className="mt-1 text-xs text-muted">UID {creator.bilibili_uid} · {lookupLabel(CREATOR_STATUS_LABELS, creator.status)}</div>
                     <div className="mt-1 text-xs text-muted">粉丝 {creator.follower_count ?? "未知"} · 同步 {formatTime(creator.last_synced_at)}</div>
-                    {creator.deleted_at ? (
-                      <div className="mt-1 text-xs text-[#9a341f]">已删除 · {creator.deletion_reason ?? "未记录原因"}</div>
-                    ) : null}
+                    {creator.deleted_at ? <div className="mt-1 text-xs text-[#9a341f]">已删除</div> : null}
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">

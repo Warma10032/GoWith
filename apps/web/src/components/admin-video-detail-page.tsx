@@ -116,7 +116,6 @@ type VideoDetail = {
     risk_flags: string[];
     updated_at: string;
     deleted_at?: string | null;
-    deletion_reason?: string | null;
   };
   assets: Array<{ id: string; source: string; language?: string | null; status: string; model_provider?: string | null; model_name?: string | null; created_at: string }>;
   segments: Array<{ id: string; text: string; start_sec?: number | null; end_sec?: number | null; confidence?: number | string | null }>;
@@ -198,13 +197,12 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
     }
   }
 
-  async function handleDelete(reason: string) {
+  async function handleDelete() {
     if (!deleteTarget) return;
     await run("删除", async () => {
       await adminFetch(`/api/admin/videos/${deleteTarget.id}`, {
         method: "DELETE",
         body: JSON.stringify({
-          reason,
           expected_updated_at: deleteTarget.updated_at,
         }),
       });
@@ -289,9 +287,6 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
                     {detail.video.classification_confidence ? <Badge>置信度 {Number(detail.video.classification_confidence).toFixed(2)}</Badge> : null}
                     {videoDeleted ? <Badge>已删除</Badge> : null}
                   </div>
-                  {detail.video.deleted_at ? (
-                    <p className="mt-2 text-sm text-[#9a341f]">删除原因：{detail.video.deletion_reason ?? "未记录"}</p>
-                  ) : null}
                   {detail.video.description ? <p className="mt-3 line-clamp-3 text-sm leading-6 text-ink/80">{detail.video.description}</p> : null}
                   <div className="mt-4 flex flex-wrap gap-2">
                     <button

@@ -28,7 +28,6 @@ type VideoRow = {
   creator_name: string;
   updated_at: string;
   deleted_at?: string | null;
-  deletion_reason?: string | null;
 };
 
 export function AdminVideosPage() {
@@ -74,13 +73,12 @@ export function AdminVideosPage() {
     }
   }
 
-  async function handleDelete(reason: string) {
+  async function handleDelete() {
     if (!deleteTarget) return;
     await run("删除", async () => {
       await adminFetch(`/api/admin/videos/${deleteTarget.id}`, {
         method: "DELETE",
         body: JSON.stringify({
-          reason,
           expected_updated_at: deleteTarget.updated_at,
         }),
       });
@@ -219,11 +217,7 @@ export function AdminVideosPage() {
                       {lookupLabel(VIDEO_WORKFLOW_STATUS_LABELS, video.workflow_status)} ·{" "}
                       {lookupLabel(VIDEO_CONTENT_TYPE_LABELS, video.content_type ?? null)}
                     </div>
-                    {video.deleted_at ? (
-                      <div className="mt-1 text-xs text-[#9a341f]">
-                        已删除 · {video.deletion_reason ?? "未记录原因"}
-                      </div>
-                    ) : null}
+                    {video.deleted_at ? <div className="mt-1 text-xs text-[#9a341f]">已删除</div> : null}
                     <div className="mt-2 flex gap-2">
                       <Link
                         href={`/admin/videos/${video.id}`}

@@ -600,6 +600,11 @@ paths:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/UuidId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VersionedActionRequest" }
       responses:
         "200": { description: Shop unpublished and audited. }
         "409": { description: shop_not_published or version_conflict }
@@ -614,7 +619,7 @@ paths:
         "200": { description: Shop moved to draft and audited. }
   /api/admin/shops/{id}/reject:
     post:
-      summary: Reject a shop review with a reason
+      summary: Reject a shop review
       security:
         - cookieAuth: []
       parameters:
@@ -623,7 +628,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/ReasonedActionRequest" }
+            schema: { $ref: "#/components/schemas/VersionedActionRequest" }
       responses:
         "200": { description: Shop rejected and audited. }
   /api/admin/shops/{id}/review-aspects/{aspect}:
@@ -637,6 +642,11 @@ paths:
           in: path
           required: true
           schema: { type: string, minLength: 1, maxLength: 80 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateReviewAspectRequest" }
       responses:
         "200": { description: Current aggregated review aspect updated and audited. }
     delete:
@@ -653,7 +663,7 @@ paths:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/VersionedReasonRequest" }
+            schema: { $ref: "#/components/schemas/VersionedActionRequest" }
       responses:
         "200": { description: Current aspect removed and audited; original AI rows retained. }
   /api/admin/shops/{id}/external-links/dianping:
@@ -951,19 +961,22 @@ components:
           type: string
     DeleteEntityRequest:
       type: object
-      required: [reason, expected_updated_at]
+      required: [expected_updated_at]
       properties:
-        reason: { type: string, minLength: 2, maxLength: 500 }
         expected_updated_at: { type: string, format: date-time }
-    ReasonedActionRequest:
+    VersionedActionRequest:
       type: object
-      required: [reason, expected_updated_at]
+      required: [expected_updated_at]
       properties:
-        reason: { type: string, minLength: 2, maxLength: 500 }
         expected_updated_at: { type: string, format: date-time }
-    VersionedReasonRequest:
-      allOf:
-        - $ref: "#/components/schemas/ReasonedActionRequest"
+    UpdateReviewAspectRequest:
+      type: object
+      required: [expected_updated_at, summary, sentiment]
+      properties:
+        expected_updated_at: { type: string, format: date-time }
+        summary: { type: string, minLength: 1, maxLength: 2000 }
+        sentiment: { type: string, enum: [positive, neutral, negative, mixed] }
+        confidence: { type: [number, "null"], minimum: 0, maximum: 1 }
     UpdateCreatorRequest:
       type: object
       required: [expected_updated_at]

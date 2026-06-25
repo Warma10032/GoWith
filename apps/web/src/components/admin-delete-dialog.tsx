@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import type { FormEvent } from "react";
 import { LoaderCircle, Trash2, X } from "lucide-react";
 
 export type DeleteDialogTarget = {
@@ -18,17 +18,13 @@ export function AdminDeleteDialog({
   target: DeleteDialogTarget | null;
   busy: string | null;
   onCancel: () => void;
-  onConfirm: (reason: string) => Promise<void>;
+  onConfirm: () => Promise<void>;
 }) {
-  const [reason, setReason] = useState("");
   if (!target) return null;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const trimmed = reason.trim();
-    if (!trimmed) return;
-    await onConfirm(trimmed);
-    setReason("");
+    await onConfirm();
   }
 
   const isDeleting = busy === "删除";
@@ -61,16 +57,9 @@ export function AdminDeleteDialog({
           </button>
         </div>
 
-        <label className="mt-4 block text-sm font-medium">
-          删除原因 <span className="text-[#9a341f]">*</span>
-          <textarea
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-            className="mt-2 min-h-24 w-full rounded-lg border border-line px-3 py-2 text-sm focus:border-brand focus:outline-none"
-            placeholder="例如：重复数据、来源失效、内容不适合展示……"
-            disabled={!!busy}
-          />
-        </label>
+        <p className="mt-4 rounded-lg bg-[#fbfaf8] px-3 py-2 text-sm text-muted">
+          该操作会进入回收站，可在回收站恢复。
+        </p>
 
         <div className="mt-4 flex justify-end gap-2">
           <button
@@ -83,7 +72,7 @@ export function AdminDeleteDialog({
           </button>
           <button
             className="inline-flex items-center gap-2 rounded-lg bg-[#9a341f] px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
-            disabled={!!busy || !reason.trim()}
+            disabled={!!busy}
           >
             {isDeleting ? <LoaderCircle size={16} className="animate-spin" /> : <Trash2 size={16} />}
             确认删除

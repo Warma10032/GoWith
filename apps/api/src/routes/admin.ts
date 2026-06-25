@@ -50,9 +50,7 @@ const expectedVersionSchema = z.object({
   expected_updated_at: z.coerce.date(),
 });
 
-const deleteEntitySchema = expectedVersionSchema.extend({
-  reason: z.string().trim().min(2).max(500),
-});
+const deleteEntitySchema = expectedVersionSchema;
 
 const creatorUpdateSchema = expectedVersionSchema
   .extend({
@@ -136,11 +134,6 @@ const reviewAspectUpdateSchema = expectedVersionSchema.extend({
   summary: z.string().trim().min(1).max(2_000),
   sentiment: z.enum(["positive", "neutral", "negative", "mixed"]),
   confidence: z.number().min(0).max(1).nullable().optional(),
-  reason: z.string().trim().min(2).max(500),
-});
-
-const reasonedVersionSchema = expectedVersionSchema.extend({
-  reason: z.string().trim().min(2).max(500),
 });
 
 const changesQuerySchema = z.object({
@@ -677,7 +670,6 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
           .set({
             deleted_at: now,
             deleted_by: admin.id,
-            deletion_reason: body.reason,
             deletion_batch_id: batchId,
           })
           .where("id", "in", videoIds)
@@ -689,7 +681,6 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
           status: "paused",
           deleted_at: now,
           deleted_by: admin.id,
-          deletion_reason: body.reason,
           deletion_batch_id: batchId,
         })
         .where("id", "=", params.id)
@@ -706,7 +697,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         action: "soft_delete",
         before: { status: creator.status, deleted_at: null },
         after: { status: "paused", deleted_at: now.toISOString(), batch_id: batchId },
-        reason: body.reason,
+        reason: null,
         reviewerId: admin.id,
       });
       for (const video of videos) {
@@ -716,7 +707,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
           action: "cascade_soft_delete",
           before: { workflow_status: video.workflow_status, deleted_at: null },
           after: { deleted_at: now.toISOString(), batch_id: batchId },
-          reason: body.reason,
+          reason: null,
           reviewerId: admin.id,
         });
       }
@@ -725,7 +716,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         trx,
         shopIds,
         admin.id,
-        `博主删除导致来源变化：${body.reason}`,
+        "博主删除导致来源变化",
       );
       return {
         creator: effectiveCreator(deletedCreator),
@@ -756,7 +747,6 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
             .set({
               deleted_at: null,
               deleted_by: null,
-              deletion_reason: null,
               deletion_batch_id: null,
             })
             .where("creator_id", "=", params.id)
@@ -771,7 +761,6 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
           status: "paused",
           deleted_at: null,
           deleted_by: null,
-          deletion_reason: null,
           deletion_batch_id: null,
         })
         .where("id", "=", params.id)
@@ -1153,7 +1142,6 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         .set({
           deleted_at: now,
           deleted_by: admin.id,
-          deletion_reason: body.reason,
           deletion_batch_id: batchId,
         })
         .where("id", "=", params.id)
@@ -1168,7 +1156,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         action: "soft_delete",
         before: { deleted_at: null, workflow_status: video.workflow_status },
         after: { deleted_at: now.toISOString(), batch_id: batchId },
-        reason: body.reason,
+        reason: null,
         reviewerId: admin.id,
       });
       const shopIds = await findAffectedShopIds(trx, [params.id]);
@@ -1176,7 +1164,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         trx,
         shopIds,
         admin.id,
-        `视频删除导致来源变化：${body.reason}`,
+        "视频删除导致来源变化",
       );
       return { video: effectiveVideo(deleted), affected_shops: affectedShops };
     });
@@ -1213,7 +1201,6 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         .set({
           deleted_at: null,
           deleted_by: null,
-          deletion_reason: null,
           deletion_batch_id: null,
         })
         .where("id", "=", params.id)
@@ -2370,7 +2357,6 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
           status: "hidden",
           deleted_at: now,
           deleted_by: admin.id,
-          deletion_reason: body.reason,
           deletion_batch_id: batchId,
         })
         .where("id", "=", params.id)
@@ -2385,7 +2371,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         action: "soft_delete",
         before: { status: before.status, deleted_at: null },
         after: { status: "hidden", deleted_at: now.toISOString(), batch_id: batchId },
-        reason: body.reason,
+        reason: null,
         reviewerId: admin.id,
       });
       return updated;
@@ -2412,7 +2398,6 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
           status: "hidden",
           deleted_at: null,
           deleted_by: null,
-          deletion_reason: null,
           deletion_batch_id: null,
         })
         .where("id", "=", params.id)
@@ -2434,7 +2419,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/shops/:id/unpublish", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    const body = reasonedVersionSchema.parse(request.body);
+    const body = expectedVersionSchema.parse(request.body);
     const admin = await requireAdmin(app.db, request);
     const shop = await app.db.transaction().execute(async (trx) => {
       const before = await trx
@@ -2463,7 +2448,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         action: "unpublish",
         before: { status: "published" },
         after: { status: "hidden" },
-        reason: body.reason,
+        reason: null,
         reviewerId: admin.id,
       });
       return updated;
@@ -2517,7 +2502,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/shops/:id/reject", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    const body = reasonedVersionSchema.parse(request.body);
+    const body = expectedVersionSchema.parse(request.body);
     const admin = await requireAdmin(app.db, request);
     const shop = await app.db.transaction().execute(async (trx) => {
       const before = await trx
@@ -2551,7 +2536,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         action: "reject",
         before: { status: before.status },
         after: { status: "rejected" },
-        reason: body.reason,
+        reason: null,
         reviewerId: admin.id,
       });
       return updated;
@@ -2612,7 +2597,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         action: "edit_review_aspect",
         before: { aspect: params.aspect, value: previousAspect },
         after: { aspect: params.aspect, value: nextReview[params.aspect] },
-        reason: body.reason,
+        reason: null,
         reviewerId: admin.id,
       });
       return updated;
@@ -2627,7 +2612,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     if (["comment_summary", "comment_signals"].includes(params.aspect)) {
       throw new HttpError(400, "invalid_review_aspect", "Reserved review aspect");
     }
-    const body = reasonedVersionSchema.parse(request.body);
+    const body = expectedVersionSchema.parse(request.body);
     const admin = await requireAdmin(app.db, request);
     const shop = await app.db.transaction().execute(async (trx) => {
       const before = await trx
@@ -2665,7 +2650,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         action: "delete_review_aspect",
         before: { aspect: params.aspect, value: removed },
         after: { aspect: params.aspect, removed: true },
-        reason: body.reason,
+        reason: null,
         reviewerId: admin.id,
       });
       return updated;

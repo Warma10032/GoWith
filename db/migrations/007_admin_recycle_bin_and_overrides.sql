@@ -3,7 +3,6 @@ ALTER TABLE creators
   ADD COLUMN IF NOT EXISTS bio_override text,
   ADD COLUMN IF NOT EXISTS deleted_at timestamptz,
   ADD COLUMN IF NOT EXISTS deleted_by uuid REFERENCES users(id) ON DELETE SET NULL,
-  ADD COLUMN IF NOT EXISTS deletion_reason text,
   ADD COLUMN IF NOT EXISTS deletion_batch_id uuid;
 
 ALTER TABLE videos
@@ -13,13 +12,11 @@ ALTER TABLE videos
   ADD COLUMN IF NOT EXISTS category_override text,
   ADD COLUMN IF NOT EXISTS deleted_at timestamptz,
   ADD COLUMN IF NOT EXISTS deleted_by uuid REFERENCES users(id) ON DELETE SET NULL,
-  ADD COLUMN IF NOT EXISTS deletion_reason text,
   ADD COLUMN IF NOT EXISTS deletion_batch_id uuid;
 
 ALTER TABLE shops
   ADD COLUMN IF NOT EXISTS deleted_at timestamptz,
   ADD COLUMN IF NOT EXISTS deleted_by uuid REFERENCES users(id) ON DELETE SET NULL,
-  ADD COLUMN IF NOT EXISTS deletion_reason text,
   ADD COLUMN IF NOT EXISTS deletion_batch_id uuid;
 
 CREATE INDEX IF NOT EXISTS creators_active_created_idx

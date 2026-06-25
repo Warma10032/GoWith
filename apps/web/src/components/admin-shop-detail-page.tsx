@@ -151,9 +151,7 @@ type ShopSummaryEditTarget = {
   suitable_scenes: string;
 };
 
-type ShopSummaryEditValues = ShopSummaryEditTarget & {
-  note: string;
-};
+type ShopSummaryEditValues = ShopSummaryEditTarget;
 
 type ReviewAspectEditTarget = {
   aspect: string;
@@ -162,9 +160,7 @@ type ReviewAspectEditTarget = {
   confidence: string;
 };
 
-type ReviewAspectEditValues = ReviewAspectEditTarget & {
-  reason: string;
-};
+type ReviewAspectEditValues = ReviewAspectEditTarget;
 
 function readNumber(obj: Record<string, unknown>, key: string): number | null {
   const v = obj[key];
@@ -234,14 +230,13 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
     }
   }
 
-  async function deleteReviewAspect(aspect: string, reason: string) {
+  async function deleteReviewAspect(aspect: string) {
     await runAction("删除评论观点", async () => {
       await adminFetch(
         `/api/admin/shops/${shopId}/review-aspects/${encodeURIComponent(aspect)}`,
         {
           method: "DELETE",
           body: JSON.stringify({
-            reason,
             expected_updated_at: data?.shop.updated_at,
           }),
         },
@@ -291,7 +286,6 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
             summary: values.summary,
             sentiment: values.sentiment,
             confidence: values.confidence === "" ? null : Number(values.confidence),
-            reason: values.reason,
           }),
         },
       );
@@ -299,12 +293,11 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
     });
   }
 
-  async function unpublishShop(reason: string) {
+  async function unpublishShop() {
     await runAction("下架店铺", async () => {
       await adminFetch(`/api/admin/shops/${shopId}/unpublish`, {
         method: "POST",
         body: JSON.stringify({
-          reason,
           expected_updated_at: data?.shop.updated_at,
         }),
       });
@@ -1085,12 +1078,11 @@ function ShopSummaryEditDialog({
     business_area: "",
     address: "",
     suitable_scenes: "",
-    note: "",
   }));
 
   useEffect(() => {
     if (!target) return;
-    setValues({ ...target, note: "" });
+    setValues(target);
   }, [target]);
 
   if (!target) return null;
@@ -1111,7 +1103,6 @@ function ShopSummaryEditDialog({
       business_area: values.business_area.trim(),
       address: values.address.trim(),
       suitable_scenes: values.suitable_scenes.trim(),
-      note: values.note.trim(),
     });
   }
 
@@ -1187,16 +1178,6 @@ function ShopSummaryEditDialog({
               disabled={!!busy}
             />
           </label>
-          <label className="md:col-span-2 text-sm font-medium">
-            修改说明（仅供本次审核备注）
-            <textarea
-              value={values.note}
-              onChange={(event) => update("note", event.target.value)}
-              className="mt-1 min-h-20 w-full rounded-lg border border-line px-3 py-2 text-sm focus:border-brand focus:outline-none"
-              placeholder="例如：AI 把分店区域写错，已按人工核验修订。"
-              disabled={!!busy}
-            />
-          </label>
         </div>
 
         <div className="mt-4 flex justify-end gap-2">
@@ -1241,12 +1222,11 @@ function ReviewAspectEditDialog({
     summary: "",
     sentiment: "neutral",
     confidence: "",
-    reason: "",
   }));
 
   useEffect(() => {
     if (!target) return;
-    setValues({ ...target, reason: "" });
+    setValues(target);
   }, [target]);
 
   if (!target) return null;
@@ -1257,7 +1237,6 @@ function ReviewAspectEditDialog({
     const confidenceNumber = confidence === "" ? null : Number(confidence);
     if (
       !values.summary.trim() ||
-      !values.reason.trim() ||
       (confidenceNumber !== null && (Number.isNaN(confidenceNumber) || confidenceNumber < 0 || confidenceNumber > 1))
     ) {
       return;
@@ -1266,7 +1245,6 @@ function ReviewAspectEditDialog({
       ...values,
       summary: values.summary.trim(),
       confidence,
-      reason: values.reason.trim(),
     });
   }
 
@@ -1337,19 +1315,6 @@ function ReviewAspectEditDialog({
             />
           </label>
         </div>
-        <label className="mt-3 block text-sm font-medium">
-          修改原因 <span className="text-[#9a341f]">*</span>
-          <textarea
-            value={values.reason}
-            onChange={(event) =>
-              setValues((current) => ({ ...current, reason: event.target.value }))
-            }
-            className="mt-2 min-h-20 w-full rounded-lg border border-line px-3 py-2 text-sm focus:border-brand focus:outline-none"
-            placeholder="例如：AI 把评论里的排队问题归类错了。"
-            disabled={!!busy}
-          />
-        </label>
-
         <div className="mt-4 flex justify-end gap-2">
           <button
             type="button"
@@ -1361,7 +1326,7 @@ function ReviewAspectEditDialog({
           </button>
           <button
             className="inline-flex items-center gap-2 rounded-lg bg-ink px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
-            disabled={!!busy || !values.summary.trim() || !values.reason.trim()}
+            disabled={!!busy || !values.summary.trim()}
           >
             {busy === "编辑评论观点" ? (
               <LoaderCircle size={16} className="animate-spin" />
@@ -1411,19 +1376,15 @@ function ReviewAspectDeleteDialog({
   target: { aspect: string; summary: string } | null;
   busy: string | null;
   onCancel: () => void;
-  onConfirm: (aspect: string, reason: string) => Promise<void>;
+  onConfirm: (aspect: string) => Promise<void>;
 }) {
-  const [reason, setReason] = useState("");
   if (!target) return null;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     const current = target;
     if (!current) return;
-    const trimmed = reason.trim();
-    if (!trimmed) return;
-    await onConfirm(current.aspect, trimmed);
-    setReason("");
+    await onConfirm(current.aspect);
   }
 
   return (
@@ -1452,16 +1413,9 @@ function ReviewAspectDeleteDialog({
           </button>
         </div>
 
-        <label className="mt-4 block text-sm font-medium">
-          删除原因 <span className="text-[#9a341f]">*</span>
-          <textarea
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-            className="mt-2 min-h-24 w-full rounded-lg border border-line px-3 py-2 text-sm focus:border-brand focus:outline-none"
-            placeholder="例如：观点错误、证据不足、与实际情况不符……"
-            disabled={!!busy}
-          />
-        </label>
+        <p className="mt-4 rounded-lg bg-[#fbfaf8] px-3 py-2 text-sm text-muted">
+          删除后只会从当前店铺展示结论中移除该观点，不修改历史 AI JSON 或原始评论。
+        </p>
 
         <div className="mt-4 flex justify-end gap-2">
           <button
@@ -1474,7 +1428,7 @@ function ReviewAspectDeleteDialog({
           </button>
           <button
             className="inline-flex items-center gap-2 rounded-lg bg-[#9a341f] px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
-            disabled={!!busy || !reason.trim()}
+            disabled={!!busy}
           >
             {busy === "删除评论观点" ? (
               <LoaderCircle size={16} className="animate-spin" />
@@ -1500,17 +1454,13 @@ function ShopUnpublishDialog({
   shopName: string;
   busy: string | null;
   onCancel: () => void;
-  onConfirm: (reason: string) => Promise<void>;
+  onConfirm: () => Promise<void>;
 }) {
-  const [reason, setReason] = useState("");
   if (!open) return null;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    const trimmed = reason.trim();
-    if (!trimmed) return;
-    await onConfirm(trimmed);
-    setReason("");
+    await onConfirm();
   }
 
   return (
@@ -1541,16 +1491,9 @@ function ShopUnpublishDialog({
           </button>
         </div>
 
-        <label className="mt-4 block text-sm font-medium">
-          下架原因 <span className="text-[#9a341f]">*</span>
-          <textarea
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-            className="mt-2 min-h-24 w-full rounded-lg border border-line px-3 py-2 text-sm focus:border-brand focus:outline-none"
-            placeholder="例如：AI 总结有误，需要人工修订后重新审核发布。"
-            disabled={!!busy}
-          />
-        </label>
+        <p className="mt-4 rounded-lg bg-[#fbfaf8] px-3 py-2 text-sm text-muted">
+          下架后可继续编辑当前展示内容，再提交复审发布。
+        </p>
 
         <div className="mt-4 flex justify-end gap-2">
           <button
@@ -1563,7 +1506,7 @@ function ShopUnpublishDialog({
           </button>
           <button
             className="inline-flex items-center gap-2 rounded-lg bg-[#9a341f] px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
-            disabled={!!busy || !reason.trim()}
+            disabled={!!busy}
           >
             {busy === "下架店铺" ? (
               <LoaderCircle size={16} className="animate-spin" />

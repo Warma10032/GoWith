@@ -266,7 +266,6 @@ B站博主表。
 | `updated_at`              | timestamptz      | 更新时间                      |
 | `deleted_at`              | timestamptz/null | 回收站时间                    |
 | `deleted_by`              | uuid FK/null     | 删除管理员                    |
-| `deletion_reason`         | text/null        | 删除原因                      |
 | `deletion_batch_id`       | uuid/null        | 博主及视频级联删除批次        |
 
 索引：
@@ -312,7 +311,6 @@ B站视频主表。
 | `updated_at`                | timestamptz       | 更新时间                 |
 | `deleted_at`                | timestamptz/null  | 回收站时间               |
 | `deleted_by`                | uuid FK/null      | 删除管理员               |
-| `deletion_reason`           | text/null         | 删除原因                 |
 | `deletion_batch_id`         | uuid/null         | 级联删除批次             |
 
 索引：
@@ -760,7 +758,6 @@ CREATE INDEX poi_match_candidates_poi_idx ON poi_match_candidates (poi_id);
 | `updated_at`         | timestamptz           | 更新时间                 |
 | `deleted_at`         | timestamptz/null      | 回收站时间               |
 | `deleted_by`         | uuid FK/null          | 删除管理员               |
-| `deletion_reason`    | text/null             | 删除原因                 |
 | `deletion_batch_id`  | uuid/null             | 删除批次                 |
 
 索引：

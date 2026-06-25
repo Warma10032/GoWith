@@ -108,7 +108,6 @@ export interface CreatorsTable {
   updated_at: Timestamp;
   deleted_at: OptionalTimestamp;
   deleted_by: OptionalColumn<string | null>;
-  deletion_reason: OptionalColumn<string | null>;
   deletion_batch_id: OptionalColumn<string | null>;
 }
 
@@ -143,7 +142,6 @@ export interface VideosTable {
   updated_at: Timestamp;
   deleted_at: OptionalTimestamp;
   deleted_by: OptionalColumn<string | null>;
-  deletion_reason: OptionalColumn<string | null>;
   deletion_batch_id: OptionalColumn<string | null>;
 }
 
@@ -469,7 +467,6 @@ export interface ShopsTable {
   updated_at: Timestamp;
   deleted_at: OptionalTimestamp;
   deleted_by: OptionalColumn<string | null>;
-  deletion_reason: OptionalColumn<string | null>;
   deletion_batch_id: OptionalColumn<string | null>;
 }
 

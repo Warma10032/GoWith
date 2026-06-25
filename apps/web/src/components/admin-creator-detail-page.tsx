@@ -28,7 +28,6 @@ type CreatorDetail = {
     last_synced_at?: string | null;
     updated_at: string;
     deleted_at?: string | null;
-    deletion_reason?: string | null;
   };
   stats: { videos: number; classified: number };
   latest_run?: { id: string; status: string; run_type: string; created_at: string } | null;
@@ -49,7 +48,6 @@ type Video = {
   content_type?: string | null;
   updated_at: string;
   deleted_at?: string | null;
-  deletion_reason?: string | null;
 };
 
 export function AdminCreatorDetailPage({ creatorId }: { creatorId: string }) {
@@ -92,7 +90,7 @@ export function AdminCreatorDetailPage({ creatorId }: { creatorId: string }) {
     }
   }
 
-  async function handleDelete(reason: string) {
+  async function handleDelete() {
     if (!deleteTarget) return;
     const path =
       deleteTarget.type === "creator"
@@ -102,7 +100,6 @@ export function AdminCreatorDetailPage({ creatorId }: { creatorId: string }) {
       await adminFetch(path, {
         method: "DELETE",
         body: JSON.stringify({
-          reason,
           expected_updated_at: deleteTarget.updated_at,
         }),
       });
@@ -155,9 +152,6 @@ export function AdminCreatorDetailPage({ creatorId }: { creatorId: string }) {
                   ) : null}
                 </div>
                 <p className="mt-1 text-sm text-muted">UID {detail.creator.bilibili_uid} · 粉丝 {detail.creator.follower_count ?? "未知"} · 最近同步 {formatTime(detail.creator.last_synced_at)}</p>
-                {detail.creator.deleted_at ? (
-                  <p className="mt-1 text-sm text-[#9a341f]">删除原因：{detail.creator.deletion_reason ?? "未记录"}</p>
-                ) : null}
                 {detail.creator.bio ? <p className="mt-2 line-clamp-2 text-sm text-ink/80">{detail.creator.bio}</p> : null}
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
@@ -253,9 +247,7 @@ export function AdminCreatorDetailPage({ creatorId }: { creatorId: string }) {
                     <div className="mt-2 text-xs text-muted">
                       {video.bvid} · {formatDuration(video.duration_sec)} · {formatTime(video.published_at)}
                     </div>
-                    {video.deleted_at ? (
-                      <div className="mt-1 text-xs text-[#9a341f]">已删除 · {video.deletion_reason ?? "未记录原因"}</div>
-                    ) : null}
+                    {video.deleted_at ? <div className="mt-1 text-xs text-[#9a341f]">已删除</div> : null}
                     {video.tags?.length ? <div className="mt-2 line-clamp-1 text-xs text-muted">{video.tags.slice(0, 6).join(" / ")}</div> : null}
                     <div className="mt-3 flex flex-wrap gap-2">
                       <Link href={`/admin/videos/${video.id}`} className="rounded-md bg-ink px-2 py-1 text-xs font-semibold text-white">
