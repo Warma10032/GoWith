@@ -21,11 +21,21 @@ import {
   InvalidDianpingUrlError,
   parseDianpingUrl,
 } from "../services/shop-external-links";
+import {
+  cancelQueuedEntityWork,
+  findAffectedShopIds,
+  revalidateAffectedShops,
+  writeReviewEvent,
+} from "../services/admin-lifecycle";
 
 const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
+
+const deletedScopeSchema = z
+  .enum(["exclude", "only", "include"])
+  .default("exclude");
 
 const listQuerySchema = paginationSchema.extend({
   q: z.string().trim().optional(),
@@ -33,6 +43,104 @@ const listQuerySchema = paginationSchema.extend({
   content_type: z.string().trim().optional(),
   creator_id: z.string().uuid().optional(),
   stage: z.string().trim().optional(),
+  deleted: deletedScopeSchema,
+});
+
+const expectedVersionSchema = z.object({
+  expected_updated_at: z.coerce.date(),
+});
+
+const deleteEntitySchema = expectedVersionSchema.extend({
+  reason: z.string().trim().min(2).max(500),
+});
+
+const creatorUpdateSchema = expectedVersionSchema
+  .extend({
+    name: z.string().trim().min(1).max(120).nullable().optional(),
+    bio: z.string().trim().max(2_000).nullable().optional(),
+    status: z.enum(["active", "paused"]).optional(),
+    sync_mode: z.enum(["full", "incremental"]).optional(),
+  })
+  .refine(
+    (value) =>
+      value.name !== undefined ||
+      value.bio !== undefined ||
+      value.status !== undefined ||
+      value.sync_mode !== undefined,
+    "At least one editable field is required",
+  );
+
+const videoUpdateSchema = expectedVersionSchema
+  .extend({
+    title: z.string().trim().min(1).max(300).nullable().optional(),
+    description: z.string().trim().max(10_000).nullable().optional(),
+    tags: z.array(z.string().trim().min(1).max(80)).max(40).nullable().optional(),
+    category: z.string().trim().max(120).nullable().optional(),
+  })
+  .refine(
+    (value) =>
+      value.title !== undefined ||
+      value.description !== undefined ||
+      value.tags !== undefined ||
+      value.category !== undefined,
+    "At least one editable field is required",
+  );
+
+const shopCardPatchSchema = z
+  .object({
+    display_title: z.string().trim().min(1).max(200).nullable().optional(),
+    subtitle: z.string().trim().max(300).nullable().optional(),
+    recommend_reason: z.string().trim().max(2_000).nullable().optional(),
+    recommended_dishes: z
+      .array(
+        z.object({
+          name: z.string().trim().min(1).max(120),
+          reason: z.string().trim().max(1_000).nullable().optional(),
+          evidence_ids: z.array(z.string().uuid()).optional(),
+        }),
+      )
+      .max(30)
+      .optional(),
+    avoid_points: z
+      .array(
+        z.object({
+          text: z.string().trim().min(1).max(500),
+          reason: z.string().trim().max(1_000).nullable().optional(),
+          evidence_ids: z.array(z.string().uuid()).optional(),
+        }),
+      )
+      .max(30)
+      .optional(),
+    suitable_scenes: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
+  })
+  .strict();
+
+const shopUpdateSchema = expectedVersionSchema
+  .extend({
+    display_name: z.string().trim().min(1).max(200).optional(),
+    category_primary: z.string().trim().max(120).nullable().optional(),
+    category_secondary: z.string().trim().max(120).nullable().optional(),
+    province: z.string().trim().max(120).nullable().optional(),
+    city: z.string().trim().max(120).nullable().optional(),
+    district: z.string().trim().max(120).nullable().optional(),
+    business_area: z.string().trim().max(120).nullable().optional(),
+    address: z.string().trim().max(500).nullable().optional(),
+    card_payload: shopCardPatchSchema.optional(),
+  })
+  .refine(
+    (value) => Object.keys(value).some((key) => key !== "expected_updated_at"),
+    "At least one editable field is required",
+  );
+
+const reviewAspectUpdateSchema = expectedVersionSchema.extend({
+  summary: z.string().trim().min(1).max(2_000),
+  sentiment: z.enum(["positive", "neutral", "negative", "mixed"]),
+  confidence: z.number().min(0).max(1).nullable().optional(),
+  reason: z.string().trim().min(2).max(500),
+});
+
+const reasonedVersionSchema = expectedVersionSchema.extend({
+  reason: z.string().trim().min(2).max(500),
 });
 
 const changesQuerySchema = z.object({
@@ -156,6 +264,65 @@ function remainingRisksAfterPoiSelection(riskFlags: string[]) {
   return riskFlags.filter((flag) => !POI_RESOLVED_RISK_FLAGS.has(flag));
 }
 
+function effectiveCreator<T extends {
+  name: string;
+  bio: string | null;
+  name_override: string | null;
+  bio_override: string | null;
+}>(creator: T) {
+  return {
+    ...creator,
+    source_name: creator.name,
+    source_bio: creator.bio,
+    name: creator.name_override ?? creator.name,
+    bio: creator.bio_override ?? creator.bio,
+  };
+}
+
+function effectiveVideo<T extends {
+  title: string;
+  description: string | null;
+  tags: string[];
+  category: string | null;
+  title_override: string | null;
+  description_override: string | null;
+  tags_override: string[] | null;
+  category_override: string | null;
+}>(video: T) {
+  return {
+    ...video,
+    source_title: video.title,
+    source_description: video.description,
+    source_tags: video.tags,
+    source_category: video.category,
+    title: video.title_override ?? video.title,
+    description: video.description_override ?? video.description,
+    tags: video.tags_override ?? video.tags,
+    category: video.category_override ?? video.category,
+  };
+}
+
+async function throwEntityMutationFailure(
+  trx: Transaction<DB>,
+  table: "creators" | "videos" | "shops",
+  id: string,
+) {
+  const row = await trx
+    .selectFrom(table)
+    .select(["id", "deleted_at"])
+    .where("id", "=", id)
+    .executeTakeFirst();
+  if (!row) throw new HttpError(404, "not_found", "Entity not found");
+  if (row.deleted_at) {
+    throw new HttpError(409, "already_deleted", "Entity is in recycle bin");
+  }
+  throw new HttpError(
+    409,
+    "version_conflict",
+    "Entity changed since it was loaded; refresh and retry",
+  );
+}
+
 async function runAdminActionWithLock<T>(
   app: Parameters<FastifyPluginAsync>[0],
   key: TaskLockKey,
@@ -179,6 +346,17 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     await requireAdmin(app.db, request);
   });
 
+  async function requireActiveVideo(id: string) {
+    const video = await app.db
+      .selectFrom("videos")
+      .select(["id", "deleted_at"])
+      .where("id", "=", id)
+      .executeTakeFirst();
+    if (!video) throw new HttpError(404, "video_not_found", "Video not found");
+    if (video.deleted_at)
+      throw new HttpError(409, "already_deleted", "Video is in recycle bin");
+  }
+
   app.get("/dashboard", async () => {
     const [
       creators,
@@ -192,10 +370,12 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     ] = await Promise.all([
       app.db
         .selectFrom("creators")
+        .where("deleted_at", "is", null)
         .select((eb) => eb.fn.countAll<string>().as("count"))
         .executeTakeFirst(),
       app.db
         .selectFrom("videos")
+        .where("deleted_at", "is", null)
         .select((eb) => eb.fn.countAll<string>().as("count"))
         .executeTakeFirst(),
       app.db
@@ -210,6 +390,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       app.db
         .selectFrom("shops")
         .where("status", "=", "published")
+        .where("deleted_at", "is", null)
         .select((eb) => eb.fn.countAll<string>().as("count"))
         .executeTakeFirst(),
       app.db
@@ -362,6 +543,10 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       .orderBy("created_at", "desc")
       .limit(query.limit)
       .offset(query.offset);
+    if (query.deleted === "exclude")
+      builder = builder.where("deleted_at", "is", null);
+    if (query.deleted === "only")
+      builder = builder.where("deleted_at", "is not", null);
     if (query.status)
       builder = builder.where("status", "=", query.status as never);
     if (query.q) {
@@ -374,7 +559,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       );
     }
     const creators = await builder.execute();
-    return { creators };
+    return { creators: creators.map(effectiveCreator) };
   });
 
   app.get("/creators/:id", async (request) => {
@@ -394,6 +579,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
           (eb) => eb.fn.count<string>("is_shop_visit").as("classified"),
         ])
         .where("creator_id", "=", params.id)
+        .where("deleted_at", "is", null)
         .executeTakeFirst(),
       app.db
         .selectFrom("pipeline_runs")
@@ -404,7 +590,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         .executeTakeFirst(),
     ]);
     return {
-      creator,
+      creator: effectiveCreator(creator),
       stats: {
         videos: Number(videoStats?.total ?? 0),
         classified: Number(videoStats?.classified ?? 0),
@@ -413,9 +599,238 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
+  app.patch("/creators/:id", async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = creatorUpdateSchema.parse(request.body);
+    const admin = await requireAdmin(app.db, request);
+    const creator = await app.db.transaction().execute(async (trx) => {
+      const before = await trx
+        .selectFrom("creators")
+        .selectAll()
+        .where("id", "=", params.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!before)
+        throw new HttpError(404, "creator_not_found", "Creator not found");
+      if (before.deleted_at)
+        throw new HttpError(409, "already_deleted", "Creator is in recycle bin");
+      if (before.updated_at.getTime() !== body.expected_updated_at.getTime()) {
+        throw new HttpError(409, "version_conflict", "Creator changed; refresh and retry");
+      }
+      const changes: Record<string, unknown> = {};
+      if (body.name !== undefined) changes.name_override = body.name;
+      if (body.bio !== undefined) changes.bio_override = body.bio;
+      if (body.status !== undefined) changes.status = body.status;
+      if (body.sync_mode !== undefined) changes.sync_mode = body.sync_mode;
+      const updated = await trx
+        .updateTable("creators")
+        .set(changes)
+        .where("id", "=", params.id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      await writeReviewEvent(trx, {
+        entityType: "creator",
+        entityId: params.id,
+        action: "edit",
+        before: effectiveCreator(before),
+        after: effectiveCreator(updated),
+        reason: "Admin updated creator fields",
+        reviewerId: admin.id,
+      });
+      return updated;
+    });
+    return { creator: effectiveCreator(creator) };
+  });
+
+  app.delete("/creators/:id", async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = deleteEntitySchema.parse(request.body);
+    const admin = await requireAdmin(app.db, request);
+    return app.db.transaction().execute(async (trx) => {
+      const creator = await trx
+        .selectFrom("creators")
+        .selectAll()
+        .where("id", "=", params.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!creator)
+        throw new HttpError(404, "creator_not_found", "Creator not found");
+      if (creator.deleted_at)
+        throw new HttpError(409, "already_deleted", "Creator is already deleted");
+      if (creator.updated_at.getTime() !== body.expected_updated_at.getTime()) {
+        throw new HttpError(409, "version_conflict", "Creator changed; refresh and retry");
+      }
+
+      const batchId = crypto.randomUUID();
+      const now = new Date();
+      const videos = await trx
+        .selectFrom("videos")
+        .select(["id", "title", "workflow_status"])
+        .where("creator_id", "=", params.id)
+        .where("deleted_at", "is", null)
+        .forUpdate()
+        .execute();
+      const videoIds = videos.map((video) => video.id);
+      if (videoIds.length) {
+        await trx
+          .updateTable("videos")
+          .set({
+            deleted_at: now,
+            deleted_by: admin.id,
+            deletion_reason: body.reason,
+            deletion_batch_id: batchId,
+          })
+          .where("id", "in", videoIds)
+          .execute();
+      }
+      const deletedCreator = await trx
+        .updateTable("creators")
+        .set({
+          status: "paused",
+          deleted_at: now,
+          deleted_by: admin.id,
+          deletion_reason: body.reason,
+          deletion_batch_id: batchId,
+        })
+        .where("id", "=", params.id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+
+      await cancelQueuedEntityWork(trx, [
+        { entityType: "creator", entityId: params.id },
+        ...videoIds.map((entityId) => ({ entityType: "video", entityId })),
+      ]);
+      await writeReviewEvent(trx, {
+        entityType: "creator",
+        entityId: params.id,
+        action: "soft_delete",
+        before: { status: creator.status, deleted_at: null },
+        after: { status: "paused", deleted_at: now.toISOString(), batch_id: batchId },
+        reason: body.reason,
+        reviewerId: admin.id,
+      });
+      for (const video of videos) {
+        await writeReviewEvent(trx, {
+          entityType: "video",
+          entityId: video.id,
+          action: "cascade_soft_delete",
+          before: { workflow_status: video.workflow_status, deleted_at: null },
+          after: { deleted_at: now.toISOString(), batch_id: batchId },
+          reason: body.reason,
+          reviewerId: admin.id,
+        });
+      }
+      const shopIds = await findAffectedShopIds(trx, videoIds);
+      const affectedShops = await revalidateAffectedShops(
+        trx,
+        shopIds,
+        admin.id,
+        `博主删除导致来源变化：${body.reason}`,
+      );
+      return {
+        creator: effectiveCreator(deletedCreator),
+        deleted_video_count: videoIds.length,
+        affected_shops: affectedShops,
+      };
+    });
+  });
+
+  app.post("/creators/:id/restore", async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const admin = await requireAdmin(app.db, request);
+    return app.db.transaction().execute(async (trx) => {
+      const creator = await trx
+        .selectFrom("creators")
+        .selectAll()
+        .where("id", "=", params.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!creator)
+        throw new HttpError(404, "creator_not_found", "Creator not found");
+      if (!creator.deleted_at)
+        throw new HttpError(409, "not_deleted", "Creator is not in recycle bin");
+      const batchId = creator.deletion_batch_id;
+      const restoredVideos = batchId
+        ? await trx
+            .updateTable("videos")
+            .set({
+              deleted_at: null,
+              deleted_by: null,
+              deletion_reason: null,
+              deletion_batch_id: null,
+            })
+            .where("creator_id", "=", params.id)
+            .where("deletion_batch_id", "=", batchId)
+            .where("deleted_at", "is not", null)
+            .returning(["id", "workflow_status"])
+            .execute()
+        : [];
+      const restored = await trx
+        .updateTable("creators")
+        .set({
+          status: "paused",
+          deleted_at: null,
+          deleted_by: null,
+          deletion_reason: null,
+          deletion_batch_id: null,
+        })
+        .where("id", "=", params.id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      await writeReviewEvent(trx, {
+        entityType: "creator",
+        entityId: params.id,
+        action: "restore",
+        before: { deleted_at: creator.deleted_at.toISOString(), batch_id: batchId },
+        after: { deleted_at: null, status: "paused" },
+        reason: "Admin restored creator from recycle bin",
+        reviewerId: admin.id,
+      });
+      for (const video of restoredVideos) {
+        await writeReviewEvent(trx, {
+          entityType: "video",
+          entityId: video.id,
+          action: "cascade_restore",
+          before: { batch_id: batchId },
+          after: { deleted_at: null, workflow_status: video.workflow_status },
+          reason: "Creator restored from recycle bin",
+          reviewerId: admin.id,
+        });
+      }
+      const shopIds = await findAffectedShopIds(
+        trx,
+        restoredVideos.map((video) => video.id),
+      );
+      const affectedShops = await revalidateAffectedShops(
+        trx,
+        shopIds,
+        admin.id,
+        "博主恢复后需要重新审核店铺来源",
+      );
+      return {
+        creator: effectiveCreator(restored),
+        restored_video_count: restoredVideos.length,
+        affected_shops: affectedShops,
+      };
+    });
+  });
+
   app.post("/creators", async (request, reply) => {
     const body = createCreatorRequestSchema.parse(request.body);
     const admin = await requireAdmin(app.db, request);
+    const deletedCreator = await app.db
+      .selectFrom("creators")
+      .select(["id", "deleted_at"])
+      .where("bilibili_uid", "=", body.bilibili_uid)
+      .where("deleted_at", "is not", null)
+      .executeTakeFirst();
+    if (deletedCreator) {
+      throw new HttpError(
+        409,
+        "already_deleted",
+        "Creator exists in recycle bin; restore it first",
+      );
+    }
     const placeholderName = `B站 UID ${body.bilibili_uid}`;
     const creator = await app.db
       .insertInto("creators")
@@ -474,6 +889,8 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       .executeTakeFirst();
     if (!creator)
       throw new HttpError(404, "creator_not_found", "Creator not found");
+    if (creator.deleted_at)
+      throw new HttpError(409, "already_deleted", "Creator is in recycle bin");
     const { run, job } = await enqueuePipelineRunJob(
       app.db,
       {
@@ -501,6 +918,10 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       .orderBy("published_at", "desc")
       .limit(query.limit)
       .offset(query.offset);
+    if (query.deleted === "exclude")
+      builder = builder.where("deleted_at", "is", null);
+    if (query.deleted === "only")
+      builder = builder.where("deleted_at", "is not", null);
     if (query.status)
       builder = builder.where("workflow_status", "=", query.status);
     if (query.content_type)
@@ -515,7 +936,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       );
     }
     const videos = await builder.execute();
-    return { videos };
+    return { videos: videos.map(effectiveVideo) };
   });
 
   app.get("/videos", async (request) => {
@@ -526,7 +947,9 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       .select([
         "videos.id",
         "videos.bvid",
-        "videos.title",
+        sql<string>`COALESCE(videos.title_override, videos.title)`.as("title"),
+        "videos.title as source_title",
+        "videos.title_override",
         "videos.cover_url",
         "videos.source_url",
         "videos.workflow_status",
@@ -534,11 +957,21 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         "videos.content_type",
         "videos.risk_flags",
         "videos.published_at",
-        "creators.name as creator_name",
+        "videos.updated_at",
+        "videos.deleted_at",
+        sql<string>`COALESCE(creators.name_override, creators.name)`.as(
+          "creator_name",
+        ),
       ])
       .orderBy("videos.created_at", "desc")
       .limit(query.limit)
       .offset(query.offset);
+    if (query.deleted === "exclude") {
+      builder = builder.where("videos.deleted_at", "is", null);
+      builder = builder.where("creators.deleted_at", "is", null);
+    }
+    if (query.deleted === "only")
+      builder = builder.where("videos.deleted_at", "is not", null);
     if (query.creator_id)
       builder = builder.where("videos.creator_id", "=", query.creator_id);
     if (query.status)
@@ -549,6 +982,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
       builder = builder.where((eb) =>
         eb.or([
           eb("videos.title", "ilike", `%${query.q}%`),
+          eb("videos.title_override", "ilike", `%${query.q}%`),
           eb("videos.bvid", "ilike", `%${query.q}%`),
           sql<boolean>`videos.title % ${query.q}`,
         ]),
@@ -639,7 +1073,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
           .executeTakeFirst(),
       ]);
     return {
-      video,
+      video: effectiveVideo(video),
       assets,
       segments,
       comments,
@@ -650,15 +1084,172 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
+  app.patch("/videos/:id", async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = videoUpdateSchema.parse(request.body);
+    const admin = await requireAdmin(app.db, request);
+    const video = await app.db.transaction().execute(async (trx) => {
+      const before = await trx
+        .selectFrom("videos")
+        .selectAll()
+        .where("id", "=", params.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!before)
+        throw new HttpError(404, "video_not_found", "Video not found");
+      if (before.deleted_at)
+        throw new HttpError(409, "already_deleted", "Video is in recycle bin");
+      if (before.updated_at.getTime() !== body.expected_updated_at.getTime()) {
+        throw new HttpError(409, "version_conflict", "Video changed; refresh and retry");
+      }
+      const changes: Record<string, unknown> = {};
+      if (body.title !== undefined) changes.title_override = body.title;
+      if (body.description !== undefined)
+        changes.description_override = body.description;
+      if (body.tags !== undefined) changes.tags_override = body.tags;
+      if (body.category !== undefined) changes.category_override = body.category;
+      const updated = await trx
+        .updateTable("videos")
+        .set(changes)
+        .where("id", "=", params.id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      await writeReviewEvent(trx, {
+        entityType: "video",
+        entityId: params.id,
+        action: "edit",
+        before: effectiveVideo(before),
+        after: effectiveVideo(updated),
+        reason: "Admin updated video fields",
+        reviewerId: admin.id,
+      });
+      return updated;
+    });
+    return { video: effectiveVideo(video) };
+  });
+
+  app.delete("/videos/:id", async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = deleteEntitySchema.parse(request.body);
+    const admin = await requireAdmin(app.db, request);
+    return app.db.transaction().execute(async (trx) => {
+      const video = await trx
+        .selectFrom("videos")
+        .selectAll()
+        .where("id", "=", params.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!video)
+        throw new HttpError(404, "video_not_found", "Video not found");
+      if (video.deleted_at)
+        throw new HttpError(409, "already_deleted", "Video is already deleted");
+      if (video.updated_at.getTime() !== body.expected_updated_at.getTime()) {
+        throw new HttpError(409, "version_conflict", "Video changed; refresh and retry");
+      }
+      const now = new Date();
+      const batchId = crypto.randomUUID();
+      const deleted = await trx
+        .updateTable("videos")
+        .set({
+          deleted_at: now,
+          deleted_by: admin.id,
+          deletion_reason: body.reason,
+          deletion_batch_id: batchId,
+        })
+        .where("id", "=", params.id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      await cancelQueuedEntityWork(trx, [
+        { entityType: "video", entityId: params.id },
+      ]);
+      await writeReviewEvent(trx, {
+        entityType: "video",
+        entityId: params.id,
+        action: "soft_delete",
+        before: { deleted_at: null, workflow_status: video.workflow_status },
+        after: { deleted_at: now.toISOString(), batch_id: batchId },
+        reason: body.reason,
+        reviewerId: admin.id,
+      });
+      const shopIds = await findAffectedShopIds(trx, [params.id]);
+      const affectedShops = await revalidateAffectedShops(
+        trx,
+        shopIds,
+        admin.id,
+        `视频删除导致来源变化：${body.reason}`,
+      );
+      return { video: effectiveVideo(deleted), affected_shops: affectedShops };
+    });
+  });
+
+  app.post("/videos/:id/restore", async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const admin = await requireAdmin(app.db, request);
+    return app.db.transaction().execute(async (trx) => {
+      const before = await trx
+        .selectFrom("videos")
+        .selectAll()
+        .where("id", "=", params.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!before)
+        throw new HttpError(404, "video_not_found", "Video not found");
+      if (!before.deleted_at)
+        throw new HttpError(409, "not_deleted", "Video is not in recycle bin");
+      const creator = await trx
+        .selectFrom("creators")
+        .select(["id", "deleted_at"])
+        .where("id", "=", before.creator_id)
+        .executeTakeFirstOrThrow();
+      if (creator.deleted_at) {
+        throw new HttpError(
+          409,
+          "creator_deleted",
+          "Restore the creator before restoring this video",
+        );
+      }
+      const restored = await trx
+        .updateTable("videos")
+        .set({
+          deleted_at: null,
+          deleted_by: null,
+          deletion_reason: null,
+          deletion_batch_id: null,
+        })
+        .where("id", "=", params.id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      await writeReviewEvent(trx, {
+        entityType: "video",
+        entityId: params.id,
+        action: "restore",
+        before: { deleted_at: before.deleted_at.toISOString() },
+        after: { deleted_at: null },
+        reason: "Admin restored video from recycle bin",
+        reviewerId: admin.id,
+      });
+      const shopIds = await findAffectedShopIds(trx, [params.id]);
+      const affectedShops = await revalidateAffectedShops(
+        trx,
+        shopIds,
+        admin.id,
+        "视频恢复后需要重新审核店铺来源",
+      );
+      return { video: effectiveVideo(restored), affected_shops: affectedShops };
+    });
+  });
+
   app.post("/videos/:id/process", async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
     const admin = await requireAdmin(app.db, request);
     const video = await app.db
       .selectFrom("videos")
-      .select(["id", "title"])
+      .select(["id", "title", "title_override", "deleted_at"])
       .where("id", "=", params.id)
       .executeTakeFirst();
     if (!video) throw new HttpError(404, "video_not_found", "Video not found");
+    if (video.deleted_at)
+      throw new HttpError(409, "already_deleted", "Video is in recycle bin");
     const { run, job } = await enqueuePipelineRunJob(
       app.db,
       {
@@ -666,7 +1257,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         entityType: "video",
         entityId: params.id,
         triggeredBy: admin.id,
-        summary: { title: video.title },
+        summary: { title: video.title_override ?? video.title },
       },
       "process_video",
     );
@@ -675,6 +1266,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/videos/:id/retry-asr", async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    await requireActiveVideo(params.id);
     const admin = await requireAdmin(app.db, request);
     const { run, job } = await enqueuePipelineRunJob(
       app.db,
@@ -691,6 +1283,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/videos/:id/retry-ai", async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    await requireActiveVideo(params.id);
     const admin = await requireAdmin(app.db, request);
     const { run, job } = await enqueuePipelineRunJob(
       app.db,
@@ -707,6 +1300,7 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
 
   app.post("/videos/:id/mark-non-shop", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    await requireActiveVideo(params.id);
     await app.db
       .updateTable("videos")
       .set({
@@ -1302,9 +1896,12 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     const query = paginationSchema
       .extend({
         status: z.string().trim().optional(),
+        deleted: deletedScopeSchema,
       })
       .parse(request.query);
     let qb = app.db.selectFrom("shops").selectAll();
+    if (query.deleted === "exclude") qb = qb.where("deleted_at", "is", null);
+    if (query.deleted === "only") qb = qb.where("deleted_at", "is not", null);
     if (query.status) qb = qb.where("status", "=", query.status);
     const shops = await qb
       .orderBy("created_at", "desc")
@@ -1394,10 +1991,12 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
             "id",
             "bvid",
             "title",
+            "title_override",
             "cover_url",
             "source_url",
             "published_at",
             "creator_id",
+            "deleted_at",
           ])
           .where(
             "id",
@@ -1409,7 +2008,14 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     const creators = videos.length
       ? await app.db
           .selectFrom("creators")
-          .select(["id", "bilibili_uid", "name", "avatar_url"])
+          .select([
+            "id",
+            "bilibili_uid",
+            "name",
+            "name_override",
+            "avatar_url",
+            "deleted_at",
+          ])
           .where(
             "id",
             "in",
@@ -1420,8 +2026,16 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
     return {
       shop,
       mentions,
-      videos,
-      creators,
+      videos: videos.map((video) => ({
+        ...video,
+        source_title: video.title,
+        title: video.title_override ?? video.title,
+      })),
+      creators: creators.map((creator) => ({
+        ...creator,
+        source_name: creator.name,
+        name: creator.name_override ?? creator.name,
+      })),
       review_comments: reviewComments,
       external_links: externalLinks,
       poi_business: poiBusiness ?? null,
@@ -1624,6 +2238,8 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
           .where("id", "=", params.id)
           .executeTakeFirst();
         if (!shop) throw new HttpError(404, "shop_not_found", "Shop not found");
+        if (shop.deleted_at)
+          throw new HttpError(409, "already_deleted", "Shop is in recycle bin");
         if (shop.status !== "draft") {
           throw new HttpError(
             409,
@@ -1664,19 +2280,396 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
 
   app.patch("/shops/:id", async (request) => {
     const params = z.object({ id: z.string().uuid() }).parse(request.params);
-    const body = z
-      .object({
-        display_name: z.string().optional(),
-        status: z.string().optional(),
-        card_payload: z.record(z.unknown()).optional(),
-      })
-      .parse(request.body);
-    const [shop] = await app.db
-      .updateTable("shops")
-      .set({ ...body, updated_at: new Date() })
-      .where("id", "=", params.id)
-      .returningAll()
-      .execute();
+    const body = shopUpdateSchema.parse(request.body);
+    const admin = await requireAdmin(app.db, request);
+    const shop = await app.db.transaction().execute(async (trx) => {
+      const before = await trx
+        .selectFrom("shops")
+        .selectAll()
+        .where("id", "=", params.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!before) throw new HttpError(404, "shop_not_found", "Shop not found");
+      if (before.deleted_at)
+        throw new HttpError(409, "already_deleted", "Shop is in recycle bin");
+      if (before.status === "published") {
+        throw new HttpError(
+          409,
+          "edit_requires_unpublish",
+          "Unpublish the shop before editing",
+        );
+      }
+      if (before.updated_at.getTime() !== body.expected_updated_at.getTime()) {
+        throw new HttpError(409, "version_conflict", "Shop changed; refresh and retry");
+      }
+      const changes: Record<string, unknown> = {};
+      for (const key of [
+        "display_name",
+        "category_primary",
+        "category_secondary",
+        "province",
+        "city",
+        "district",
+        "business_area",
+        "address",
+      ] as const) {
+        if (body[key] !== undefined) changes[key] = body[key];
+      }
+      if (body.card_payload) {
+        changes.card_payload = {
+          ...asRecord(before.card_payload),
+          ...body.card_payload,
+        };
+      }
+      if (before.status === "approved") changes.status = "draft";
+      const updated = await trx
+        .updateTable("shops")
+        .set(changes)
+        .where("id", "=", params.id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      await writeReviewEvent(trx, {
+        entityType: "shop",
+        entityId: params.id,
+        action: "edit",
+        before,
+        after: updated,
+        reason:
+          before.status === "approved"
+            ? "Admin edited approved shop; approval reset to draft"
+            : "Admin edited shop fields",
+        reviewerId: admin.id,
+      });
+      return updated;
+    });
+    return { shop };
+  });
+
+  app.delete("/shops/:id", async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = deleteEntitySchema.parse(request.body);
+    const admin = await requireAdmin(app.db, request);
+    const shop = await app.db.transaction().execute(async (trx) => {
+      const before = await trx
+        .selectFrom("shops")
+        .selectAll()
+        .where("id", "=", params.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!before) throw new HttpError(404, "shop_not_found", "Shop not found");
+      if (before.deleted_at)
+        throw new HttpError(409, "already_deleted", "Shop is already deleted");
+      if (before.updated_at.getTime() !== body.expected_updated_at.getTime()) {
+        throw new HttpError(409, "version_conflict", "Shop changed; refresh and retry");
+      }
+      const now = new Date();
+      const batchId = crypto.randomUUID();
+      const updated = await trx
+        .updateTable("shops")
+        .set({
+          status: "hidden",
+          deleted_at: now,
+          deleted_by: admin.id,
+          deletion_reason: body.reason,
+          deletion_batch_id: batchId,
+        })
+        .where("id", "=", params.id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      await cancelQueuedEntityWork(trx, [
+        { entityType: "shop", entityId: params.id },
+      ]);
+      await writeReviewEvent(trx, {
+        entityType: "shop",
+        entityId: params.id,
+        action: "soft_delete",
+        before: { status: before.status, deleted_at: null },
+        after: { status: "hidden", deleted_at: now.toISOString(), batch_id: batchId },
+        reason: body.reason,
+        reviewerId: admin.id,
+      });
+      return updated;
+    });
+    return { shop };
+  });
+
+  app.post("/shops/:id/restore", async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const admin = await requireAdmin(app.db, request);
+    const shop = await app.db.transaction().execute(async (trx) => {
+      const before = await trx
+        .selectFrom("shops")
+        .selectAll()
+        .where("id", "=", params.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!before) throw new HttpError(404, "shop_not_found", "Shop not found");
+      if (!before.deleted_at)
+        throw new HttpError(409, "not_deleted", "Shop is not in recycle bin");
+      const updated = await trx
+        .updateTable("shops")
+        .set({
+          status: "hidden",
+          deleted_at: null,
+          deleted_by: null,
+          deletion_reason: null,
+          deletion_batch_id: null,
+        })
+        .where("id", "=", params.id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      await writeReviewEvent(trx, {
+        entityType: "shop",
+        entityId: params.id,
+        action: "restore",
+        before: { deleted_at: before.deleted_at.toISOString(), status: before.status },
+        after: { deleted_at: null, status: "hidden" },
+        reason: "Admin restored shop from recycle bin",
+        reviewerId: admin.id,
+      });
+      return updated;
+    });
+    return { shop };
+  });
+
+  app.post("/shops/:id/unpublish", async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = reasonedVersionSchema.parse(request.body);
+    const admin = await requireAdmin(app.db, request);
+    const shop = await app.db.transaction().execute(async (trx) => {
+      const before = await trx
+        .selectFrom("shops")
+        .selectAll()
+        .where("id", "=", params.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!before) throw new HttpError(404, "shop_not_found", "Shop not found");
+      if (before.deleted_at)
+        throw new HttpError(409, "already_deleted", "Shop is in recycle bin");
+      if (before.status !== "published")
+        throw new HttpError(409, "shop_not_published", "Shop is not published");
+      if (before.updated_at.getTime() !== body.expected_updated_at.getTime()) {
+        throw new HttpError(409, "version_conflict", "Shop changed; refresh and retry");
+      }
+      const updated = await trx
+        .updateTable("shops")
+        .set({ status: "hidden" })
+        .where("id", "=", params.id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      await writeReviewEvent(trx, {
+        entityType: "shop",
+        entityId: params.id,
+        action: "unpublish",
+        before: { status: "published" },
+        after: { status: "hidden" },
+        reason: body.reason,
+        reviewerId: admin.id,
+      });
+      return updated;
+    });
+    return { shop };
+  });
+
+  app.post("/shops/:id/submit-review", async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = expectedVersionSchema.parse(request.body);
+    const admin = await requireAdmin(app.db, request);
+    const shop = await app.db.transaction().execute(async (trx) => {
+      const before = await trx
+        .selectFrom("shops")
+        .selectAll()
+        .where("id", "=", params.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!before) throw new HttpError(404, "shop_not_found", "Shop not found");
+      if (before.deleted_at)
+        throw new HttpError(409, "already_deleted", "Shop is in recycle bin");
+      if (!["hidden", "rejected"].includes(before.status)) {
+        throw new HttpError(
+          409,
+          "shop_not_ready_for_review",
+          "Only hidden or rejected shops can be submitted",
+        );
+      }
+      if (before.updated_at.getTime() !== body.expected_updated_at.getTime()) {
+        throw new HttpError(409, "version_conflict", "Shop changed; refresh and retry");
+      }
+      const updated = await trx
+        .updateTable("shops")
+        .set({ status: "draft" })
+        .where("id", "=", params.id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      await writeReviewEvent(trx, {
+        entityType: "shop",
+        entityId: params.id,
+        action: "submit_review",
+        before: { status: before.status },
+        after: { status: "draft" },
+        reason: "Admin submitted shop for review",
+        reviewerId: admin.id,
+      });
+      return updated;
+    });
+    return { shop };
+  });
+
+  app.post("/shops/:id/reject", async (request) => {
+    const params = z.object({ id: z.string().uuid() }).parse(request.params);
+    const body = reasonedVersionSchema.parse(request.body);
+    const admin = await requireAdmin(app.db, request);
+    const shop = await app.db.transaction().execute(async (trx) => {
+      const before = await trx
+        .selectFrom("shops")
+        .selectAll()
+        .where("id", "=", params.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!before) throw new HttpError(404, "shop_not_found", "Shop not found");
+      if (before.deleted_at)
+        throw new HttpError(409, "already_deleted", "Shop is in recycle bin");
+      if (before.status === "published") {
+        throw new HttpError(
+          409,
+          "edit_requires_unpublish",
+          "Unpublish the shop before rejecting it",
+        );
+      }
+      if (before.updated_at.getTime() !== body.expected_updated_at.getTime()) {
+        throw new HttpError(409, "version_conflict", "Shop changed; refresh and retry");
+      }
+      const updated = await trx
+        .updateTable("shops")
+        .set({ status: "rejected", last_reviewed_at: new Date() })
+        .where("id", "=", params.id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      await writeReviewEvent(trx, {
+        entityType: "shop",
+        entityId: params.id,
+        action: "reject",
+        before: { status: before.status },
+        after: { status: "rejected" },
+        reason: body.reason,
+        reviewerId: admin.id,
+      });
+      return updated;
+    });
+    return { shop };
+  });
+
+  app.patch("/shops/:id/review-aspects/:aspect", async (request) => {
+    const params = z
+      .object({ id: z.string().uuid(), aspect: z.string().trim().min(1).max(80) })
+      .parse(request.params);
+    if (["comment_summary", "comment_signals"].includes(params.aspect)) {
+      throw new HttpError(400, "invalid_review_aspect", "Reserved review aspect");
+    }
+    const body = reviewAspectUpdateSchema.parse(request.body);
+    const admin = await requireAdmin(app.db, request);
+    const shop = await app.db.transaction().execute(async (trx) => {
+      const before = await trx
+        .selectFrom("shops")
+        .selectAll()
+        .where("id", "=", params.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!before) throw new HttpError(404, "shop_not_found", "Shop not found");
+      if (before.deleted_at)
+        throw new HttpError(409, "already_deleted", "Shop is in recycle bin");
+      if (before.status === "published")
+        throw new HttpError(409, "edit_requires_unpublish", "Unpublish before editing");
+      if (before.updated_at.getTime() !== body.expected_updated_at.getTime()) {
+        throw new HttpError(409, "version_conflict", "Shop changed; refresh and retry");
+      }
+      const review = asRecord(before.aggregated_review);
+      const previousAspect = asRecord(review[params.aspect]);
+      if (!Object.keys(previousAspect).length) {
+        throw new HttpError(404, "review_aspect_not_found", "Review aspect not found");
+      }
+      const nextReview = {
+        ...review,
+        [params.aspect]: {
+          ...previousAspect,
+          summary: body.summary,
+          sentiment: body.sentiment,
+          confidence: body.confidence ?? previousAspect.confidence ?? null,
+        },
+      };
+      const updated = await trx
+        .updateTable("shops")
+        .set({
+          aggregated_review: nextReview,
+          status: before.status === "approved" ? "draft" : before.status,
+        })
+        .where("id", "=", params.id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      await writeReviewEvent(trx, {
+        entityType: "shop",
+        entityId: params.id,
+        action: "edit_review_aspect",
+        before: { aspect: params.aspect, value: previousAspect },
+        after: { aspect: params.aspect, value: nextReview[params.aspect] },
+        reason: body.reason,
+        reviewerId: admin.id,
+      });
+      return updated;
+    });
+    return { shop };
+  });
+
+  app.delete("/shops/:id/review-aspects/:aspect", async (request) => {
+    const params = z
+      .object({ id: z.string().uuid(), aspect: z.string().trim().min(1).max(80) })
+      .parse(request.params);
+    if (["comment_summary", "comment_signals"].includes(params.aspect)) {
+      throw new HttpError(400, "invalid_review_aspect", "Reserved review aspect");
+    }
+    const body = reasonedVersionSchema.parse(request.body);
+    const admin = await requireAdmin(app.db, request);
+    const shop = await app.db.transaction().execute(async (trx) => {
+      const before = await trx
+        .selectFrom("shops")
+        .selectAll()
+        .where("id", "=", params.id)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!before) throw new HttpError(404, "shop_not_found", "Shop not found");
+      if (before.deleted_at)
+        throw new HttpError(409, "already_deleted", "Shop is in recycle bin");
+      if (before.status === "published")
+        throw new HttpError(409, "edit_requires_unpublish", "Unpublish before editing");
+      if (before.updated_at.getTime() !== body.expected_updated_at.getTime()) {
+        throw new HttpError(409, "version_conflict", "Shop changed; refresh and retry");
+      }
+      const review = asRecord(before.aggregated_review);
+      const previousAspect = review[params.aspect];
+      if (previousAspect === undefined) {
+        throw new HttpError(404, "review_aspect_not_found", "Review aspect not found");
+      }
+      const { [params.aspect]: removed, ...nextReview } = review;
+      const updated = await trx
+        .updateTable("shops")
+        .set({
+          aggregated_review: nextReview,
+          status: before.status === "approved" ? "draft" : before.status,
+        })
+        .where("id", "=", params.id)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      await writeReviewEvent(trx, {
+        entityType: "shop",
+        entityId: params.id,
+        action: "delete_review_aspect",
+        before: { aspect: params.aspect, value: removed },
+        after: { aspect: params.aspect, removed: true },
+        reason: body.reason,
+        reviewerId: admin.id,
+      });
+      return updated;
+    });
     return { shop };
   });
 
@@ -1697,6 +2690,8 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
           .where("id", "=", params.id)
           .executeTakeFirst();
         if (!shop) throw new HttpError(404, "shop_not_found", "Shop not found");
+        if (shop.deleted_at)
+          throw new HttpError(409, "already_deleted", "Shop is in recycle bin");
         // Per AGENTS.md §3.5: publish must follow an explicit approve step.
         if (shop.status !== "approved") {
           throw new HttpError(

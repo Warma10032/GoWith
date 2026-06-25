@@ -116,6 +116,7 @@ paths:
         - name: status
           in: query
           schema: { type: string }
+        - $ref: "#/components/parameters/DeletedScope"
       responses:
         "200":
           description: Creator list.
@@ -156,6 +157,43 @@ paths:
       responses:
         "200":
           description: Creator detail.
+    patch:
+      summary: Update creator manual overrides and management settings
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateCreatorRequest" }
+      responses:
+        "200": { description: Creator updated and audited. }
+        "409": { description: version_conflict or already_deleted }
+    delete:
+      summary: Move creator and its active videos to recycle bin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeleteEntityRequest" }
+      responses:
+        "200": { description: Creator and affected videos soft deleted and audited. }
+        "409": { description: version_conflict or already_deleted }
+  /api/admin/creators/{id}/restore:
+    post:
+      summary: Restore a creator and videos deleted in the same batch
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200": { description: Creator restored as paused; matching batch videos restored. }
   /api/admin/creators/{id}/videos:
     get:
       summary: List all videos for a creator as admin cards
@@ -172,6 +210,7 @@ paths:
         - name: content_type
           in: query
           schema: { type: string }
+        - $ref: "#/components/parameters/DeletedScope"
       responses:
         "200":
           description: Creator video list.
@@ -206,6 +245,43 @@ paths:
       responses:
         "200":
           description: Video detail.
+    patch:
+      summary: Update video manual overrides
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateVideoRequest" }
+      responses:
+        "200": { description: Video updated and audited. }
+        "409": { description: version_conflict or already_deleted }
+    delete:
+      summary: Move a video to recycle bin
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeleteEntityRequest" }
+      responses:
+        "200": { description: Video soft deleted; affected shops revalidated. }
+        "409": { description: version_conflict or already_deleted }
+  /api/admin/videos/{id}/restore:
+    post:
+      summary: Restore a soft-deleted video
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200": { description: Video restored without auto-publishing affected shops. }
   /api/admin/videos/{id}/process:
     post:
       summary: Start observable video processing pipeline
@@ -257,6 +333,7 @@ paths:
         - name: status
           in: query
           schema: { type: string }
+        - $ref: "#/components/parameters/DeletedScope"
       responses:
         "200":
           description: Pipeline run list.
@@ -478,14 +555,107 @@ paths:
         "404":
           description: shop_not_found
     patch:
-      summary: Update shop fields
+      summary: Update typed curated shop fields
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateShopRequest" }
+      responses:
+        "200":
+          description: Shop updated and audited; approved shops return to draft.
+        "409":
+          description: edit_requires_unpublish, version_conflict, or already_deleted
+    delete:
+      summary: Move a shop to recycle bin and take it offline
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeleteEntityRequest" }
+      responses:
+        "200": { description: Shop soft deleted and audited; immutable snapshots retained. }
+        "409": { description: version_conflict or already_deleted }
+  /api/admin/shops/{id}/restore:
+    post:
+      summary: Restore a shop as hidden
       security:
         - cookieAuth: []
       parameters:
         - $ref: "#/components/parameters/UuidId"
       responses:
-        "200":
-          description: Shop updated.
+        "200": { description: Shop restored as hidden and requires review before publication. }
+  /api/admin/shops/{id}/unpublish:
+    post:
+      summary: Take a published shop offline as hidden
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200": { description: Shop unpublished and audited. }
+        "409": { description: shop_not_published or version_conflict }
+  /api/admin/shops/{id}/submit-review:
+    post:
+      summary: Submit a hidden or rejected shop for review
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      responses:
+        "200": { description: Shop moved to draft and audited. }
+  /api/admin/shops/{id}/reject:
+    post:
+      summary: Reject a shop review with a reason
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReasonedActionRequest" }
+      responses:
+        "200": { description: Shop rejected and audited. }
+  /api/admin/shops/{id}/review-aspects/{aspect}:
+    patch:
+      summary: Edit one current shop review aspect without mutating AI history
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+        - name: aspect
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 80 }
+      responses:
+        "200": { description: Current aggregated review aspect updated and audited. }
+    delete:
+      summary: Remove one current shop review aspect without deleting AI evidence
+      security:
+        - cookieAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UuidId"
+        - name: aspect
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 80 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VersionedReasonRequest" }
+      responses:
+        "200": { description: Current aspect removed and audited; original AI rows retained. }
   /api/admin/shops/{id}/external-links/dianping:
     put:
       summary: Bind or replace a confirmed Dianping shop link
@@ -657,7 +827,7 @@ paths:
         - $ref: "#/components/parameters/UuidId"
       responses:
         "200":
-          description: Published shop detail, including source videos, `evidence_count`, up to 20 evidence snippets, confirmed external platform links, and source-labelled POI business data. Comment evidence text is redacted.
+          description: Published shop detail, including source videos, confirmed external platform links, and source-labelled POI business data.
   /api/creators:
     get:
       summary: List public creators
@@ -712,6 +882,13 @@ components:
       schema:
         type: string
         format: uuid
+    DeletedScope:
+      name: deleted
+      in: query
+      schema:
+        type: string
+        enum: [exclude, only, include]
+        default: exclude
   schemas:
     ShopExternalLink:
       type: object
@@ -772,6 +949,55 @@ components:
       properties:
         bilibili_uid:
           type: string
+    DeleteEntityRequest:
+      type: object
+      required: [reason, expected_updated_at]
+      properties:
+        reason: { type: string, minLength: 2, maxLength: 500 }
+        expected_updated_at: { type: string, format: date-time }
+    ReasonedActionRequest:
+      type: object
+      required: [reason, expected_updated_at]
+      properties:
+        reason: { type: string, minLength: 2, maxLength: 500 }
+        expected_updated_at: { type: string, format: date-time }
+    VersionedReasonRequest:
+      allOf:
+        - $ref: "#/components/schemas/ReasonedActionRequest"
+    UpdateCreatorRequest:
+      type: object
+      required: [expected_updated_at]
+      properties:
+        expected_updated_at: { type: string, format: date-time }
+        name: { type: [string, "null"], minLength: 1, maxLength: 120 }
+        bio: { type: [string, "null"], maxLength: 2000 }
+        status: { type: string, enum: [active, paused] }
+        sync_mode: { type: string, enum: [full, incremental] }
+    UpdateVideoRequest:
+      type: object
+      required: [expected_updated_at]
+      properties:
+        expected_updated_at: { type: string, format: date-time }
+        title: { type: [string, "null"], minLength: 1, maxLength: 300 }
+        description: { type: [string, "null"], maxLength: 10000 }
+        tags:
+          type: [array, "null"]
+          items: { type: string, maxLength: 80 }
+        category: { type: [string, "null"], maxLength: 120 }
+    UpdateShopRequest:
+      type: object
+      required: [expected_updated_at]
+      properties:
+        expected_updated_at: { type: string, format: date-time }
+        display_name: { type: string, minLength: 1, maxLength: 200 }
+        category_primary: { type: [string, "null"], maxLength: 120 }
+        category_secondary: { type: [string, "null"], maxLength: 120 }
+        province: { type: [string, "null"], maxLength: 120 }
+        city: { type: [string, "null"], maxLength: 120 }
+        district: { type: [string, "null"], maxLength: 120 }
+        business_area: { type: [string, "null"], maxLength: 120 }
+        address: { type: [string, "null"], maxLength: 500 }
+        card_payload: { type: object }
     UserEventRequest:
       type: object
       required: [event_name, surface]

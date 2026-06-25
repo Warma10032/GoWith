@@ -250,9 +250,11 @@ B站博主表。
 | `id`                      | uuid PK          | 内部博主 ID                   |
 | `bilibili_uid`            | text             | B站 UID                       |
 | `name`                    | text             | 昵称                          |
+| `name_override`           | text/null        | 管理员昵称覆盖；null 使用来源值 |
 | `avatar_url`              | text/null        | 头像                          |
 | `profile_url`             | text             | B站主页                       |
 | `bio`                     | text/null        | 简介                          |
+| `bio_override`            | text/null        | 管理员简介覆盖；null 使用来源值 |
 | `follower_count`          | bigint/null      | 粉丝数                        |
 | `status`                  | text             | `active` / `paused` / `error` |
 | `sync_mode`               | text             | `full` / `incremental`        |
@@ -262,6 +264,10 @@ B站博主表。
 | `raw_payload_id`          | uuid/null        | 原始响应                      |
 | `created_at`              | timestamptz      | 创建时间                      |
 | `updated_at`              | timestamptz      | 更新时间                      |
+| `deleted_at`              | timestamptz/null | 回收站时间                    |
+| `deleted_by`              | uuid FK/null     | 删除管理员                    |
+| `deletion_reason`         | text/null        | 删除原因                      |
+| `deletion_batch_id`       | uuid/null        | 博主及视频级联删除批次        |
 
 索引：
 
@@ -283,13 +289,17 @@ B站视频主表。
 | `aid`                       | text/null         | AV号                     |
 | `cid`                       | text/null         | 默认 CID                 |
 | `title`                     | text              | 标题                     |
+| `title_override`            | text/null         | 管理员标题覆盖           |
 | `description`               | text/null         | 简介                     |
+| `description_override`      | text/null         | 管理员简介覆盖           |
 | `cover_url`                 | text/null         | 封面                     |
 | `source_url`                | text              | B站链接                  |
 | `duration_sec`              | integer/null      | 时长                     |
 | `published_at`              | timestamptz/null  | 发布时间                 |
 | `tags`                      | text[]            | 标签                     |
+| `tags_override`             | text[]/null       | 管理员标签覆盖           |
 | `category`                  | text/null         | B站分区                  |
+| `category_override`         | text/null         | 管理员分区覆盖           |
 | `stats`                     | jsonb             | 播放、点赞、收藏、评论等 |
 | `workflow_status`           | text              | 工作流状态               |
 | `is_shop_visit`             | boolean/null      | 是否探店                 |
@@ -300,6 +310,10 @@ B站视频主表。
 | `last_synced_at`            | timestamptz/null  | 最近同步                 |
 | `created_at`                | timestamptz       | 创建时间                 |
 | `updated_at`                | timestamptz       | 更新时间                 |
+| `deleted_at`                | timestamptz/null  | 回收站时间               |
+| `deleted_by`                | uuid FK/null      | 删除管理员               |
+| `deletion_reason`           | text/null         | 删除原因                 |
+| `deletion_batch_id`         | uuid/null         | 级联删除批次             |
 
 索引：
 
@@ -744,6 +758,10 @@ CREATE INDEX poi_match_candidates_poi_idx ON poi_match_candidates (poi_id);
 | `last_reviewed_at`   | timestamptz/null      | 最近审核                 |
 | `created_at`         | timestamptz           | 创建时间                 |
 | `updated_at`         | timestamptz           | 更新时间                 |
+| `deleted_at`         | timestamptz/null      | 回收站时间               |
+| `deleted_by`         | uuid FK/null          | 删除管理员               |
+| `deletion_reason`    | text/null             | 删除原因                 |
+| `deletion_batch_id`  | uuid/null             | 删除批次                 |
 
 索引：
 
@@ -752,8 +770,10 @@ CREATE INDEX shops_status_city_idx ON shops (status, city, district);
 CREATE INDEX shops_category_idx ON shops (category_primary, category_secondary);
 CREATE INDEX shops_name_trgm_idx ON shops USING GIN (display_name gin_trgm_ops);
 CREATE INDEX shops_geom_gix ON shops USING GIST (geom);
-CREATE INDEX shops_published_idx ON shops (published_at DESC) WHERE status = 'published';
+CREATE INDEX shops_published_idx ON shops (published_at DESC) WHERE status = 'published' AND deleted_at IS NULL;
 ```
+
+`creators`、`videos`、`shops` 默认查询都必须加 `deleted_at IS NULL`。回收站只查询 `deleted_at IS NOT NULL`。删除与恢复均写 `review_events`；物理行、AI 原始输出、证据和发布快照不删除。
 
 ### 10.2 `shop_aliases`
 

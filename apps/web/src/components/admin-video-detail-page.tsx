@@ -12,10 +12,13 @@ import {
   MapPin,
   Play,
   RefreshCw,
+  RotateCcw,
   ShieldOff,
+  Trash2,
 } from "lucide-react";
 import { AdminShell } from "./admin-shell";
 import { adminFetch } from "@/lib/admin-api";
+import { AdminDeleteDialog, type DeleteDialogTarget } from "./admin-delete-dialog";
 import {
   useAdminRealtime,
   useAdminRealtimeRefresh,
@@ -111,6 +114,9 @@ type VideoDetail = {
     content_type?: string | null;
     classification_confidence?: number | string | null;
     risk_flags: string[];
+    updated_at: string;
+    deleted_at?: string | null;
+    deletion_reason?: string | null;
   };
   assets: Array<{ id: string; source: string; language?: string | null; status: string; model_provider?: string | null; model_name?: string | null; created_at: string }>;
   segments: Array<{ id: string; text: string; start_sec?: number | null; end_sec?: number | null; confidence?: number | string | null }>;
@@ -132,6 +138,7 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
   const [expandedCandidateId, setExpandedCandidateId] = useState<string | null>(null);
   const [candidateDetail, setCandidateDetail] = useState<CandidateDetail | null>(null);
   const [candidateError, setCandidateError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<(DeleteDialogTarget & { updated_at: string }) | null>(null);
 
   async function load() {
     const payload = await adminFetch<VideoDetail>(`/api/admin/videos/${videoId}`);
@@ -191,6 +198,26 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
     }
   }
 
+  async function handleDelete(reason: string) {
+    if (!deleteTarget) return;
+    await run("删除", async () => {
+      await adminFetch(`/api/admin/videos/${deleteTarget.id}`, {
+        method: "DELETE",
+        body: JSON.stringify({
+          reason,
+          expected_updated_at: deleteTarget.updated_at,
+        }),
+      });
+      setDeleteTarget(null);
+    });
+  }
+
+  async function handleRestore() {
+    await run("恢复视频", () =>
+      adminFetch(`/api/admin/videos/${videoId}/restore`, { method: "POST" }),
+    );
+  }
+
   async function candidateAction(candidateId: string, label: string, action: () => Promise<unknown>) {
     setBusy(label);
     setError(null);
@@ -225,6 +252,7 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
     const last = [...events].reverse().find((event) => event.progress_percent !== null && event.progress_percent !== undefined);
     return Math.max(0, Math.min(100, Number(last?.progress_percent ?? 0)));
   }, [events]);
+  const videoDeleted = Boolean(detail?.video.deleted_at);
 
   return (
     <AdminShell title="视频处理控制台" description="手动启动处理，查看 ASR/AI/POI 阶段的持久化事件流。">
@@ -259,26 +287,30 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
                     <Badge>{lookupLabel(VIDEO_WORKFLOW_STATUS_LABELS, detail.video.workflow_status)}</Badge>
                     {detail.video.content_type ? <Badge>{lookupLabel(VIDEO_CONTENT_TYPE_LABELS, detail.video.content_type)}</Badge> : null}
                     {detail.video.classification_confidence ? <Badge>置信度 {Number(detail.video.classification_confidence).toFixed(2)}</Badge> : null}
+                    {videoDeleted ? <Badge>已删除</Badge> : null}
                   </div>
+                  {detail.video.deleted_at ? (
+                    <p className="mt-2 text-sm text-[#9a341f]">删除原因：{detail.video.deletion_reason ?? "未记录"}</p>
+                  ) : null}
                   {detail.video.description ? <p className="mt-3 line-clamp-3 text-sm leading-6 text-ink/80">{detail.video.description}</p> : null}
                   <div className="mt-4 flex flex-wrap gap-2">
                     <button
                       onClick={() => void run("开始处理", () => adminFetch<{ run_id: string }>("/api/admin/videos/" + videoId + "/process", { method: "POST" }))}
                       className="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-sm font-semibold text-white"
-                      disabled={!!busy}
+                      disabled={!!busy || videoDeleted}
                     >
                       {busy === "开始处理" ? <LoaderCircle size={16} className="animate-spin" /> : <Play size={16} />}
                       开始处理
                     </button>
-                    <button onClick={() => void run("重跑 ASR", () => adminFetch<{ run_id: string }>(`/api/admin/videos/${videoId}/retry-asr`, { method: "POST" }))} className="inline-flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm font-medium" disabled={!!busy}>
+                    <button onClick={() => void run("重跑 ASR", () => adminFetch<{ run_id: string }>(`/api/admin/videos/${videoId}/retry-asr`, { method: "POST" }))} className="inline-flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm font-medium" disabled={!!busy || videoDeleted}>
                       {busy === "重跑 ASR" ? <LoaderCircle size={16} className="animate-spin" /> : <RefreshCw size={16} />}
                       重跑 ASR
                     </button>
-                    <button onClick={() => void run("重跑 AI", () => adminFetch<{ run_id: string }>(`/api/admin/videos/${videoId}/retry-ai`, { method: "POST" }))} className="inline-flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm font-medium" disabled={!!busy}>
+                    <button onClick={() => void run("重跑 AI", () => adminFetch<{ run_id: string }>(`/api/admin/videos/${videoId}/retry-ai`, { method: "POST" }))} className="inline-flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm font-medium" disabled={!!busy || videoDeleted}>
                       {busy === "重跑 AI" ? <LoaderCircle size={16} className="animate-spin" /> : <Bot size={16} />}
                       重跑 AI
                     </button>
-                    <button onClick={() => void run("标记非探店", () => adminFetch(`/api/admin/videos/${videoId}/mark-non-shop`, { method: "POST" }))} className="inline-flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm font-medium" disabled={!!busy}>
+                    <button onClick={() => void run("标记非探店", () => adminFetch(`/api/admin/videos/${videoId}/mark-non-shop`, { method: "POST" }))} className="inline-flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm font-medium" disabled={!!busy || videoDeleted}>
                       {busy === "标记非探店" ? <LoaderCircle size={16} className="animate-spin" /> : <ShieldOff size={16} />}
                       标记非探店
                     </button>
@@ -286,6 +318,28 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
                       <ExternalLink size={16} />
                       B站视频
                     </a>
+                    {videoDeleted ? (
+                      <button onClick={() => void handleRestore()} className="inline-flex items-center gap-2 rounded-lg border border-[#c9dfc8] px-3 py-2 text-sm font-semibold text-[#2d6330]" disabled={!!busy}>
+                        {busy === "恢复视频" ? <LoaderCircle size={16} className="animate-spin" /> : <RotateCcw size={16} />}
+                        恢复视频
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() =>
+                          setDeleteTarget({
+                            id: detail.video.id,
+                            title: `删除视频「${detail.video.title}」？`,
+                            description: "删除视频会重新统计关联店铺来源；证据不足的店铺会自动下架并进入复核。",
+                            updated_at: detail.video.updated_at,
+                          })
+                        }
+                        className="inline-flex items-center gap-2 rounded-lg border border-[#f2c7bd] px-3 py-2 text-sm font-semibold text-[#9a341f]"
+                        disabled={!!busy}
+                      >
+                        <Trash2 size={16} />
+                        删除视频
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -408,6 +462,12 @@ export function AdminVideoDetailPage({ videoId }: { videoId: string }) {
           </aside>
         </div>
       )}
+      <AdminDeleteDialog
+        target={deleteTarget}
+        busy={busy}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={handleDelete}
+      />
     </AdminShell>
   );
 }

@@ -23,6 +23,12 @@ export type Timestamp = ColumnType<
   Date | string
 >;
 export type GeneratedUuid = Generated<string>;
+export type OptionalColumn<T> = ColumnType<T, T | undefined, T>;
+export type OptionalTimestamp = ColumnType<
+  Date | null,
+  Date | string | null | undefined,
+  Date | string | null
+>;
 
 export interface UsersTable {
   id: GeneratedUuid;
@@ -85,10 +91,12 @@ export interface CreatorsTable {
   id: GeneratedUuid;
   bilibili_uid: string;
   name: string;
+  name_override: OptionalColumn<string | null>;
   avatar_url: string | null;
   avatar_source_url: string | null;
   profile_url: string;
   bio: string | null;
+  bio_override: OptionalColumn<string | null>;
   follower_count: number | null;
   status: "active" | "paused" | "error";
   sync_mode: "full" | "incremental";
@@ -98,6 +106,10 @@ export interface CreatorsTable {
   raw_payload_id: string | null;
   created_at: Timestamp;
   updated_at: Timestamp;
+  deleted_at: OptionalTimestamp;
+  deleted_by: OptionalColumn<string | null>;
+  deletion_reason: OptionalColumn<string | null>;
+  deletion_batch_id: OptionalColumn<string | null>;
 }
 
 export interface VideosTable {
@@ -107,14 +119,18 @@ export interface VideosTable {
   aid: string | null;
   cid: string | null;
   title: string;
+  title_override: OptionalColumn<string | null>;
   description: string | null;
+  description_override: OptionalColumn<string | null>;
   cover_url: string | null;
   cover_source_url: string | null;
   source_url: string;
   duration_sec: number | null;
   published_at: Timestamp | null;
   tags: string[];
+  tags_override: OptionalColumn<string[] | null>;
   category: string | null;
+  category_override: OptionalColumn<string | null>;
   stats: Json;
   workflow_status: string;
   is_shop_visit: boolean | null;
@@ -125,6 +141,10 @@ export interface VideosTable {
   last_synced_at: Timestamp | null;
   created_at: Timestamp;
   updated_at: Timestamp;
+  deleted_at: OptionalTimestamp;
+  deleted_by: OptionalColumn<string | null>;
+  deletion_reason: OptionalColumn<string | null>;
+  deletion_batch_id: OptionalColumn<string | null>;
 }
 
 export interface JobsTable {
@@ -447,6 +467,10 @@ export interface ShopsTable {
   last_reviewed_at: Timestamp | null;
   created_at: Timestamp;
   updated_at: Timestamp;
+  deleted_at: OptionalTimestamp;
+  deleted_by: OptionalColumn<string | null>;
+  deletion_reason: OptionalColumn<string | null>;
+  deletion_batch_id: OptionalColumn<string | null>;
 }
 
 export interface ShopAliasesTable {

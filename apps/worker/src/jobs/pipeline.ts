@@ -32,6 +32,11 @@ import { env } from "../env";
 import { pipelineQueue } from "../queue";
 
 export async function handlePipelineJob(db: Kysely<DB>, job: Job) {
+  if (await jobTargetsDeletedEntity(db, job)) {
+    const result = { skipped: true, reason: "entity_deleted" };
+    await finishRunIfTerminal(db, job, result);
+    return result;
+  }
   switch (job.name) {
     case "check_bilibili_auth_pool":
       return checkBilibiliAuthPoolJob(db, job);
@@ -54,6 +59,73 @@ export async function handlePipelineJob(db: Kysely<DB>, job: Job) {
     default:
       throw new Error(`Unsupported pipeline job: ${job.name}`);
   }
+}
+
+async function jobTargetsDeletedEntity(db: Kysely<DB>, job: Job) {
+  const entityId = (job.data as { entityId?: string }).entityId;
+  if (!entityId) return false;
+  if (["sync_creator_profile", "sync_creator_videos"].includes(job.name)) {
+    const creator = await db
+      .selectFrom("creators")
+      .select("deleted_at")
+      .where("id", "=", entityId)
+      .executeTakeFirst();
+    return Boolean(creator?.deleted_at);
+  }
+  if (
+    [
+      "process_video",
+      "run_asr",
+      "classify_video",
+      "extract_comment_signals",
+      "structure_video",
+    ].includes(job.name)
+  ) {
+    const video = await db
+      .selectFrom("videos")
+      .select("deleted_at")
+      .where("id", "=", entityId)
+      .executeTakeFirst();
+    return Boolean(video?.deleted_at);
+  }
+  if (job.name === "match_poi") {
+    const candidate = await db
+      .selectFrom("shop_candidates")
+      .innerJoin("videos", "videos.id", "shop_candidates.video_id")
+      .select("videos.deleted_at")
+      .where("shop_candidates.id", "=", entityId)
+      .executeTakeFirst();
+    return Boolean(candidate?.deleted_at);
+  }
+  return false;
+}
+
+function effectiveVideoRow<T extends {
+  title: string;
+  title_override: string | null;
+  description: string | null;
+  description_override: string | null;
+  tags: string[];
+  tags_override: string[] | null;
+  category: string | null;
+  category_override: string | null;
+}>(video: T): T {
+  return {
+    ...video,
+    title: video.title_override ?? video.title,
+    description: video.description_override ?? video.description,
+    tags: video.tags_override ?? video.tags,
+    category: video.category_override ?? video.category,
+  };
+}
+
+async function videoWasDeleted(db: Kysely<DB>, videoId: string) {
+  const video = await db
+    .selectFrom("videos")
+    .select("deleted_at")
+    .where("id", "=", videoId)
+    .executeTakeFirst();
+  return Boolean(video?.deleted_at);
 }
 
 function runIdFromJob(job: Job): string | null {
@@ -257,6 +329,7 @@ async function syncCreatorProfile(db: Kysely<DB>, job: Job) {
       updated_at: refreshedAt,
     })
     .where("id", "=", entityId)
+    .where("deleted_at", "is", null)
     .execute();
   const result = { updated: true, creator_id: entityId };
   await finishRunIfTerminal(db, job, result);
@@ -278,7 +351,7 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
 
   // 头像保持原始 B站 URL（与 creator 同步逻辑一致 + videos.cover_url 同样的模式）
 
-  await db
+  const creatorUpdate = await db
     .updateTable("creators")
     .set({
       name: payload.name,
@@ -291,7 +364,11 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
       updated_at: new Date(),
     })
     .where("id", "=", entityId)
-    .execute();
+    .where("deleted_at", "is", null)
+    .executeTakeFirst();
+  if (!creatorUpdate.numUpdatedRows) {
+    return { skipped: true, reason: "entity_deleted" };
+  }
 
   for (const video of payload.videos) {
     // 视频封面也保持原始 B站 URL，不再下载到 /uploads/videos/。前端 SafeImage 的
@@ -342,10 +419,11 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
           raw_payload_id: video.raw_payload_id,
           last_synced_at: new Date(),
           updated_at: new Date(),
-        }),
+        }).where("videos.deleted_at", "is", null),
       )
       .returningAll()
-      .executeTakeFirstOrThrow();
+      .executeTakeFirst();
+    if (!row) continue;
 
     if (video.transcript.length > 0) {
       await saveTextAsset(db, {
@@ -426,11 +504,14 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
 
 async function processVideoJob(db: Kysely<DB>, job: Job) {
   const { entityId } = job.data as { entityId: string };
-  const video = await db
-    .selectFrom("videos")
-    .selectAll()
-    .where("id", "=", entityId)
-    .executeTakeFirstOrThrow();
+  const video = effectiveVideoRow(
+    await db
+      .selectFrom("videos")
+      .selectAll()
+      .where("id", "=", entityId)
+      .where("deleted_at", "is", null)
+      .executeTakeFirstOrThrow(),
+  );
   const textAsset = await db
     .selectFrom("video_text_assets")
     .select(["id", "source"])
@@ -883,11 +964,14 @@ async function saveFailedAiCalls(
 
 async function runAsrJob(db: Kysely<DB>, job: Job) {
   const { entityId } = job.data as { entityId: string };
-  const video = await db
-    .selectFrom("videos")
-    .selectAll()
-    .where("id", "=", entityId)
-    .executeTakeFirstOrThrow();
+  const video = effectiveVideoRow(
+    await db
+      .selectFrom("videos")
+      .selectAll()
+      .where("id", "=", entityId)
+      .where("deleted_at", "is", null)
+      .executeTakeFirstOrThrow(),
+  );
   await emitPipelineEvent(db, job, {
     eventType: "progress",
     title: "准备进行 ASR 转写",
@@ -901,6 +985,9 @@ async function runAsrJob(db: Kysely<DB>, job: Job) {
   });
   try {
     const result = await transcribeAudioFile(audio);
+    if (await videoWasDeleted(db, video.id)) {
+      return { skipped: true, reason: "entity_deleted" };
+    }
     await saveTextAsset(db, {
       videoId: video.id,
       source: "asr",
@@ -919,6 +1006,7 @@ async function runAsrJob(db: Kysely<DB>, job: Job) {
       .updateTable("videos")
       .set({ workflow_status: "asr_ready", updated_at: new Date() })
       .where("id", "=", video.id)
+      .where("deleted_at", "is", null)
       .execute();
     await emitPipelineEvent(db, job, {
       eventType: "saved",
@@ -958,11 +1046,14 @@ async function runAsrJob(db: Kysely<DB>, job: Job) {
 
 async function classifyVideoJob(db: Kysely<DB>, job: Job) {
   const { entityId } = job.data as { entityId: string };
-  const video = await db
-    .selectFrom("videos")
-    .selectAll()
-    .where("id", "=", entityId)
-    .executeTakeFirstOrThrow();
+  const video = effectiveVideoRow(
+    await db
+      .selectFrom("videos")
+      .selectAll()
+      .where("id", "=", entityId)
+      .where("deleted_at", "is", null)
+      .executeTakeFirstOrThrow(),
+  );
   const analysisInput = await buildAnalysisInput(db, video);
   await emitPipelineEvent(db, job, {
     eventType: "ai_request_prepared",
@@ -979,6 +1070,9 @@ async function classifyVideoJob(db: Kysely<DB>, job: Job) {
   try {
     envelope = await classifyVideo(analysisInput.request);
   } catch (error) {
+    if (await videoWasDeleted(db, video.id)) {
+      return { skipped: true, reason: "entity_deleted" };
+    }
     if (error instanceof AiWorkerRequestError) {
       await saveFailedAiCalls(
         db,
@@ -989,6 +1083,9 @@ async function classifyVideoJob(db: Kysely<DB>, job: Job) {
       );
     }
     throw error;
+  }
+  if (await videoWasDeleted(db, video.id)) {
+    return { skipped: true, reason: "entity_deleted" };
   }
   const result = videoClassificationResultSchema.parse(envelope.output);
   result.evidence_ids = validEvidenceIds(
@@ -1090,11 +1187,14 @@ async function classifyVideoJob(db: Kysely<DB>, job: Job) {
 
 async function commentSignalsJob(db: Kysely<DB>, job: Job) {
   const { entityId } = job.data as { entityId: string };
-  const video = await db
-    .selectFrom("videos")
-    .selectAll()
-    .where("id", "=", entityId)
-    .executeTakeFirstOrThrow();
+  const video = effectiveVideoRow(
+    await db
+      .selectFrom("videos")
+      .selectAll()
+      .where("id", "=", entityId)
+      .where("deleted_at", "is", null)
+      .executeTakeFirstOrThrow(),
+  );
   const classification = await db
     .selectFrom("video_classifications")
     .selectAll()
@@ -1118,6 +1218,9 @@ async function commentSignalsJob(db: Kysely<DB>, job: Job) {
   try {
     envelope = await extractCommentSignals(analysisInput.request);
   } catch (error) {
+    if (await videoWasDeleted(db, video.id)) {
+      return { skipped: true, reason: "entity_deleted" };
+    }
     if (error instanceof AiWorkerRequestError) {
       await saveFailedAiCalls(
         db,
@@ -1128,6 +1231,9 @@ async function commentSignalsJob(db: Kysely<DB>, job: Job) {
       );
     }
     throw error;
+  }
+  if (await videoWasDeleted(db, video.id)) {
+    return { skipped: true, reason: "entity_deleted" };
   }
   const result = commentSignalExtractionSchema.parse(envelope.output);
   for (const mention of result.shop_name_mentions)
@@ -1207,11 +1313,14 @@ async function commentSignalsJob(db: Kysely<DB>, job: Job) {
 
 async function structureVideoJob(db: Kysely<DB>, job: Job) {
   const { entityId } = job.data as { entityId: string };
-  const video = await db
-    .selectFrom("videos")
-    .selectAll()
-    .where("id", "=", entityId)
-    .executeTakeFirstOrThrow();
+  const video = effectiveVideoRow(
+    await db
+      .selectFrom("videos")
+      .selectAll()
+      .where("id", "=", entityId)
+      .where("deleted_at", "is", null)
+      .executeTakeFirstOrThrow(),
+  );
   const commentSignals = await db
     .selectFrom("comment_signal_extractions")
     .selectAll()
@@ -1243,6 +1352,9 @@ async function structureVideoJob(db: Kysely<DB>, job: Job) {
   try {
     envelope = await structureVideo(analysisInput.request);
   } catch (error) {
+    if (await videoWasDeleted(db, video.id)) {
+      return { skipped: true, reason: "entity_deleted" };
+    }
     if (error instanceof AiWorkerRequestError) {
       await saveFailedAiCalls(
         db,
@@ -1253,6 +1365,9 @@ async function structureVideoJob(db: Kysely<DB>, job: Job) {
       );
     }
     throw error;
+  }
+  if (await videoWasDeleted(db, video.id)) {
+    return { skipped: true, reason: "entity_deleted" };
   }
   const result = videoStructuredAnalysisSchema.parse(envelope.output);
   result.video.evidence_ids = validEvidenceIds(

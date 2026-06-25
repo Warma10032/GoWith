@@ -894,9 +894,18 @@ rejected
 ```
 candidate:    extracted -> poi_matched -> merged (when promoted to draft shop)
 shop:         draft -> approved -> published
-              ↑
-         (no direct promote-to-published; must pass through approved)
+              ↑                    |
+              |                    v
+              +---- hidden <- unpublished
+                    |
+                    +-> draft (submit review)
+
+soft delete: active row -> deleted_at set -> recycle bin -> restore
 ```
+
+已发布店铺不可直接修改。管理员必须先下架为 `hidden`，修改完成后依次提交复审、审核通过并重新发布。软删除只写墓碑字段并隐藏实体；`ai_runs`、`ai_video_analyses`、`evidence` 与历史发布快照保持不可变。
+
+博主与视频的人工修订通过 override 字段保存，B站同步继续更新来源字段。读取与 AI 重跑均使用“人工值优先、来源值兜底”的有效值。
 
 ### 13.3 需要记录的审计字段
 
@@ -966,9 +975,15 @@ AI 输出不能直接写入最终业务表。建议顺序：
 
 ```text
 POST /api/admin/creators
+PATCH /api/admin/creators/:id
+DELETE /api/admin/creators/:id
+POST /api/admin/creators/:id/restore
 POST /api/admin/creators/:id/sync
 GET  /api/admin/videos
 GET  /api/admin/videos/:id
+PATCH /api/admin/videos/:id
+DELETE /api/admin/videos/:id
+POST /api/admin/videos/:id/restore
 POST /api/admin/videos/:id/retry-asr
 POST /api/admin/videos/:id/retry-ai
 POST /api/admin/videos/:id/mark-non-shop
@@ -983,6 +998,13 @@ POST /api/admin/shop-candidates/:id/reject
 GET  /api/admin/shops
 GET  /api/admin/shops/:id
 PATCH /api/admin/shops/:id
+DELETE /api/admin/shops/:id
+POST /api/admin/shops/:id/restore
+POST /api/admin/shops/:id/unpublish
+POST /api/admin/shops/:id/submit-review
+POST /api/admin/shops/:id/reject
+PATCH /api/admin/shops/:id/review-aspects/:aspect
+DELETE /api/admin/shops/:id/review-aspects/:aspect
 POST /api/admin/shops/:id/publish
 POST /api/admin/shops/merge
 ```

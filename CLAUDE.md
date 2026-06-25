@@ -143,6 +143,8 @@ POI 匹配阈值：
 - **原始数据 / 中间结果 / 人工审核 / 前台发布四层分表保存**。`shop_candidates` ≠ `shops`；候选经 POI 匹配 + 审核才成为正式店铺。
 - **AI 输出保留原始 JSON** 在 `ai_runs.output_payload` 和 `ai_video_analyses.analysis_json`，便于调试、回放、模型评估。
 - **前台只读 `shops` 和 `published_shop_snapshots`**，不直接读未审核 AI 中间表。
+- **后台删除统一为软删除**：`creators` / `videos` / `shops` 写入墓碑字段并进入回收站；公共查询强制排除 `deleted_at IS NOT NULL`，原始 AI 输出、证据和发布快照不得级联删除。
+- **人工修订不覆盖外部来源**：博主和视频使用 override 字段；店铺当前展示内容可人工编辑，但每次修改必须写 `review_events`。
 - **POI 强匹配键 = `provider + provider_poi_id`**，坐标体系（GCJ-02 / BD-09 / WGS-84）必须在 `pois.coord_type` 显式标记，禁止混用。
 - **推荐训练数据从第一天记录**：所有曝光 / 点击必须带 `recommendation_request_id` 和 `recommendation_item_id`，`recommendation_items.feature_snapshot` 必须保存当时排序特征。
 
