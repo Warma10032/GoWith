@@ -272,6 +272,10 @@ export function AmapCanvas() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeQueryRef = useRef("");
   const selectedShopIdRef = useRef<string | null>(null);
+  // 始终指向当前最新的 fetchViewportShops / scheduleFetch；初始化 effect 用 ref 访问，
+  // 避免因为 callback 链引用变化导致地图被销毁重建。
+  const fetchViewportShopsRef = useRef<(() => Promise<void>) | null>(null);
+  const scheduleFetchRef = useRef<(() => void) | null>(null);
   const [status, setStatus] = useState<MapStatus>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [shops, setShops] = useState<MapShop[]>([]);
@@ -479,6 +483,14 @@ export function AmapCanvas() {
   }, []);
 
   useEffect(() => {
+    fetchViewportShopsRef.current = () => fetchViewportShops();
+  }, [fetchViewportShops]);
+
+  useEffect(() => {
+    scheduleFetchRef.current = scheduleFetch;
+  }, [scheduleFetch]);
+
+  useEffect(() => {
     let cancelled = false;
     let resizeObserver: ResizeObserver | null = null;
     let initialFetchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -511,25 +523,15 @@ export function AmapCanvas() {
     Promise.all([
       loadAmapSdk(key),
       waitForContainerLayout(container, initializationController.signal),
-      getBrowserLocation().catch(() => null),
     ])
-      .then(([AMap, _layout, browserLocation]) => {
+      .then(([AMap, _layout]) => {
         if (cancelled || containerRef.current !== container) return;
 
-        const initialLocation = browserLocation
-          ? wgs84ToGcj02({
-              lng: browserLocation.lng,
-              lat: browserLocation.lat,
-            })
-          : null;
-
         const map = new AMap.Map(container, {
-          center: initialLocation
-            ? [initialLocation.lng, initialLocation.lat]
-            : [104.195397, 35.86166],
+          center: [104.195397, 35.86166],
           mapStyle: "amap://styles/normal",
           viewMode: "2D",
-          zoom: initialLocation ? 13 : 4,
+          zoom: 4,
           zooms: [3, 18],
         });
 
@@ -542,17 +544,6 @@ export function AmapCanvas() {
           offset: new AMap.Pixel(0, -28),
           closeWhenClickMap: true,
         });
-        if (initialLocation) {
-          const marker = new AMap.Marker({
-            position: [initialLocation.lng, initialLocation.lat],
-            title: "我的位置",
-          });
-          marker.setMap(map);
-          userMarkerRef.current = marker;
-          setLocationStatus("ready");
-        } else {
-          setLocationStatus("error");
-        }
         setStatus("ready");
 
         let initialFetchStarted = false;
@@ -560,13 +551,13 @@ export function AmapCanvas() {
           if (cancelled || initialFetchStarted) return;
           initialFetchStarted = true;
           map.resize();
-          void fetchViewportShops();
+          void fetchViewportShopsRef.current?.();
         };
         map.on("complete", () => {
           fetchInitialViewport();
         });
-        map.on("moveend", scheduleFetch);
-        map.on("zoomend", scheduleFetch);
+        map.on("moveend", () => scheduleFetchRef.current?.());
+        map.on("zoomend", () => scheduleFetchRef.current?.());
 
         resizeObserver = new ResizeObserver(() => map.resize());
         resizeObserver.observe(container);
@@ -579,6 +570,33 @@ export function AmapCanvas() {
         setErrorMessage(
           error instanceof Error ? error.message : "高德地图加载失败",
         );
+      });
+
+    // 定位独立发起：不在地图初始化关键路径上，避免被 home 页共享的
+    // cachedLocationPromise（pending 状态）阻塞整张地图的渲染。
+    getBrowserLocation()
+      .then((location) => {
+        if (cancelled) return;
+        const map = mapRef.current;
+        const AMap = amapRef.current;
+        if (!map || !AMap) return;
+        const gcj02 = wgs84ToGcj02({
+          lng: location.lng,
+          lat: location.lat,
+        });
+        userMarkerRef.current?.setMap(null);
+        const marker = new AMap.Marker({
+          position: [gcj02.lng, gcj02.lat],
+          title: "我的位置",
+        });
+        marker.setMap(map);
+        userMarkerRef.current = marker;
+        map.setZoomAndCenter(13, [gcj02.lng, gcj02.lat]);
+        setLocationStatus("ready");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLocationStatus("error");
       });
 
     return () => {
@@ -597,7 +615,7 @@ export function AmapCanvas() {
       mapRef.current = null;
       amapRef.current = null;
     };
-  }, [fetchViewportShops, scheduleFetch]);
+  }, []);
 
   async function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
