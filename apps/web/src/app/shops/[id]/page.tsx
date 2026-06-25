@@ -241,7 +241,6 @@ export default async function ShopPage({
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
             <Info title="位置" icon={MapPin} value={location || "待确认"} />
             <Info title="品类" value={category || "暂无"} />
-            <Info title="证据条数" value={`${data.evidence_count} 条`} />
             <Info
               title="高德评分"
               value={
@@ -374,27 +373,6 @@ export default async function ShopPage({
                 ))
               ) : (
                 <p className="text-sm text-muted">发布后会显示 B站来源视频。</p>
-              )}
-            </div>
-          </section>
-
-          <section className="rounded-lg border border-line bg-white p-5">
-            <h2 className="font-semibold">证据片段</h2>
-            <div className="mt-3 space-y-2 text-sm text-muted">
-              {data.evidence.length ? (
-                data.evidence.map((evidence, index) => (
-                  <p
-                    key={evidence.id ?? `${evidence.source}-${index}`}
-                    className="rounded-lg border border-line p-3"
-                  >
-                    <span className="mr-2 rounded bg-[#f7efe8] px-1.5 py-0.5 text-xs font-medium text-brand">
-                      {evidence.source}
-                    </span>
-                    {evidence.text_excerpt}
-                  </p>
-                ))
-              ) : (
-                <p>暂无可展示证据，后台审核后补齐。</p>
               )}
             </div>
           </section>

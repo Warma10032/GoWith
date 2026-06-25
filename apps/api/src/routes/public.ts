@@ -4,7 +4,6 @@ import { sql } from "kysely";
 import { z } from "zod";
 import {
   createUserEventSchema,
-  collectCandidateEvidenceIds,
   favoriteRequestSchema,
   wgs84ToGcj02,
 } from "@gowith/shared";
@@ -159,13 +158,17 @@ async function getSourceVideosByShopIds(
     .select([
       "shop_video_mentions.shop_id",
       "videos.id as video_id",
-      "videos.title",
+      sql<string>`COALESCE(videos.title_override, videos.title)`.as("title"),
       "videos.source_url",
       "videos.bvid",
       "videos.cover_url",
-      "creators.name as creator_name",
+      sql<string>`COALESCE(creators.name_override, creators.name)`.as(
+        "creator_name",
+      ),
     ])
     .where("shop_video_mentions.shop_id", "in", shopIds)
+    .where("videos.deleted_at", "is", null)
+    .where("creators.deleted_at", "is", null)
     .orderBy("videos.published_at", "desc")
     .execute();
 
@@ -222,21 +225,25 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
       .leftJoin("shops", (join) =>
         join
           .onRef("shops.id", "=", "shop_video_mentions.shop_id")
-          .on("shops.status", "=", "published"),
+          .on("shops.status", "=", "published")
+          .on("shops.deleted_at", "is", null),
       )
       .select([
         "creators.id",
         "creators.bilibili_uid",
-        "creators.name",
+        sql<string>`COALESCE(creators.name_override, creators.name)`.as("name"),
         "creators.avatar_url",
         "creators.profile_url",
-        "creators.bio",
+        sql<string | null>`COALESCE(creators.bio_override, creators.bio)`.as(
+          "bio",
+        ),
         "creators.follower_count",
         "creators.status",
         "creators.last_synced_at",
         (eb) => eb.fn.count<number>("shops.id").distinct().as("shop_count"),
       ])
       .where("creators.status", "=", "active")
+      .where("creators.deleted_at", "is", null)
       .groupBy("creators.id")
       .orderBy("creators.created_at", "desc")
       .limit(100)
@@ -263,6 +270,8 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
       .selectFrom("creators")
       .selectAll()
       .where("id", "=", params.data.id)
+      .where("status", "=", "active")
+      .where("deleted_at", "is", null)
       .executeTakeFirst();
     if (!creator)
       throw new HttpError(404, "creator_not_found", "Creator not found");
@@ -287,12 +296,16 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
         "shops.status",
         "videos.published_at as latest_video_published_at",
         "videos.id as latest_video_id",
-        "videos.title as latest_video_title",
+        sql<string>`COALESCE(videos.title_override, videos.title)`.as(
+          "latest_video_title",
+        ),
         "videos.bvid as latest_video_bvid",
         "videos.source_url as latest_video_source_url",
       ])
       .where("shop_video_mentions.creator_id", "=", params.data.id)
       .where("shops.status", "=", "published")
+      .where("shops.deleted_at", "is", null)
+      .where("videos.deleted_at", "is", null)
       .distinctOn("shops.id")
       .orderBy("shops.id")
       .orderBy("videos.published_at", "desc")
@@ -304,7 +317,11 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
       getShopSupplementsByIds(app, shopIds),
     ]);
     return {
-      creator,
+      creator: {
+        ...creator,
+        name: creator.name_override ?? creator.name,
+        bio: creator.bio_override ?? creator.bio,
+      },
       shops: attachShopSupplements(
         attachSourceVideos(shops, videosByShop),
         supplements,
@@ -327,15 +344,18 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
         app.db
           .selectFrom("shops")
           .where("status", "=", "published")
+          .where("deleted_at", "is", null)
           .select((eb) => eb.fn.countAll<string>().as("count"))
           .executeTakeFirst(),
         app.db
           .selectFrom("creators")
           .where("status", "=", "active")
+          .where("deleted_at", "is", null)
           .select((eb) => eb.fn.countAll<string>().as("count"))
           .executeTakeFirst(),
         app.db
           .selectFrom("videos")
+          .where("deleted_at", "is", null)
           .select((eb) => eb.fn.countAll<string>().as("count"))
           .executeTakeFirst(),
         app.db
@@ -344,7 +364,7 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
           .executeTakeFirst(),
         sql<{
           count: string;
-        }>`SELECT COUNT(DISTINCT city) AS count FROM shops WHERE status = 'published' AND city IS NOT NULL`.execute(
+        }>`SELECT COUNT(DISTINCT city) AS count FROM shops WHERE status = 'published' AND deleted_at IS NULL AND city IS NOT NULL`.execute(
           app.db,
         ),
       ]);
@@ -397,7 +417,8 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
     const baseShopQuery = app.db
       .selectFrom("shops")
       .selectAll()
-      .where("status", "=", "published");
+      .where("status", "=", "published")
+      .where("deleted_at", "is", null);
     const shops = gcjLocation
       ? await baseShopQuery
           .select(
@@ -473,6 +494,7 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
       FROM shops
       ${creatorId ? sql`INNER JOIN shop_video_mentions svm_filter ON svm_filter.shop_id = shops.id` : sql``}
       WHERE shops.status = 'published'
+        AND shops.deleted_at IS NULL
         AND shops.geom && ST_MakeEnvelope(${minLng}, ${minLat}, ${maxLng}, ${maxLat}, 4326)
         ${q ? sql`AND (shops.display_name ILIKE ${`%${q}%`} OR shops.address ILIKE ${`%${q}%`} OR shops.city ILIKE ${`%${q}%`} OR shops.district ILIKE ${`%${q}%`} OR shops.display_name % ${q})` : sql``}
         ${creatorId ? sql`AND svm_filter.creator_id = ${creatorId}` : sql``}
@@ -509,6 +531,7 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
         ) AS rank_score
       FROM shops
       WHERE status = 'published'
+        AND deleted_at IS NULL
         AND (
           display_name ILIKE ${`%${q}%`}
           OR address ILIKE ${`%${q}%`}
@@ -545,6 +568,7 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
       .selectAll()
       .where("id", "=", params.data.id)
       .where("status", "=", "published")
+      .where("deleted_at", "is", null)
       .executeTakeFirst();
     if (!shop) throw new HttpError(404, "shop_not_found", "Shop not found");
     const [mentions, supplements] = await Promise.all([
@@ -554,73 +578,23 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
         .innerJoin("creators", "creators.id", "shop_video_mentions.creator_id")
         .select([
           "videos.id as video_id",
-          "videos.title",
+          sql<string>`COALESCE(videos.title_override, videos.title)`.as("title"),
           "videos.source_url",
           "videos.bvid",
           "videos.cover_url",
-          "creators.name as creator_name",
-          "shop_video_mentions.shop_candidate_id",
-          "shop_video_mentions.evidence_ids",
+          sql<string>`COALESCE(creators.name_override, creators.name)`.as(
+            "creator_name",
+          ),
         ])
         .where("shop_video_mentions.shop_id", "=", params.data.id)
+        .where("videos.deleted_at", "is", null)
+        .where("creators.deleted_at", "is", null)
         .execute(),
       getShopSupplementsByIds(app, [shop.id]),
     ]);
-    const evidenceIds = new Set(
-      mentions.flatMap((mention) => mention.evidence_ids),
-    );
-    const legacyCandidateIds = mentions.flatMap((mention) =>
-      mention.evidence_ids.length === 0 && mention.shop_candidate_id
-        ? [mention.shop_candidate_id]
-        : [],
-    );
-    if (legacyCandidateIds.length) {
-      const candidates = await app.db
-        .selectFrom("shop_candidates")
-        .select(["card_payload", "review_dimensions", "comment_summary"])
-        .where("id", "in", legacyCandidateIds)
-        .execute();
-      for (const candidate of candidates) {
-        for (const id of collectCandidateEvidenceIds(candidate)) {
-          evidenceIds.add(id);
-        }
-      }
-    }
-    const evidenceRows = evidenceIds.size
-      ? await app.db
-          .selectFrom("evidence")
-          .select([
-            "id",
-            "source",
-            "text_excerpt",
-            "start_sec",
-            "end_sec",
-            "confidence",
-            "created_at",
-          ])
-          .where("id", "in", [...evidenceIds])
-          .orderBy("created_at", "asc")
-          .execute()
-      : [];
     return {
       shop: attachShopSupplements([shop], supplements)[0],
-      mentions: mentions.map(
-        ({
-          shop_candidate_id: _candidateId,
-          evidence_ids: _evidenceIds,
-          ...mention
-        }) => mention,
-      ),
-      evidence_count: evidenceRows.length,
-      evidence: evidenceRows
-        .slice(0, 20)
-        .map(({ created_at: _createdAt, ...evidence }) => ({
-          ...evidence,
-          text_excerpt:
-            evidence.source === "comment"
-              ? "评论区聚合证据（原文不公开）"
-              : evidence.text_excerpt,
-        })),
+      mentions,
     };
   });
 
