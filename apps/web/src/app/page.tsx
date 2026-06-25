@@ -40,32 +40,28 @@ function SiteMetrics({ stats }: { stats: StatsPayload }) {
     {
       label: "已发布店铺",
       value: counts.shops_published,
-      hint: "published",
       Icon: Store,
     },
     {
       label: "覆盖城市",
       value: counts.cities_covered,
-      hint: "distinct cities",
       Icon: MapPin,
     },
     {
       label: "活跃博主",
       value: counts.creators_active,
-      hint: "active creators",
       Icon: UserRound,
     },
     {
       label: "已索引视频",
       value: counts.videos_total,
-      hint: "videos",
       Icon: Video,
     },
   ];
   return (
     <div className="rounded-lg border border-line bg-white p-3">
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-        {cards.map(({ label, value, hint, Icon }) => (
+        {cards.map(({ label, value, Icon }) => (
           <div
             key={label}
             className="flex items-center gap-3 rounded-lg border border-line bg-[#faf8f5] px-4 py-3"
@@ -78,7 +74,6 @@ function SiteMetrics({ stats }: { stats: StatsPayload }) {
                 {value}
               </div>
               <div className="mt-0.5 text-xs text-muted">{label}</div>
-              <div className="text-[10px] text-muted">{hint}</div>
             </div>
           </div>
         ))}
