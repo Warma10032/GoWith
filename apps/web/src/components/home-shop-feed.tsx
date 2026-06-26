@@ -3,7 +3,11 @@
 import { Compass, LoaderCircle, LocateFixed, MapPin } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiBaseUrl, type ShopCardData } from "@/lib/api";
-import { getBrowserLocation } from "@/lib/browser-location";
+import {
+  getBrowserLocation,
+  getCachedBrowserLocation,
+  type BrowserLocation,
+} from "@/lib/browser-location";
 import { ShopCard } from "./shop-card";
 
 type RecommendedPayload = {
@@ -13,31 +17,40 @@ type RecommendedPayload = {
 
 export function HomeShopFeed() {
   const requestVersion = useRef(0);
+  const backgroundLocationStarted = useRef(false);
   const [payload, setPayload] = useState<RecommendedPayload | null>(null);
-  const [busy, setBusy] = useState<string | null>("正在获取位置");
+  const [busy, setBusy] = useState<string | null>("正在加载推荐");
   const [locationMessage, setLocationMessage] = useState<string | null>(null);
 
   const load = useCallback(async (forceLocation = false) => {
     const version = ++requestVersion.current;
-    setBusy("正在获取位置");
+    setBusy(forceLocation ? "正在获取位置" : "正在加载推荐");
     setLocationMessage(null);
 
     let query = "";
-    try {
-      const location = await getBrowserLocation(forceLocation);
+    const applyLocation = (location: BrowserLocation) => {
       const params = new URLSearchParams({
         lng: String(location.lng),
         lat: String(location.lat),
         coord_type: location.coordType,
       });
       query = `?${params.toString()}`;
-      setBusy("正在按距离加载店铺");
       setLocationMessage(
         `已按当前位置排序 · 精度约 ${Math.round(location.accuracy)} m`,
       );
-    } catch {
-      setBusy("正在加载默认推荐");
-      setLocationMessage("未获得定位，当前按发布时间排序");
+    };
+
+    const cachedLocation = forceLocation ? null : getCachedBrowserLocation();
+    if (cachedLocation) {
+      applyLocation(cachedLocation);
+    } else if (forceLocation) {
+      try {
+        applyLocation(await getBrowserLocation(true));
+      } catch {
+        setLocationMessage("未获得定位，当前按发布时间排序");
+      }
+    } else {
+      setLocationMessage("当前按发布时间排序，定位会在后台更新");
     }
 
     try {
@@ -61,6 +74,15 @@ export function HomeShopFeed() {
       }
     } finally {
       if (version === requestVersion.current) setBusy(null);
+    }
+
+    if (!forceLocation && !cachedLocation && !backgroundLocationStarted.current) {
+      backgroundLocationStarted.current = true;
+      void getBrowserLocation()
+        .then(() => {
+          if (version === requestVersion.current) void load(false);
+        })
+        .catch(() => undefined);
     }
   }, []);
 
