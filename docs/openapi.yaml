@@ -104,6 +104,42 @@ paths:
           description: Cookie pool health-check job enqueued.
         "409":
           description: task_already_running (same health-check task is already queued or running).
+  /api/admin/scheduled-tasks:
+    get:
+      summary: List built-in scheduled tasks
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: Built-in scheduled task catalog with last run and next estimated run.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tasks]
+                properties:
+                  tasks:
+                    type: array
+                    items: { $ref: "#/components/schemas/ScheduledTask" }
+  /api/admin/scheduled-tasks/{id}/run:
+    post:
+      summary: Manually enqueue one built-in scheduled task
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [bilibili_cookie_health_check, cleanup_ai_runs, cleanup_task_logs]
+      responses:
+        "202":
+          description: Scheduled task run enqueued.
+        "404":
+          description: scheduled_task_not_found
+        "409":
+          description: task_already_running
   /api/admin/creators:
     get:
       summary: List managed creators with optional search
@@ -943,6 +979,44 @@ components:
               url:
                 type: string
                 format: uri
+    ScheduledTask:
+      type: object
+      required:
+        [
+          id,
+          name,
+          description,
+          job_name,
+          run_type,
+          interval_ms,
+          interval_label,
+          retention_days,
+          enabled,
+          next_run_at,
+          last_run
+        ]
+      properties:
+        id:
+          type: string
+          enum: [bilibili_cookie_health_check, cleanup_ai_runs, cleanup_task_logs]
+        name: { type: string }
+        description: { type: string }
+        job_name:
+          type: string
+          enum: [check_bilibili_auth_pool, cleanup_ai_runs, cleanup_task_logs]
+        run_type:
+          type: string
+          enum: [bilibili_auth_check, scheduled_ai_runs_cleanup, scheduled_task_logs_cleanup]
+        interval_ms: { type: integer }
+        interval_label: { type: string }
+        retention_days: { type: [integer, "null"] }
+        enabled: { type: boolean }
+        next_run_at: { type: [string, "null"], format: date-time }
+        last_run:
+          oneOf:
+            - type: "null"
+            - type: object
+              additionalProperties: true
     LoginRequest:
       type: object
       required: [email, password]

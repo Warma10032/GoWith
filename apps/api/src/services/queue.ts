@@ -21,7 +21,9 @@ export type JobName =
   | "classify_video"
   | "extract_comment_signals"
   | "structure_video"
-  | "match_poi";
+  | "match_poi"
+  | "cleanup_ai_runs"
+  | "cleanup_task_logs";
 
 function redisConnectionOptions(redisUrl: string): ConnectionOptions {
   const url = new URL(redisUrl);
@@ -45,13 +47,15 @@ type PipelineRunType =
   | "video_processing"
   | "video_asr_retry"
   | "video_ai_retry"
-  | "poi_match";
+  | "poi_match"
+  | "scheduled_ai_runs_cleanup"
+  | "scheduled_task_logs_cleanup";
 
 interface PipelineRunInput {
   runType: PipelineRunType;
   entityType: string;
   entityId: string;
-  triggeredBy: string;
+  triggeredBy: string | null;
   summary?: Record<string, unknown>;
 }
 

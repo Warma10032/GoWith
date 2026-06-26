@@ -12,6 +12,9 @@ import {
 import {
   collectCandidateEvidenceIds,
   createCreatorRequestSchema,
+  findScheduledTaskDefinition,
+  formatIntervalMs,
+  scheduledTaskDefinitions,
 } from "@gowith/shared";
 import { HttpError } from "../lib/http";
 import { encryptSecret } from "../services/crypto";
@@ -510,6 +513,75 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
         triggeredBy: admin.id,
       },
       "check_bilibili_auth_pool",
+    );
+    return acceptedTask(reply, run, job.data.db_job_id ?? job.id);
+  });
+
+  app.get("/scheduled-tasks", async (request) => {
+    await requireAdmin(app.db, request);
+    const tasks = await Promise.all(
+      scheduledTaskDefinitions.map(async (task) => {
+        const lastRun = await app.db
+          .selectFrom("pipeline_runs")
+          .selectAll()
+          .where("run_type", "=", task.runType)
+          .where("entity_type", "=", "system")
+          .where("entity_id", "=", SYSTEM_TASK_ENTITY_ID)
+          .where(sql<boolean>`summary_json->>'scheduled_task_id' = ${task.id}`)
+          .orderBy("created_at", "desc")
+          .executeTakeFirst();
+        const lastStartedAt =
+          lastRun?.started_at ?? lastRun?.created_at ?? null;
+        const nextRunAt =
+          task.enabled && lastStartedAt
+            ? new Date(lastStartedAt.getTime() + task.intervalMs)
+            : task.enabled
+              ? new Date()
+              : null;
+        return {
+          id: task.id,
+          name: task.name,
+          description: task.description,
+          job_name: task.jobName,
+          run_type: task.runType,
+          interval_ms: task.intervalMs,
+          interval_label: formatIntervalMs(task.intervalMs),
+          retention_days: task.retentionDays ?? null,
+          enabled: task.enabled,
+          next_run_at: nextRunAt?.toISOString() ?? null,
+          last_run: lastRun ?? null,
+        };
+      }),
+    );
+    return { tasks };
+  });
+
+  app.post("/scheduled-tasks/:id/run", async (request, reply) => {
+    const params = z.object({ id: z.string().trim().min(1) }).parse(request.params);
+    const admin = await requireAdmin(app.db, request);
+    const task = findScheduledTaskDefinition(params.id);
+    if (!task) {
+      throw new HttpError(404, "scheduled_task_not_found", "Scheduled task not found");
+    }
+    const payload: Record<string, unknown> = {
+      scheduled_task_id: task.id,
+    };
+    if (task.retentionDays) payload.retentionDays = task.retentionDays;
+    const { run, job } = await enqueuePipelineRunJob(
+      app.db,
+      {
+        runType: task.runType,
+        entityType: "system",
+        entityId: SYSTEM_TASK_ENTITY_ID,
+        triggeredBy: admin.id,
+        summary: {
+          scheduled_task_id: task.id,
+          trigger: "manual",
+          retention_days: task.retentionDays ?? null,
+        },
+      },
+      task.jobName,
+      payload,
     );
     return acceptedTask(reply, run, job.data.db_job_id ?? job.id);
   });

@@ -30,6 +30,7 @@ import {
 import { searchAmapPoi } from "../adapters/poi";
 import { env } from "../env";
 import { pipelineQueue } from "../queue";
+import { cleanupAiRunsJob, cleanupTaskLogsJob } from "./cleanup";
 
 export async function handlePipelineJob(db: Kysely<DB>, job: Job) {
   if (await jobTargetsDeletedEntity(db, job)) {
@@ -56,13 +57,23 @@ export async function handlePipelineJob(db: Kysely<DB>, job: Job) {
       return structureVideoJob(db, job);
     case "match_poi":
       return matchPoiJob(db, job);
+    case "cleanup_ai_runs": {
+      const result = await cleanupAiRunsJob(db, job);
+      await finishRunIfTerminal(db, job, result);
+      return result;
+    }
+    case "cleanup_task_logs": {
+      const result = await cleanupTaskLogsJob(db, job);
+      await finishRunIfTerminal(db, job, result);
+      return result;
+    }
     default:
       throw new Error(`Unsupported pipeline job: ${job.name}`);
   }
 }
 
 async function jobTargetsDeletedEntity(db: Kysely<DB>, job: Job) {
-  const entityId = (job.data as { entityId?: string }).entityId;
+  const entityId = (job.data as { entityId?: string } | undefined)?.entityId;
   if (!entityId) return false;
   if (["sync_creator_profile", "sync_creator_videos"].includes(job.name)) {
     const creator = await db

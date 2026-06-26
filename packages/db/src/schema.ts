@@ -174,7 +174,9 @@ export interface PipelineRunsTable {
     | "video_processing"
     | "video_asr_retry"
     | "video_ai_retry"
-    | "poi_match";
+    | "poi_match"
+    | "scheduled_ai_runs_cleanup"
+    | "scheduled_task_logs_cleanup";
   entity_type: string;
   entity_id: string;
   status: "queued" | "running" | "success" | "failed" | "cancelled";
