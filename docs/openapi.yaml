@@ -132,7 +132,8 @@ paths:
           required: true
           schema:
             type: string
-            enum: [bilibili_cookie_health_check, cleanup_ai_runs, cleanup_task_logs]
+            enum:
+              [bilibili_cookie_health_check, cleanup_ai_runs, cleanup_task_logs]
       responses:
         "202":
           description: Scheduled task run enqueued.
@@ -219,7 +220,8 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/DeleteEntityRequest" }
       responses:
-        "200": { description: Creator and affected videos soft deleted and audited. }
+        "200":
+          { description: Creator and affected videos soft deleted and audited. }
         "409": { description: version_conflict or already_deleted }
   /api/admin/creators/{id}/restore:
     post:
@@ -229,7 +231,10 @@ paths:
       parameters:
         - $ref: "#/components/parameters/UuidId"
       responses:
-        "200": { description: Creator restored as paused; matching batch videos restored. }
+        "200":
+          {
+            description: Creator restored as paused; matching batch videos restored.,
+          }
   /api/admin/creators/{id}/videos:
     get:
       summary: List all videos for a creator as admin cards
@@ -317,7 +322,10 @@ paths:
       parameters:
         - $ref: "#/components/parameters/UuidId"
       responses:
-        "200": { description: Video restored without auto-publishing affected shops. }
+        "200":
+          {
+            description: Video restored without auto-publishing affected shops.,
+          }
   /api/admin/videos/{id}/process:
     post:
       summary: Start observable video processing pipeline
@@ -618,7 +626,10 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/DeleteEntityRequest" }
       responses:
-        "200": { description: Shop soft deleted and audited; immutable snapshots retained. }
+        "200":
+          {
+            description: Shop soft deleted and audited; immutable snapshots retained.,
+          }
         "409": { description: version_conflict or already_deleted }
   /api/admin/shops/{id}/restore:
     post:
@@ -628,7 +639,10 @@ paths:
       parameters:
         - $ref: "#/components/parameters/UuidId"
       responses:
-        "200": { description: Shop restored as hidden and requires review before publication. }
+        "200":
+          {
+            description: Shop restored as hidden and requires review before publication.,
+          }
   /api/admin/shops/{id}/unpublish:
     post:
       summary: Take a published shop offline as hidden
@@ -684,7 +698,8 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/UpdateReviewAspectRequest" }
       responses:
-        "200": { description: Current aggregated review aspect updated and audited. }
+        "200":
+          { description: Current aggregated review aspect updated and audited. }
     delete:
       summary: Remove one current shop review aspect without deleting AI evidence
       security:
@@ -701,7 +716,10 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/VersionedActionRequest" }
       responses:
-        "200": { description: Current aspect removed and audited; original AI rows retained. }
+        "200":
+          {
+            description: Current aspect removed and audited; original AI rows retained.,
+          }
   /api/admin/shops/{id}/external-links/dianping:
     put:
       summary: Bind or replace a confirmed Dianping shop link
@@ -817,9 +835,88 @@ paths:
         - name: anonymous_id
           in: query
           schema: { type: string }
+        - name: sort
+          in: query
+          schema:
+            {
+              type: string,
+              enum:
+                [
+                  recommended,
+                  distance,
+                  latest,
+                  ai_score,
+                  amap_rating,
+                  price_asc,
+                  price_desc,
+                ],
+              default: recommended,
+            }
+          description: User-selected sort. `recommended` keeps the existing recency or distance-aware default.
+        - name: city
+          in: query
+          schema: { type: string }
+          description: Optional province or city text filter over published shops. Province inputs expand to the maintained China province-city map.
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum:
+              - 中餐
+              - 地方特色菜
+              - 火锅
+              - 烧烤
+              - 海鲜
+              - 自助餐
+              - 小吃快餐
+              - 粉面粥
+              - 甜品饮品
+              - 咖啡烘焙
+              - 西餐
+              - 日本料理
+              - 韩国料理
+              - 东南亚菜
+              - 素食
+              - 其他餐饮
+              - 鲁菜
+              - 粤菜
+              - 潮汕菜
+              - 客家菜
+              - 川菜
+              - 湘菜
+              - 江浙菜
+              - 东北菜
+              - 西北菜
+              - 云贵菜
+              - 新疆菜
+              - 清真菜
+              - 家常菜
+              - 私房菜
+              - 农家菜
+              - 创意菜
+          description: Optional exact primary category or secondary cuisine from the shop-analysis prompt taxonomy.
+        - name: creator_id
+          in: query
+          schema: { type: string, format: uuid }
+          description: Optional creator filter through shop video mentions.
+        - name: min_avg_cost
+          in: query
+          schema: { type: number, minimum: 0 }
+          description: Minimum AMap average cost.
+        - name: max_avg_cost
+          in: query
+          schema: { type: number, minimum: 0 }
+          description: Maximum AMap average cost.
+        - name: has_dianping
+          in: query
+          schema: { type: boolean }
+          description: When true, only return shops with confirmed Dianping links.
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 30 }
       responses:
         "200":
-          description: Recommendation request and ranked shops. With location, shops are ordered by `distance_m`; otherwise published recency is used. Each shop includes `source_videos`, confirmed `external_links`, and source-labelled `poi_business` data.
+          description: Recommendation request and ranked shops. Supports user-selected sorting and filters. With default sorting and location, shops are ordered by `distance_m`; otherwise published recency is used. Each shop includes `source_videos`, confirmed `external_links`, and source-labelled `poi_business` data.
   /api/shops/map:
     get:
       summary: Get published shops in a map viewport with source videos
@@ -993,12 +1090,13 @@ components:
           retention_days,
           enabled,
           next_run_at,
-          last_run
+          last_run,
         ]
       properties:
         id:
           type: string
-          enum: [bilibili_cookie_health_check, cleanup_ai_runs, cleanup_task_logs]
+          enum:
+            [bilibili_cookie_health_check, cleanup_ai_runs, cleanup_task_logs]
         name: { type: string }
         description: { type: string }
         job_name:
@@ -1006,7 +1104,12 @@ components:
           enum: [check_bilibili_auth_pool, cleanup_ai_runs, cleanup_task_logs]
         run_type:
           type: string
-          enum: [bilibili_auth_check, scheduled_ai_runs_cleanup, scheduled_task_logs_cleanup]
+          enum:
+            [
+              bilibili_auth_check,
+              scheduled_ai_runs_cleanup,
+              scheduled_task_logs_cleanup,
+            ]
         interval_ms: { type: integer }
         interval_label: { type: string }
         retention_days: { type: [integer, "null"] }

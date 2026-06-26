@@ -21,7 +21,11 @@ import {
 } from "react";
 import { wgs84ToGcj02 } from "@gowith/shared";
 import { apiBaseUrl } from "@/lib/api";
-import { getBrowserLocation } from "@/lib/browser-location";
+import {
+  getBrowserLocation,
+  getCachedBrowserLocation,
+  type BrowserLocation,
+} from "@/lib/browser-location";
 
 type SourceVideo = {
   video_id?: string;
@@ -196,7 +200,7 @@ declare global {
 }
 
 type MapStatus = "idle" | "loading" | "ready" | "error" | "missing-key";
-type LocationStatus = "locating" | "ready" | "error";
+type LocationStatus = "idle" | "locating" | "ready" | "error";
 
 function lngLatValue(value: LngLat, axis: "lng" | "lat") {
   const getter = axis === "lng" ? value.getLng : value.getLat;
@@ -284,8 +288,7 @@ export function AmapCanvas() {
   const [selectedShopId, setSelectedShopId] = useState<string | null>(null);
   const [loadingPins, setLoadingPins] = useState(false);
   const [panelError, setPanelError] = useState<string | null>(null);
-  const [locationStatus, setLocationStatus] =
-    useState<LocationStatus>("locating");
+  const [locationStatus, setLocationStatus] = useState<LocationStatus>("idle");
 
   const selectedShop = useMemo(
     () => shops.find((shop) => shop.id === selectedShopId) ?? null,
@@ -457,30 +460,37 @@ export function AmapCanvas() {
     }, 350);
   }, [fetchViewportShops]);
 
-  const locateUser = useCallback(async (force = true) => {
+  const showUserLocation = useCallback((location: BrowserLocation) => {
     const map = mapRef.current;
     const AMap = amapRef.current;
-    if (!map || !AMap) return;
-    setLocationStatus("locating");
-    try {
-      const browserLocation = await getBrowserLocation(force);
-      const location = wgs84ToGcj02({
-        lng: browserLocation.lng,
-        lat: browserLocation.lat,
-      });
-      userMarkerRef.current?.setMap(null);
-      const marker = new AMap.Marker({
-        position: [location.lng, location.lat],
-        title: "我的位置",
-      });
-      marker.setMap(map);
-      userMarkerRef.current = marker;
-      map.setZoomAndCenter(13, [location.lng, location.lat]);
-      setLocationStatus("ready");
-    } catch {
-      setLocationStatus("error");
-    }
+    if (!map || !AMap) return false;
+    const gcj02 = wgs84ToGcj02({
+      lng: location.lng,
+      lat: location.lat,
+    });
+    userMarkerRef.current?.setMap(null);
+    const marker = new AMap.Marker({
+      position: [gcj02.lng, gcj02.lat],
+      title: "我的位置",
+    });
+    marker.setMap(map);
+    userMarkerRef.current = marker;
+    map.setZoomAndCenter(13, [gcj02.lng, gcj02.lat]);
+    return true;
   }, []);
+
+  const locateUser = useCallback(
+    async (force = true) => {
+      setLocationStatus("locating");
+      try {
+        const browserLocation = await getBrowserLocation(force);
+        setLocationStatus(showUserLocation(browserLocation) ? "ready" : "idle");
+      } catch {
+        setLocationStatus("error");
+      }
+    },
+    [showUserLocation],
+  );
 
   useEffect(() => {
     fetchViewportShopsRef.current = () => fetchViewportShops();
@@ -563,6 +573,15 @@ export function AmapCanvas() {
         resizeObserver.observe(container);
         postMountFrame = requestAnimationFrame(() => map.resize());
         initialFetchTimer = setTimeout(fetchInitialViewport, 500);
+
+        const cachedLocation = getCachedBrowserLocation();
+        if (cachedLocation) {
+          setLocationStatus(
+            showUserLocation(cachedLocation) ? "ready" : "idle",
+          );
+        } else {
+          setLocationStatus("idle");
+        }
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -570,33 +589,6 @@ export function AmapCanvas() {
         setErrorMessage(
           error instanceof Error ? error.message : "高德地图加载失败",
         );
-      });
-
-    // 定位独立发起：不在地图初始化关键路径上，避免被 home 页共享的
-    // cachedLocationPromise（pending 状态）阻塞整张地图的渲染。
-    getBrowserLocation()
-      .then((location) => {
-        if (cancelled) return;
-        const map = mapRef.current;
-        const AMap = amapRef.current;
-        if (!map || !AMap) return;
-        const gcj02 = wgs84ToGcj02({
-          lng: location.lng,
-          lat: location.lat,
-        });
-        userMarkerRef.current?.setMap(null);
-        const marker = new AMap.Marker({
-          position: [gcj02.lng, gcj02.lat],
-          title: "我的位置",
-        });
-        marker.setMap(map);
-        userMarkerRef.current = marker;
-        map.setZoomAndCenter(13, [gcj02.lng, gcj02.lat]);
-        setLocationStatus("ready");
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setLocationStatus("error");
       });
 
     return () => {
@@ -615,7 +607,7 @@ export function AmapCanvas() {
       mapRef.current = null;
       amapRef.current = null;
     };
-  }, []);
+  }, [showUserLocation]);
 
   async function handleSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -656,10 +648,10 @@ export function AmapCanvas() {
           正在执行：{busyLabel}（其它操作按钮已禁用）
         </div>
       ) : null}
-      <div className="relative min-h-[420px] overflow-hidden rounded-lg border border-line bg-map md:min-h-[620px]">
+      <div className="relative h-[420px] min-h-[420px] overflow-hidden rounded-lg border border-line bg-map md:h-[620px] md:min-h-[620px]">
         <div
           ref={containerRef}
-          className="absolute inset-0"
+          className="absolute inset-0 h-full w-full"
           aria-label="高德地图"
         />
         {status !== "ready" ? (
@@ -718,7 +710,7 @@ export function AmapCanvas() {
           ) : (
             <LocateFixed size={15} />
           )}
-          {locationStatus === "ready" ? "已定位" : "重新定位"}
+          {locationStatus === "ready" ? "已定位" : "定位"}
         </button>
       </div>
 
@@ -781,7 +773,9 @@ export function AmapCanvas() {
             ? "地图已以当前位置为中心，左下角比例尺会随缩放保持真实距离。"
             : locationStatus === "locating"
               ? "正在获取当前位置…"
-              : "未获得定位，当前显示全国视图。"}
+              : locationStatus === "idle"
+                ? "当前显示全国视图；需要当前位置时可手动定位。"
+                : "未获得定位，当前显示全国视图。"}
         </p>
 
         {panelError ? (

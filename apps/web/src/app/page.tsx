@@ -1,7 +1,6 @@
-import { MapPin, Store, UserRound, Video } from "lucide-react";
+import { Suspense } from "react";
 import { TopNav } from "@/components/top-nav";
-import { HomeFilters } from "@/components/home-filters";
-import { HomeShopFeed } from "@/components/home-shop-feed";
+import { HomeRecommendationShell } from "@/components/home-recommendation-shell";
 import { apiFetch } from "@/lib/api";
 
 interface StatsPayload {
@@ -22,78 +21,15 @@ export default async function HomePage() {
   return (
     <main>
       <TopNav />
-      <section className="mx-auto grid max-w-7xl gap-6 px-4 py-6 lg:grid-cols-[280px_1fr]">
-        <HomeFilters />
-
-        <section className="space-y-4">
-          {stats ? <SiteMetrics stats={stats} /> : null}
-          <HomeShopFeed />
-        </section>
-      </section>
+      <Suspense
+        fallback={
+          <section className="mx-auto max-w-7xl px-4 py-6 text-sm text-muted">
+            正在加载推荐筛选…
+          </section>
+        }
+      >
+        <HomeRecommendationShell stats={stats} />
+      </Suspense>
     </main>
   );
-}
-
-function SiteMetrics({ stats }: { stats: StatsPayload }) {
-  const { counts } = stats;
-  const cards = [
-    {
-      label: "已发布店铺",
-      value: counts.shops_published,
-      Icon: Store,
-    },
-    {
-      label: "覆盖城市",
-      value: counts.cities_covered,
-      Icon: MapPin,
-    },
-    {
-      label: "活跃博主",
-      value: counts.creators_active,
-      Icon: UserRound,
-    },
-    {
-      label: "已索引视频",
-      value: counts.videos_total,
-      Icon: Video,
-    },
-  ];
-  return (
-    <div className="rounded-lg border border-line bg-white p-3">
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-        {cards.map(({ label, value, Icon }) => (
-          <div
-            key={label}
-            className="flex items-center gap-3 rounded-lg border border-line bg-[#faf8f5] px-4 py-3"
-          >
-            <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-white text-brand">
-              <Icon size={18} />
-            </div>
-            <div className="min-w-0">
-              <div className="text-xl font-semibold tabular-nums leading-tight">
-                {value}
-              </div>
-              <div className="mt-0.5 text-xs text-muted">{label}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="mt-2 flex items-center justify-end gap-1 text-[10px] text-muted">
-        更新于 {formatUpdatedAt(stats.last_updated_at)}
-      </div>
-    </div>
-  );
-}
-
-function formatUpdatedAt(value: string | undefined): string {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }

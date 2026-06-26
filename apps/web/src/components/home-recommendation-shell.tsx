@@ -1,0 +1,100 @@
+"use client";
+
+import { useState } from "react";
+import { MapPin, Store, UserRound, Video } from "lucide-react";
+import { HomeFilters } from "./home-filters";
+import { HomeShopFeed } from "./home-shop-feed";
+
+type StatsPayload = {
+  counts: {
+    shops_published: number;
+    creators_active: number;
+    videos_total: number;
+    shops_in_review: number;
+    cities_covered: number;
+  };
+  last_updated_at: string;
+};
+
+export function HomeRecommendationShell({
+  stats,
+}: {
+  stats: StatsPayload | null;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+
+  return (
+    <section className="mx-auto grid max-w-7xl gap-6 px-4 py-6 lg:grid-cols-[280px_1fr]">
+      <HomeFilters disabled={Boolean(busy)} />
+
+      <section className="space-y-4">
+        {stats ? <SiteMetrics stats={stats} /> : null}
+        <HomeShopFeed busy={busy} onBusyChange={setBusy} />
+      </section>
+    </section>
+  );
+}
+
+function SiteMetrics({ stats }: { stats: StatsPayload }) {
+  const { counts } = stats;
+  const cards = [
+    {
+      label: "已发布店铺",
+      value: counts.shops_published,
+      Icon: Store,
+    },
+    {
+      label: "覆盖城市",
+      value: counts.cities_covered,
+      Icon: MapPin,
+    },
+    {
+      label: "活跃博主",
+      value: counts.creators_active,
+      Icon: UserRound,
+    },
+    {
+      label: "已索引视频",
+      value: counts.videos_total,
+      Icon: Video,
+    },
+  ];
+  return (
+    <div className="rounded-lg border border-line bg-white p-3">
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        {cards.map(({ label, value, Icon }) => (
+          <div
+            key={label}
+            className="flex items-center gap-3 rounded-lg border border-line bg-[#faf8f5] px-4 py-3"
+          >
+            <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-white text-brand">
+              <Icon size={18} />
+            </div>
+            <div className="min-w-0">
+              <div className="text-xl font-semibold tabular-nums leading-tight">
+                {value}
+              </div>
+              <div className="mt-0.5 text-xs text-muted">{label}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 flex items-center justify-end gap-1 text-[10px] text-muted">
+        更新于 {formatUpdatedAt(stats.last_updated_at)}
+      </div>
+    </div>
+  );
+}
+
+function formatUpdatedAt(value: string | undefined): string {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}

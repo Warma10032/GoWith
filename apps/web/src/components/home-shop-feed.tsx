@@ -1,7 +1,9 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { Compass, LoaderCircle, LocateFixed, MapPin } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { shopCategoryOptions } from "@gowith/shared";
 import { apiBaseUrl, type ShopCardData } from "@/lib/api";
 import {
   getBrowserLocation,
@@ -15,78 +17,136 @@ type RecommendedPayload = {
   shops: ShopCardData[];
 };
 
-export function HomeShopFeed() {
+const RECOMMENDED_QUERY_KEYS = [
+  "sort",
+  "city",
+  "category",
+  "creator_id",
+  "min_avg_cost",
+  "max_avg_cost",
+  "has_dianping",
+  "limit",
+];
+const RECOMMENDED_SORTS = new Set([
+  "recommended",
+  "distance",
+  "latest",
+  "ai_score",
+  "amap_rating",
+  "price_asc",
+  "price_desc",
+]);
+const RECOMMENDED_CATEGORIES = new Set<string>(shopCategoryOptions);
+
+export function HomeShopFeed({
+  busy,
+  onBusyChange,
+}: {
+  busy: string | null;
+  onBusyChange: (busy: string | null) => void;
+}) {
+  const searchParams = useSearchParams();
+  const searchKey = searchParams.toString();
+  const recommendationQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    for (const key of RECOMMENDED_QUERY_KEYS) {
+      const value = searchParams.get(key);
+      if (value) params.set(key, value);
+    }
+    const sort = params.get("sort");
+    if (sort && !RECOMMENDED_SORTS.has(sort)) params.delete("sort");
+    const category = params.get("category");
+    if (category && !RECOMMENDED_CATEGORIES.has(category)) {
+      params.delete("category");
+    }
+    return params;
+  }, [searchKey]);
+  const recommendationQueryKey = recommendationQuery.toString();
+  const selectedSort = recommendationQuery.get("sort") ?? "recommended";
   const requestVersion = useRef(0);
   const backgroundLocationStarted = useRef(false);
   const [payload, setPayload] = useState<RecommendedPayload | null>(null);
-  const [busy, setBusy] = useState<string | null>("正在加载推荐");
   const [locationMessage, setLocationMessage] = useState<string | null>(null);
 
-  const load = useCallback(async (forceLocation = false) => {
-    const version = ++requestVersion.current;
-    setBusy(forceLocation ? "正在获取位置" : "正在加载推荐");
-    setLocationMessage(null);
+  const load = useCallback(
+    async (forceLocation = false) => {
+      const version = ++requestVersion.current;
+      onBusyChange(forceLocation ? "正在获取位置" : "加载推荐");
+      setLocationMessage(null);
 
-    let query = "";
-    const applyLocation = (location: BrowserLocation) => {
-      const params = new URLSearchParams({
-        lng: String(location.lng),
-        lat: String(location.lat),
-        coord_type: location.coordType,
-      });
-      query = `?${params.toString()}`;
-      setLocationMessage(
-        `已按当前位置排序 · 精度约 ${Math.round(location.accuracy)} m`,
-      );
-    };
-
-    const cachedLocation = forceLocation ? null : getCachedBrowserLocation();
-    if (cachedLocation) {
-      applyLocation(cachedLocation);
-    } else if (forceLocation) {
-      try {
-        applyLocation(await getBrowserLocation(true));
-      } catch {
-        setLocationMessage("未获得定位，当前按发布时间排序");
-      }
-    } else {
-      setLocationMessage("当前按发布时间排序，定位会在后台更新");
-    }
-
-    try {
-      const response = await fetch(
-        `${apiBaseUrl}/api/shops/recommended${query}`,
-        {
-          credentials: "include",
-          cache: "no-store",
-        },
-      );
-      if (!response.ok) throw new Error(`recommendations_${response.status}`);
-      const next = (await response.json()) as RecommendedPayload;
-      if (version === requestVersion.current) setPayload(next);
-    } catch (error) {
-      if (version === requestVersion.current) {
+      const params = new URLSearchParams(recommendationQueryKey);
+      const needsLocation = forceLocation || selectedSort === "distance";
+      const setLocationQuery = (location: BrowserLocation) => {
+        params.set("lng", String(location.lng));
+        params.set("lat", String(location.lat));
+        params.set("coord_type", location.coordType);
         setLocationMessage(
-          error instanceof Error
-            ? `推荐加载失败：${error.message}`
-            : "推荐加载失败",
+          selectedSort === "recommended" || selectedSort === "distance"
+            ? `已按当前位置排序 · 精度约 ${Math.round(location.accuracy)} m`
+            : `已按所选规则排序 · 定位精度约 ${Math.round(location.accuracy)} m`,
+        );
+      };
+
+      const cachedLocation = forceLocation ? null : getCachedBrowserLocation();
+      if (cachedLocation) {
+        setLocationQuery(cachedLocation);
+      } else if (needsLocation) {
+        try {
+          setLocationQuery(await getBrowserLocation(forceLocation));
+        } catch {
+          setLocationMessage("未获得定位，当前按发布时间排序");
+        }
+      } else {
+        setLocationMessage(
+          selectedSort === "recommended"
+            ? "当前按发布时间排序，定位会在后台更新"
+            : "已按所选规则排序，定位会在后台更新",
         );
       }
-    } finally {
-      if (version === requestVersion.current) setBusy(null);
-    }
 
-    if (!forceLocation && !cachedLocation && !backgroundLocationStarted.current) {
-      backgroundLocationStarted.current = true;
-      void getBrowserLocation()
-        .then(() => {
-          if (version === requestVersion.current) void load(false);
-        })
-        .catch(() => undefined);
-    }
-  }, []);
+      try {
+        const query = params.toString();
+        const response = await fetch(
+          `${apiBaseUrl}/api/shops/recommended${query ? `?${query}` : ""}`,
+          {
+            credentials: "include",
+            cache: "no-store",
+          },
+        );
+        if (!response.ok) throw new Error(`recommendations_${response.status}`);
+        const next = (await response.json()) as RecommendedPayload;
+        if (version === requestVersion.current) setPayload(next);
+      } catch (error) {
+        if (version === requestVersion.current) {
+          setLocationMessage(
+            error instanceof Error
+              ? `推荐加载失败：${error.message}`
+              : "推荐加载失败",
+          );
+        }
+      } finally {
+        if (version === requestVersion.current) onBusyChange(null);
+      }
+
+      if (
+        !forceLocation &&
+        !cachedLocation &&
+        !needsLocation &&
+        !backgroundLocationStarted.current
+      ) {
+        backgroundLocationStarted.current = true;
+        void getBrowserLocation()
+          .then(() => {
+            if (version === requestVersion.current) void load(false);
+          })
+          .catch(() => undefined);
+      }
+    },
+    [onBusyChange, recommendationQueryKey, selectedSort],
+  );
 
   useEffect(() => {
+    backgroundLocationStarted.current = false;
     void load();
     return () => {
       requestVersion.current += 1;

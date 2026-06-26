@@ -3,8 +3,12 @@ import type { FastifyPluginAsync } from "fastify";
 import { sql } from "kysely";
 import { z } from "zod";
 import {
+  citiesForProvinceInput,
   createUserEventSchema,
   favoriteRequestSchema,
+  provinceForRegionInput,
+  regionNameVariants,
+  shopCategoryOptions,
   wgs84ToGcj02,
 } from "@gowith/shared";
 import { HttpError } from "../lib/http";
@@ -45,18 +49,81 @@ type ShopSupplement = {
   poi_business: PoiBusiness | null;
 };
 
+type RecommendedShopRow = Record<string, unknown> & {
+  id: string;
+  distance_m: number | null;
+  recommendation_score: number | null;
+  poi_avg_cost: number | null;
+  poi_rating: number | null;
+  has_dianping_link: boolean;
+  quality: unknown;
+  published_at: Date | null;
+};
+
+const recommendedSortSchema = z.enum([
+  "recommended",
+  "distance",
+  "latest",
+  "ai_score",
+  "amap_rating",
+  "price_asc",
+  "price_desc",
+]);
+const recommendedCategorySchema = z.preprocess((value) => {
+  if (typeof value !== "string") return value;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}, z.enum(shopCategoryOptions).optional());
+
+const optionalTrimmedString = z
+  .string()
+  .trim()
+  .transform((value) => (value ? value : undefined))
+  .optional();
+
+const booleanQuerySchema = z.preprocess((value) => {
+  if (value === undefined) return undefined;
+  if (value === "true" || value === true) return true;
+  if (value === "false" || value === false) return false;
+  return value;
+}, z.boolean().optional());
+
+const optionalNonNegativeNumber = z.preprocess((value) => {
+  if (value === "") return undefined;
+  return value;
+}, z.coerce.number().min(0).optional());
+
 export const recommendedQuerySchema = z
   .object({
     anonymous_id: z.string().optional(),
     lng: z.coerce.number().min(-180).max(180).optional(),
     lat: z.coerce.number().min(-90).max(90).optional(),
     coord_type: z.enum(["wgs84", "gcj02"]).default("wgs84"),
+    sort: recommendedSortSchema.default("recommended"),
+    city: optionalTrimmedString,
+    category: recommendedCategorySchema,
+    creator_id: z.string().uuid().optional(),
+    min_avg_cost: optionalNonNegativeNumber,
+    max_avg_cost: optionalNonNegativeNumber,
+    has_dianping: booleanQuerySchema,
+    limit: z.coerce.number().int().min(1).max(100).default(30),
   })
   .superRefine((value, context) => {
     if ((value.lng === undefined) !== (value.lat === undefined)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message: "lng and lat must be provided together",
+      });
+    }
+    if (
+      value.min_avg_cost !== undefined &&
+      value.max_avg_cost !== undefined &&
+      value.min_avg_cost > value.max_avg_cost
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "min_avg_cost must be less than or equal to max_avg_cost",
+        path: ["min_avg_cost"],
       });
     }
   });
@@ -390,6 +457,72 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
         ? wgs84ToGcj02({ lng: query.lng!, lat: query.lat! })
         : { lng: query.lng!, lat: query.lat! }
       : null;
+    const usesDistanceRanking =
+      Boolean(gcjLocation) &&
+      (query.sort === "distance" ||
+        (query.sort === "recommended" && hasLocation));
+    const distanceSql = gcjLocation
+      ? sql<
+          number | null
+        >`CASE WHEN shops.coord_type = 'gcj02' THEN ST_DistanceSphere(shops.geom, ST_SetSRID(ST_MakePoint(${gcjLocation.lng}, ${gcjLocation.lat}), 4326)) ELSE NULL END`
+      : sql<null>`NULL`;
+    const recommendationScoreSql = sql<
+      number | null
+    >`CASE WHEN jsonb_typeof(shops.card_payload->'recommendation_score') = 'number' THEN (shops.card_payload->>'recommendation_score')::numeric ELSE NULL END`;
+    const hasDianpingSql = sql<boolean>`EXISTS (
+      SELECT 1
+      FROM shop_external_links dianping_filter
+      WHERE dianping_filter.shop_id = shops.id
+        AND dianping_filter.platform = 'dianping'
+        AND dianping_filter.status = 'confirmed'
+    )`;
+    const provinceInput = query.city
+      ? provinceForRegionInput(query.city)
+      : null;
+    const regionVariants = query.city ? regionNameVariants(query.city) : [];
+    const provinceVariants = provinceInput
+      ? regionNameVariants(provinceInput)
+      : [];
+    const provinceCityVariants = query.city
+      ? citiesForProvinceInput(query.city).flatMap((city) =>
+          regionNameVariants(city),
+        )
+      : [];
+    const locationTerms = Array.from(
+      new Set([
+        ...regionVariants.map((value) => `city:${value}`),
+        ...regionVariants.map((value) => `province:${value}`),
+        ...provinceVariants.map((value) => `province:${value}`),
+        ...provinceCityVariants.map((value) => `city:${value}`),
+      ]),
+    ).map((term) => {
+      const separatorIndex = term.indexOf(":");
+      const field = term.slice(0, separatorIndex);
+      const value = term.slice(separatorIndex + 1);
+      return field === "province"
+        ? sql`shops.province ILIKE ${`%${value}%`}`
+        : sql`shops.city ILIKE ${`%${value}%`}`;
+    });
+    const locationFilterSql =
+      query.city && locationTerms.length > 0
+        ? sql`AND (${sql.join(locationTerms, sql` OR `)})`
+        : sql``;
+    const orderSql =
+      query.sort === "distance"
+        ? sql`distance_m ASC NULLS LAST, shops.published_at DESC NULLS LAST`
+        : query.sort === "latest"
+          ? sql`shops.published_at DESC NULLS LAST`
+          : query.sort === "ai_score"
+            ? sql`recommendation_score DESC NULLS LAST, shops.published_at DESC NULLS LAST`
+            : query.sort === "amap_rating"
+              ? sql`pois.rating DESC NULLS LAST, shops.published_at DESC NULLS LAST`
+              : query.sort === "price_asc"
+                ? sql`pois.avg_cost ASC NULLS LAST, shops.published_at DESC NULLS LAST`
+                : query.sort === "price_desc"
+                  ? sql`pois.avg_cost DESC NULLS LAST, shops.published_at DESC NULLS LAST`
+                  : gcjLocation
+                    ? sql`distance_m ASC NULLS LAST, shops.published_at DESC NULLS LAST`
+                    : sql`shops.published_at DESC NULLS LAST`;
     const user = await getUserFromRequest(app.db, request);
     const requestId = crypto.randomUUID();
     await app.db
@@ -407,34 +540,68 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
                 coord_type: query.coord_type,
               }
             : {}),
+          sort: query.sort,
+          filters: {
+            city: query.city ?? null,
+            category: query.category ?? null,
+            creator_id: query.creator_id ?? null,
+            min_avg_cost: query.min_avg_cost ?? null,
+            max_avg_cost: query.max_avg_cost ?? null,
+            has_dianping: query.has_dianping ?? null,
+          },
+          limit: query.limit,
         },
-        algorithm: hasLocation ? "distance_v1" : "rule_v0",
+        algorithm: usesDistanceRanking
+          ? "distance_v1"
+          : `rule_${query.sort}_v1`,
         model_version: null,
         created_at: new Date(),
       })
       .execute();
 
-    const baseShopQuery = app.db
-      .selectFrom("shops")
-      .selectAll()
-      .where("status", "=", "published")
-      .where("deleted_at", "is", null);
-    const shops = gcjLocation
-      ? await baseShopQuery
-          .select(
-            sql<number>`CASE WHEN shops.coord_type = 'gcj02' THEN ST_DistanceSphere(shops.geom, ST_SetSRID(ST_MakePoint(${gcjLocation.lng}, ${gcjLocation.lat}), 4326)) ELSE NULL END`.as(
-              "distance_m",
-            ),
-          )
-          .orderBy(sql`distance_m ASC NULLS LAST`)
-          .orderBy("published_at", "desc")
-          .limit(30)
-          .execute()
-      : await baseShopQuery
-          .select(sql<null>`NULL`.as("distance_m"))
-          .orderBy("published_at", "desc")
-          .limit(30)
-          .execute();
+    const shopsResult = await sql`
+      SELECT
+        shops.*,
+        ${distanceSql} AS distance_m,
+        ${recommendationScoreSql} AS recommendation_score,
+        pois.avg_cost AS poi_avg_cost,
+        pois.rating AS poi_rating,
+        ${hasDianpingSql} AS has_dianping_link
+      FROM shops
+      LEFT JOIN pois ON pois.id = shops.primary_poi_id
+      WHERE shops.status = 'published'
+        AND shops.deleted_at IS NULL
+        ${locationFilterSql}
+        ${
+          query.category
+            ? sql`AND (shops.category_primary = ${query.category} OR shops.category_secondary = ${query.category})`
+            : sql``
+        }
+        ${
+          query.creator_id
+            ? sql`AND EXISTS (
+                SELECT 1
+                FROM shop_video_mentions svm_filter
+                WHERE svm_filter.shop_id = shops.id
+                  AND svm_filter.creator_id = ${query.creator_id}
+              )`
+            : sql``
+        }
+        ${
+          query.min_avg_cost !== undefined
+            ? sql`AND pois.avg_cost >= ${query.min_avg_cost}`
+            : sql``
+        }
+        ${
+          query.max_avg_cost !== undefined
+            ? sql`AND pois.avg_cost <= ${query.max_avg_cost}`
+            : sql``
+        }
+        ${query.has_dianping ? sql`AND ${hasDianpingSql}` : sql``}
+      ORDER BY ${orderSql}
+      LIMIT ${query.limit}
+    `.execute(app.db);
+    const shops = shopsResult.rows as RecommendedShopRow[];
 
     const items = [];
     for (const [index, shop] of shops.entries()) {
@@ -448,15 +615,26 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
           shop_id: shop.id,
           rank: index + 1,
           score,
-          reason_codes: hasLocation
+          reason_codes: usesDistanceRanking
             ? ["nearby", "distance_v1"]
-            : ["published_recently", "rule_v0"],
+            : [`sort_${query.sort}`, "rule_v1"],
           feature_snapshot: {
             shop_confidence:
               (shop.quality as Record<string, unknown>)?.shop_confidence ??
               null,
             published_at: shop.published_at,
             distance_m: shop.distance_m,
+            avg_cost: shop.poi_avg_cost,
+            rating: shop.poi_rating,
+            filters: {
+              city: query.city ?? null,
+              category: query.category ?? null,
+              creator_id: query.creator_id ?? null,
+              min_avg_cost: query.min_avg_cost ?? null,
+              max_avg_cost: query.max_avg_cost ?? null,
+              has_dianping: query.has_dianping ?? null,
+              has_dianping_link: shop.has_dianping_link,
+            },
           },
           created_at: new Date(),
         })
@@ -578,7 +756,9 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
         .innerJoin("creators", "creators.id", "shop_video_mentions.creator_id")
         .select([
           "videos.id as video_id",
-          sql<string>`COALESCE(videos.title_override, videos.title)`.as("title"),
+          sql<string>`COALESCE(videos.title_override, videos.title)`.as(
+            "title",
+          ),
           "videos.source_url",
           "videos.bvid",
           "videos.cover_url",
