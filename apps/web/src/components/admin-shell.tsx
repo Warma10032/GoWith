@@ -6,12 +6,14 @@ import { ReactNode, useEffect, useState } from "react";
 import {
   Activity,
   Bot,
+  CalendarClock,
   Database,
   ExternalLink,
   Film,
   KeyRound,
   LoaderCircle,
   Store,
+  Trash2,
   UserRound,
   Workflow,
 } from "lucide-react";
@@ -45,7 +47,9 @@ const navItems = [
   { href: "/admin/videos", label: "视频", icon: Film },
   { href: "/admin/shops", label: "店铺", icon: Store },
   { href: "/admin/runs", label: "处理任务", icon: Workflow },
+  { href: "/admin/scheduled-tasks", label: "定时任务", icon: CalendarClock },
   { href: "/admin/ai-runs", label: "AI 运行", icon: Bot },
+  { href: "/admin/recycle-bin", label: "回收站", icon: Trash2 },
 ];
 
 interface AdminShellProps {

@@ -74,6 +74,8 @@ export const PIPELINE_RUN_TYPE_LABELS: Readonly<Record<string, string>> = {
   video_asr_retry: "重新转写视频",
   video_ai_retry: "重新执行 AI 分析",
   poi_match: "POI 匹配",
+  scheduled_ai_runs_cleanup: "AI 运行记录清理",
+  scheduled_task_logs_cleanup: "DB 任务日志清理",
 };
 
 export const AI_RUN_STAGE_LABELS: Readonly<Record<string, string>> = {
@@ -186,6 +188,7 @@ export const ENTITY_TYPE_LABELS: Readonly<Record<string, string>> = {
   poi: "POI",
   ai_run: "AI 运行",
   pipeline_run: "处理任务",
+  system: "系统",
 };
 
 /**
