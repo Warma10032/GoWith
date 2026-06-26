@@ -43,7 +43,7 @@ export function ShopCard({
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-3">
-            <div>
+            <div className="min-w-0">
               <Link
                 href={`/shops/${shop.id}`}
                 className="text-lg font-semibold leading-tight hover:text-brand"
@@ -54,11 +54,23 @@ export function ShopCard({
                 {card.subtitle ?? "AI 已整理为可审核店铺卡片"}
               </p>
             </div>
-            {priceLabel ? (
-              <span className="shrink-0 rounded-md bg-[#f7efe8] px-2 py-1 text-xs font-medium text-brand">
-                {priceLabel}
-              </span>
-            ) : null}
+            <div className="flex shrink-0 flex-col items-end gap-0.5 text-right">
+              <div className="flex items-baseline gap-1 leading-none text-brand">
+                <span className="text-xl font-semibold tabular-nums">
+                  {formatRecommendationScore(recommendationScore)}
+                </span>
+                <span className="text-[10px] text-muted">AI 评分</span>
+              </div>
+              {providerRating !== null && providerRating !== undefined ? (
+                <span className="inline-flex items-center gap-0.5 text-xs font-medium text-[#9a5a16]">
+                  <Star size={12} fill="currentColor" />
+                  高德 {providerRating.toFixed(1)}
+                </span>
+              ) : null}
+              {priceLabel ? (
+                <span className="text-[11px] text-muted">{priceLabel}</span>
+              ) : null}
+            </div>
           </div>
           <p className="mt-3 text-sm leading-6 text-ink">
             {card.recommend_reason ?? "等待 AI 总结与人工审核。"}
@@ -72,16 +84,6 @@ export function ShopCard({
             {distanceLabel ? (
               <span className="font-medium text-brand">
                 距离 {distanceLabel}
-              </span>
-            ) : null}
-            <span className="inline-flex items-center gap-1">
-              <Star size={14} />
-              AI 评分 {formatRecommendationScore(recommendationScore)}
-            </span>
-            {providerRating !== null && providerRating !== undefined ? (
-              <span className="inline-flex items-center gap-1 font-medium text-[#9a5a16]">
-                <Star size={14} fill="currentColor" />
-                高德评分 {providerRating.toFixed(1)}
               </span>
             ) : null}
             {sourceVideo ? (
