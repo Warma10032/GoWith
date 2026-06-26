@@ -73,7 +73,7 @@ export function CreatorListClient({ creators }: CreatorListClientProps) {
         <p className="mt-2 text-xs text-muted">
           {keyword
             ? `匹配 ${filtered.length} / ${creators.length} 位博主`
-            : `共 ${creators.length} 位已激活博主，按粉丝数倒序`}
+            : `共 ${creators.length} 位博主`}
         </p>
       </div>
 

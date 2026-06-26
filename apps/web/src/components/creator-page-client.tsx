@@ -180,12 +180,11 @@ export function CreatorPageClient({
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
-            <Stat label="已发布店铺" value={shopCount} hint="published" />
-            <Stat label="覆盖城市" value={cityCount} hint="distinct cities" />
+            <Stat label="已发布店铺" value={shopCount} />
+            <Stat label="覆盖城市" value={cityCount} />
             <Stat
               label="最近探店"
               value={formatShortDate(latestShop?.latest_video?.published_at)}
-              hint="latest video"
               text
             />
           </div>
@@ -276,12 +275,10 @@ export function CreatorPageClient({
 function Stat({
   label,
   value,
-  hint,
   text = false,
 }: {
   label: string;
   value: number | string;
-  hint: string;
   text?: boolean;
 }) {
   return (
@@ -296,7 +293,6 @@ function Stat({
         {value}
       </div>
       <div className="mt-1 text-xs text-muted">{label}</div>
-      <div className="mt-0.5 text-[10px] text-muted">{hint}</div>
     </div>
   );
 }

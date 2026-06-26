@@ -32,7 +32,7 @@ export default async function CreatorsListPage() {
         <header className="rounded-lg border border-line bg-white p-6">
           <h1 className="text-2xl font-semibold">探店博主</h1>
           <p className="mt-2 text-sm text-muted">
-            所有已激活的 B 站探店博主。点击进入查看博主的探店地图与店铺卡片。
+            所有活跃 B 站探店博主。点击进入查看博主的探店地图与店铺卡片。
           </p>
         </header>
 
