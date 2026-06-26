@@ -475,6 +475,30 @@ export function AdminShopDetailPage({ shopId }: { shopId: string }) {
             发布
           </button>
         ) : null}
+        {["hidden", "rejected"].includes(shop.status) ? (
+          <button
+            onClick={() =>
+              void runAction("提交复审", async () => {
+                await adminFetch(`/api/admin/shops/${shop.id}/submit-review`, {
+                  method: "POST",
+                  body: JSON.stringify({
+                    expected_updated_at: shop.updated_at,
+                  }),
+                });
+              })
+            }
+            className="inline-flex items-center gap-2 rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white"
+            disabled={!!busy}
+            title="提交复审后会进入草稿审核，通过审核后即可重新发布上架"
+          >
+            {busy === "提交复审" ? (
+              <LoaderCircle size={14} className="animate-spin" />
+            ) : (
+              <Send size={14} />
+            )}
+            提交复审（重新上架）
+          </button>
+        ) : null}
         {shop.status === "published" ? (
           <button
             onClick={() => setUnpublishDialogOpen(true)}
