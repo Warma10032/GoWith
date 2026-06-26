@@ -22,7 +22,7 @@ export function ShopCard({
   );
   const providerPrice = shop.poi_business?.avg_cost;
   const providerRating = shop.poi_business?.rating;
-  const coverUrl = shop.poi_business?.photos[0]?.url;
+  const coverUrl = shop.poi_business?.photos?.[0]?.url;
   const distanceLabel = formatDistance(
     shop.distance_m === null || shop.distance_m === undefined
       ? null
@@ -54,21 +54,27 @@ export function ShopCard({
                 {card.subtitle ?? "AI 已整理为可审核店铺卡片"}
               </p>
             </div>
-            <div className="flex shrink-0 flex-col items-end gap-0.5 text-right">
-              <div className="flex items-baseline gap-1 leading-none text-brand">
-                <span className="text-xl font-semibold tabular-nums">
-                  {formatRecommendationScore(recommendationScore)}
-                </span>
-                <span className="text-[10px] text-muted">AI 评分</span>
-              </div>
+            <div className="flex shrink-0 items-center gap-2 text-right text-xs text-muted">
+              <span className="leading-none font-medium text-brand">
+                AI 评分
+              </span>
+              <span className="text-base font-semibold leading-none tabular-nums text-brand">
+                {formatRecommendationScore(recommendationScore)}
+              </span>
               {providerRating !== null && providerRating !== undefined ? (
-                <span className="inline-flex items-center gap-0.5 text-xs font-medium text-[#9a5a16]">
-                  <Star size={12} fill="currentColor" />
-                  高德 {providerRating.toFixed(1)}
-                </span>
+                <>
+                  <span aria-hidden className="h-3 w-px bg-line" />
+                  <span className="inline-flex items-center gap-0.5 leading-none font-medium text-[#9a5a16]">
+                    <Star size={12} fill="currentColor" />
+                    高德评分 {providerRating.toFixed(1)}
+                  </span>
+                </>
               ) : null}
               {priceLabel ? (
-                <span className="text-[11px] text-muted">{priceLabel}</span>
+                <>
+                  <span aria-hidden className="h-3 w-px bg-line" />
+                  <span className="leading-none">{priceLabel}</span>
+                </>
               ) : null}
             </div>
           </div>
