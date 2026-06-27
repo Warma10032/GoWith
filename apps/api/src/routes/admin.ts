@@ -19,6 +19,7 @@ import {
 import { HttpError } from "../lib/http";
 import { encryptSecret } from "../services/crypto";
 import { requireAdmin } from "../services/auth";
+import { assertCsrfToken } from "../services/csrf";
 import { enqueuePipelineRunJob } from "../services/queue";
 import {
   InvalidDianpingUrlError,
@@ -338,8 +339,10 @@ async function runAdminActionWithLock<T>(
 }
 
 export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
-  app.addHook("preHandler", async (request) => {
+  app.addHook("preHandler", async (request, reply) => {
     await requireAdmin(app.db, request);
+    // P0-3: 所有 /api/admin/** 非 GET / HEAD / OPTIONS 请求必须带 CSRF token。
+    await assertCsrfToken(request, reply);
   });
 
   async function requireActiveVideo(id: string) {
@@ -1415,16 +1418,14 @@ export const registerAdminRoutes: FastifyPluginAsync = async (app) => {
 
   app.get("/task-stream", async (request, reply) => {
     await requireAdmin(app.db, request);
+    // P1-3: SSE 沿用 Fastify CORS 白名单 (cors 插件基于 request.headers.origin
+    // 与 allowedOrigins 校验)，不再手动写 ACAO 头反射任何 Origin。
     reply.hijack();
     reply.raw.writeHead(200, {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
-      "Access-Control-Allow-Credentials": "true",
-      "Access-Control-Allow-Origin": String(
-        request.headers.origin ?? "http://127.0.0.1:13000",
-      ),
     });
     reply.raw.write(
       `event: ready\ndata: ${JSON.stringify({ connected_at: new Date().toISOString() })}\n\n`,
