@@ -464,7 +464,10 @@ export async function searchAmapPoi(
       headers: { accept: "application/json" },
     },
   );
-  if (!response.ok) throw new Error(`amap_http_${response.status}`);
+  if (!response.ok) {
+    // P2-4: 错误信息不直接回显含 key 的 URL。
+    throw new Error(`amap_http_${response.status}`);
+  }
   const payload = (await response.json()) as AmapTextResponse;
   const rawPayloadId = await saveRawAmapPayload(
     db,
