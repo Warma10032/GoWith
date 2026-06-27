@@ -12,7 +12,12 @@ import {
   wgs84ToGcj02,
 } from "@gowith/shared";
 import { HttpError } from "../lib/http";
-import { getUserFromRequest, requireUser } from "../services/auth";
+import { checkRateLimit } from "../services/rate-limit";
+import {
+  getRequestClientIp,
+  getUserFromRequest,
+  requireUser,
+} from "../services/auth";
 
 type SourceVideo = {
   video_id: string;
@@ -127,6 +132,60 @@ export const recommendedQuerySchema = z
       });
     }
   });
+
+// P1-6: 地图 / 搜索 query 的 Zod schema，约束坐标范围、查询词长度。
+const trimmedQueryString = z
+  .string()
+  .trim()
+  .min(1)
+  .max(80)
+  .optional();
+
+export const shopMapQuerySchema = z
+  .object({
+    min_lng: z.coerce.number().min(-180).max(180).default(70),
+    min_lat: z.coerce.number().min(-90).max(90).default(15),
+    max_lng: z.coerce.number().min(-180).max(180).default(140),
+    max_lat: z.coerce.number().min(-90).max(90).default(55),
+    limit: z.coerce.number().int().min(1).max(500).default(500),
+    q: trimmedQueryString,
+    creator_id: z.string().uuid().optional(),
+    category: z.string().trim().min(1).max(80).optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.min_lng > value.max_lng) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "min_lng must be <= max_lng",
+        path: ["min_lng"],
+      });
+    }
+    if (value.min_lat > value.max_lat) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "min_lat must be <= max_lat",
+        path: ["min_lat"],
+      });
+    }
+    // 面积上限：避免超长 bbox 拉爆 PostGIS / trigram
+    const lngSpan = value.max_lng - value.min_lng;
+    const latSpan = value.max_lat - value.min_lat;
+    if (lngSpan * latSpan > 360 * 180) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "bbox too large",
+        path: ["max_lng"],
+      });
+    }
+  });
+
+export const shopSearchQuerySchema = z.object({
+  q: z.string().trim().min(1).max(80),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+
+const EVENTS_RATE_LIMIT_MAX = 60;
+const EVENTS_RATE_LIMIT_WINDOW_MS = 60 * 1000;
 
 function finiteNumber(value: unknown): number | null {
   const parsed = Number(value);
@@ -657,15 +716,8 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get("/shops/map", async (request) => {
-    const query = request.query as Record<string, string | undefined>;
-    const minLng = Number(query.min_lng ?? 70);
-    const minLat = Number(query.min_lat ?? 15);
-    const maxLng = Number(query.max_lng ?? 140);
-    const maxLat = Number(query.max_lat ?? 55);
-    const limit = Math.min(500, Math.max(1, Number(query.limit ?? 500)));
-    const q = query.q?.trim();
-    const creatorId = query.creator_id?.trim();
-    const category = query.category?.trim();
+    const query = shopMapQuerySchema.parse(request.query);
+    const { min_lng: minLng, min_lat: minLat, max_lng: maxLng, max_lat: maxLat, limit, q, creator_id: creatorId, category } = query;
     const shops = await sql`
       SELECT DISTINCT ON (shops.primary_poi_id)
         shops.id, shops.display_name, shops.city, shops.district, shops.address, shops.lng, shops.lat, shops.coord_type, shops.card_payload, shops.quality, shops.published_at
@@ -695,9 +747,8 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get("/shops/search", async (request) => {
-    const query = request.query as Record<string, string | undefined>;
-    const q = query.q?.trim();
-    const limit = Math.min(50, Math.max(1, Number(query.limit ?? 20)));
+    const query = shopSearchQuerySchema.parse(request.query);
+    const { q, limit } = query;
     if (!q) return { shops: [] };
     const shops = await sql`
       SELECT DISTINCT ON (primary_poi_id)
@@ -778,9 +829,37 @@ export const registerPublicRoutes: FastifyPluginAsync = async (app) => {
     };
   });
 
-  app.post("/users/events", async (request) => {
-    const user = await getUserFromRequest(app.db, request);
+  app.post("/users/events", async (request, reply) => {
+    // P1-4: 限速 — IP 维度 + anonymous_id 维度各 60/分钟，超出即拒绝。
+    const ip = getRequestClientIp(request);
+    const ipLimit = await checkRateLimit({
+      scope: "events_ip",
+      key: ip,
+      max: EVENTS_RATE_LIMIT_MAX,
+      windowMs: EVENTS_RATE_LIMIT_WINDOW_MS,
+      lockoutMs: EVENTS_RATE_LIMIT_WINDOW_MS,
+    });
+    if (!ipLimit.allowed) {
+      const seconds = Math.max(1, Math.ceil(ipLimit.retryAfterMs / 1000));
+      reply.header("Retry-After", String(seconds));
+      throw new HttpError(429, "rate_limited", "Too many events; slow down");
+    }
     const body = createUserEventSchema.parse(request.body);
+    if (body.anonymous_id) {
+      const idLimit = await checkRateLimit({
+        scope: "events_anon",
+        key: body.anonymous_id,
+        max: EVENTS_RATE_LIMIT_MAX,
+        windowMs: EVENTS_RATE_LIMIT_WINDOW_MS,
+        lockoutMs: EVENTS_RATE_LIMIT_WINDOW_MS,
+      });
+      if (!idLimit.allowed) {
+        const seconds = Math.max(1, Math.ceil(idLimit.retryAfterMs / 1000));
+        reply.header("Retry-After", String(seconds));
+        throw new HttpError(429, "rate_limited", "Too many events; slow down");
+      }
+    }
+    const user = await getUserFromRequest(app.db, request);
     await app.db
       .insertInto("user_events")
       .values({
