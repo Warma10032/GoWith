@@ -111,6 +111,7 @@ erDiagram
 ```text
 new
 metadata_synced
+metadata_failed
 subtitle_ready
 asr_ready
 text_unavailable

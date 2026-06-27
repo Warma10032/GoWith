@@ -174,7 +174,12 @@ paths:
           description: task_already_running (same creator profile sync task is already queued or running).
   /api/admin/creators/{id}/sync:
     post:
-      summary: Enqueue creator video metadata sync and create observable run
+      summary: Enqueue incremental full-list creator video sync and create observable run
+      description: |
+        Scans all accessible Bilibili video-list pages for the creator, inserts
+        only videos that are not already in the database, and retries only
+        videos currently marked `metadata_failed`. Existing successful videos
+        are not refreshed and their workflow state is not reset.
       security:
         - cookieAuth: []
       parameters:
