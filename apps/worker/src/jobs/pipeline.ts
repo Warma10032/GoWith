@@ -9,10 +9,14 @@ import {
   videoStructuredAnalysisSchema,
 } from "@gowith/shared";
 import {
+  BilibiliError,
   checkBilibiliCookiePool,
+  fetchCreatorVideoBundle,
+  fetchCreatorVideoList,
   fetchCreatorProfile,
-  fetchCreatorVideos,
   fetchVideoAudioForAsr,
+  type FetchedComment,
+  type FetchedVideo,
   type TranscriptSegment,
 } from "../adapters/bilibili";
 import {
@@ -30,6 +34,10 @@ import {
 import { searchAmapPoi } from "../adapters/poi";
 import { env } from "../env";
 import { pipelineQueue } from "../queue";
+import {
+  planCreatorVideoSync,
+  type ExistingCreatorVideo,
+} from "./creator-video-sync-plan";
 import { cleanupAiRunsJob, cleanupTaskLogsJob } from "./cleanup";
 
 export async function handlePipelineJob(db: Kysely<DB>, job: Job) {
@@ -111,16 +119,18 @@ async function jobTargetsDeletedEntity(db: Kysely<DB>, job: Job) {
   return false;
 }
 
-function effectiveVideoRow<T extends {
-  title: string;
-  title_override: string | null;
-  description: string | null;
-  description_override: string | null;
-  tags: string[];
-  tags_override: string[] | null;
-  category: string | null;
-  category_override: string | null;
-}>(video: T): T {
+function effectiveVideoRow<
+  T extends {
+    title: string;
+    title_override: string | null;
+    description: string | null;
+    description_override: string | null;
+    tags: string[];
+    tags_override: string[] | null;
+    category: string | null;
+    category_override: string | null;
+  },
+>(video: T): T {
   return {
     ...video,
     title: video.title_override ?? video.title,
@@ -289,13 +299,14 @@ async function finishRunIfTerminal(
   db: Kysely<DB>,
   job: Job,
   summary: Record<string, unknown>,
+  status: "success" | "failed" = "success",
 ) {
   const runId = runIdFromJob(job);
   if (!runId) return;
   await db
     .updateTable("pipeline_runs")
     .set({
-      status: "success",
+      status,
       finished_at: new Date(),
       summary_json: summary as Json,
     })
@@ -358,7 +369,7 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
     detail: { bilibili_uid },
     progressPercent: 5,
   });
-  const payload = await fetchCreatorVideos(db, bilibili_uid);
+  const payload = await fetchCreatorVideoList(db, bilibili_uid);
 
   // 头像保持原始 B站 URL（与 creator 同步逻辑一致 + videos.cover_url 同样的模式）
 
@@ -381,136 +392,269 @@ async function syncCreatorVideos(db: Kysely<DB>, job: Job) {
     return { skipped: true, reason: "entity_deleted" };
   }
 
-  for (const video of payload.videos) {
-    // 视频封面也保持原始 B站 URL，不再下载到 /uploads/videos/。前端 SafeImage 的
-    // referrerPolicy="no-referrer" 已绕过防盗链。
-    const row = await db
-      .insertInto("videos")
-      .values({
-        id: crypto.randomUUID(),
-        creator_id: entityId,
-        bvid: video.bvid,
-        aid: video.aid,
-        cid: video.cid,
-        title: video.title,
-        description: video.description,
-        cover_url: video.cover_url,
-        cover_source_url: video.cover_url,
-        source_url: video.source_url,
-        duration_sec: video.duration_sec,
-        published_at: new Date(video.published_at),
-        tags: video.tags,
-        category: video.category,
-        stats: video.stats,
-        workflow_status: "metadata_synced",
-        is_shop_visit: null,
-        content_type: null,
-        classification_confidence: null,
-        risk_flags: [],
-        raw_payload_id: video.raw_payload_id,
-        last_synced_at: new Date(),
-        created_at: new Date(),
-        updated_at: new Date(),
-      })
-      .onConflict((oc) =>
-        oc.column("bvid").doUpdateSet({
-          title: video.title,
-          description: video.description,
-          cover_url: video.cover_url,
-          cover_source_url: video.cover_url,
-          aid: video.aid,
-          cid: video.cid,
-          source_url: video.source_url,
-          duration_sec: video.duration_sec,
-          published_at: new Date(video.published_at),
-          tags: video.tags,
-          category: video.category,
-          stats: video.stats,
-          workflow_status: "metadata_synced",
-          raw_payload_id: video.raw_payload_id,
-          last_synced_at: new Date(),
-          updated_at: new Date(),
-        }).where("videos.deleted_at", "is", null),
-      )
-      .returningAll()
-      .executeTakeFirst();
-    if (!row) continue;
+  const bvids = [...new Set(payload.videos.map((video) => video.bvid))];
+  const existingRows = bvids.length
+    ? ((await db
+        .selectFrom("videos")
+        .select(["id", "bvid", "workflow_status", "deleted_at"])
+        .where("bvid", "in", bvids)
+        .execute()) as ExistingCreatorVideo[])
+    : [];
+  const actions = planCreatorVideoSync(payload.videos, existingRows);
+  const stats = {
+    listed: bvids.length,
+    existing_skipped: actions.filter(
+      (action) => action.kind === "skip_existing",
+    ).length,
+    new_inserted: 0,
+    retried_failed: actions.filter((action) => action.kind === "retry_failed")
+      .length,
+    enriched_success: 0,
+    enriched_failed: 0,
+    db_rows_after_sync: 0,
+    failed_videos: [] as Array<{
+      bvid: string;
+      video_id: string | null;
+      error_code: string;
+      error_message: string;
+    }>,
+  };
 
-    if (video.transcript.length > 0) {
-      await saveTextAsset(db, {
-        videoId: row.id,
-        source: "subtitle",
-        language: video.transcript_language ?? "zh-CN",
-        segments: video.transcript,
-        contentText: null,
-        modelProvider: null,
-        modelName: null,
+  await emitPipelineEvent(db, job, {
+    eventType: "progress",
+    title: "视频列表扫描完成",
+    message: `发现 ${stats.listed} 个视频，跳过 ${stats.existing_skipped} 个已入库视频。`,
+    progressPercent: 15,
+    detail: stats as unknown as Record<string, unknown>,
+  });
+
+  for (const action of actions) {
+    if (action.kind === "skip_existing") continue;
+
+    const row =
+      action.kind === "new"
+        ? await insertListedVideo(db, entityId, action.video)
+        : action.existing;
+    if (action.kind === "new") stats.new_inserted += 1;
+
+    try {
+      const enriched = await fetchCreatorVideoBundle(db, action.video);
+      await saveEnrichedVideo(db, row.id, enriched);
+      stats.enriched_success += 1;
+      await emitPipelineEvent(db, job, {
+        eventType: "saved",
+        title:
+          action.kind === "new" ? "新视频基础信息已保存" : "失败视频重跑成功",
+        message: enriched.title,
+        entityType: "video",
+        entityId: row.id,
+        detail: {
+          bvid: enriched.bvid,
+          has_subtitle: enriched.transcript.length > 0,
+          comment_count: enriched.comments.length,
+        },
+      });
+    } catch (error) {
+      const detail = bilibiliErrorDetail(error);
+      stats.enriched_failed += 1;
+      stats.failed_videos.push({
+        bvid: action.video.bvid,
+        video_id: row.id,
+        ...detail,
       });
       await db
         .updateTable("videos")
-        .set({ workflow_status: "subtitle_ready", updated_at: new Date() })
+        .set({
+          workflow_status: "metadata_failed",
+          last_synced_at: new Date(),
+          updated_at: new Date(),
+        })
         .where("id", "=", row.id)
         .execute();
+      await emitPipelineEvent(db, job, {
+        eventType: "failed",
+        level: "warning",
+        title: "视频 enrichment 失败，等待下次增量重跑",
+        message: `${action.video.bvid}: ${detail.error_message}`,
+        entityType: "video",
+        entityId: row.id,
+        detail,
+      });
     }
+  }
 
-    for (const comment of video.comments) {
-      await db
-        .insertInto("video_comments")
-        .values({
-          id: crypto.randomUUID(),
-          video_id: row.id,
-          platform_comment_id: comment.id,
-          parent_comment_id: null,
-          content: comment.content,
-          content_sha256: crypto
-            .createHash("sha256")
-            .update(comment.content)
-            .digest("hex"),
-          user_hash: comment.user_hash,
-          author_name: comment.author_name,
-          author_avatar_url: comment.author_avatar_url,
-          image_urls: comment.image_urls,
-          like_count: comment.like_count,
-          reply_count: comment.reply_count,
-          published_at: comment.published_at
-            ? new Date(comment.published_at)
-            : null,
-          sample_type: comment.sample_type,
-          contains_location_signal: /哪|路|地址|附近|搬|闭/.test(
-            comment.content,
-          ),
-          contains_shop_signal: /店|面|餐|咖啡|火锅|牛肉/.test(comment.content),
-          raw_payload_id: comment.raw_payload_id,
-          created_at: new Date(),
-        })
-        .onConflict((oc) => oc.column("platform_comment_id").doNothing())
-        .execute();
-    }
+  const dbRows = bvids.length
+    ? await db
+        .selectFrom("videos")
+        .select(({ fn }) => fn.countAll<number>().as("count"))
+        .where("creator_id", "=", entityId)
+        .where("bvid", "in", bvids)
+        .where("deleted_at", "is", null)
+        .executeTakeFirst()
+    : { count: 0 };
+  stats.db_rows_after_sync = Number(dbRows?.count ?? 0);
+  const runStatus = stats.enriched_failed > 0 ? "failed" : "success";
 
-    await emitPipelineEvent(db, job, {
-      eventType: "saved",
-      title: "视频基础信息已保存",
-      message: video.title,
-      entityType: "video",
-      entityId: row.id,
-      detail: {
-        bvid: video.bvid,
-        has_subtitle: video.transcript.length > 0,
-        comment_count: video.comments.length,
-      },
+  await emitPipelineEvent(db, job, {
+    eventType: runStatus === "success" ? "completed" : "failed",
+    level: runStatus === "success" ? "success" : "warning",
+    title:
+      runStatus === "success"
+        ? "博主视频增量同步完成"
+        : "博主视频增量同步完成，但仍有失败视频",
+    message:
+      runStatus === "success"
+        ? `发现 ${stats.listed} 个视频，新入库 ${stats.new_inserted} 个。AI 处理需在视频页手动启动。`
+        : `发现 ${stats.listed} 个视频，${stats.enriched_failed} 个视频待下次重跑。`,
+    progressPercent: 100,
+    detail: stats as unknown as Record<string, unknown>,
+  });
+  await finishRunIfTerminal(
+    db,
+    job,
+    stats as unknown as Record<string, unknown>,
+    runStatus,
+  );
+  return { ...stats, pipeline_status: runStatus };
+}
+
+function bilibiliErrorDetail(error: unknown): {
+  error_code: string;
+  error_message: string;
+} {
+  return {
+    error_code: error instanceof BilibiliError ? error.code : "network_error",
+    error_message:
+      error instanceof Error ? error.message.slice(0, 500) : String(error),
+  };
+}
+
+async function insertListedVideo(
+  db: Kysely<DB>,
+  creatorId: string,
+  video: FetchedVideo,
+) {
+  const now = new Date();
+  const inserted = await db
+    .insertInto("videos")
+    .values({
+      id: crypto.randomUUID(),
+      creator_id: creatorId,
+      bvid: video.bvid,
+      aid: video.aid,
+      cid: video.cid,
+      title: video.title,
+      description: video.description,
+      cover_url: video.cover_url,
+      cover_source_url: video.cover_url,
+      source_url: video.source_url,
+      duration_sec: video.duration_sec,
+      published_at: new Date(video.published_at),
+      tags: video.tags,
+      category: video.category,
+      stats: video.stats,
+      workflow_status: "metadata_synced",
+      is_shop_visit: null,
+      content_type: null,
+      classification_confidence: null,
+      risk_flags: [],
+      raw_payload_id: video.raw_payload_id,
+      last_synced_at: now,
+      created_at: now,
+      updated_at: now,
+    })
+    .onConflict((oc) => oc.column("bvid").doNothing())
+    .returningAll()
+    .executeTakeFirst();
+  if (inserted) return inserted;
+  return db
+    .selectFrom("videos")
+    .selectAll()
+    .where("bvid", "=", video.bvid)
+    .executeTakeFirstOrThrow();
+}
+
+async function saveEnrichedVideo(
+  db: Kysely<DB>,
+  videoId: string,
+  video: FetchedVideo,
+) {
+  const workflowStatus =
+    video.transcript.length > 0 ? "subtitle_ready" : "metadata_synced";
+  await db
+    .updateTable("videos")
+    .set({
+      aid: video.aid,
+      cid: video.cid,
+      title: video.title,
+      description: video.description,
+      cover_url: video.cover_url,
+      cover_source_url: video.cover_url,
+      source_url: video.source_url,
+      duration_sec: video.duration_sec,
+      published_at: new Date(video.published_at),
+      tags: video.tags,
+      category: video.category,
+      stats: video.stats,
+      workflow_status: workflowStatus,
+      raw_payload_id: video.raw_payload_id,
+      last_synced_at: new Date(),
+      updated_at: new Date(),
+    })
+    .where("id", "=", videoId)
+    .execute();
+
+  if (video.transcript.length > 0) {
+    await saveTextAsset(db, {
+      videoId,
+      source: "subtitle",
+      language: video.transcript_language ?? "zh-CN",
+      segments: video.transcript,
+      contentText: null,
+      modelProvider: null,
+      modelName: null,
     });
   }
 
-  await emitPipelineEvent(db, job, {
-    eventType: "completed",
-    level: "success",
-    title: "博主视频同步完成",
-    message: `已同步 ${payload.videos.length} 个视频，AI 处理需在视频页手动启动。`,
-    progressPercent: 100,
-    detail: { video_count: payload.videos.length },
-  });
-  await finishRunIfTerminal(db, job, { video_count: payload.videos.length });
-  return { videos: payload.videos.length };
+  await saveVideoComments(db, videoId, video.comments);
+}
+
+async function saveVideoComments(
+  db: Kysely<DB>,
+  videoId: string,
+  comments: FetchedComment[],
+) {
+  for (const comment of comments) {
+    await db
+      .insertInto("video_comments")
+      .values({
+        id: crypto.randomUUID(),
+        video_id: videoId,
+        platform_comment_id: comment.id,
+        parent_comment_id: null,
+        content: comment.content,
+        content_sha256: crypto
+          .createHash("sha256")
+          .update(comment.content)
+          .digest("hex"),
+        user_hash: comment.user_hash,
+        author_name: comment.author_name,
+        author_avatar_url: comment.author_avatar_url,
+        image_urls: comment.image_urls,
+        like_count: comment.like_count,
+        reply_count: comment.reply_count,
+        published_at: comment.published_at
+          ? new Date(comment.published_at)
+          : null,
+        sample_type: comment.sample_type,
+        contains_location_signal: /哪|路|地址|附近|搬|闭/.test(comment.content),
+        contains_shop_signal: /店|面|餐|咖啡|火锅|牛肉/.test(comment.content),
+        raw_payload_id: comment.raw_payload_id,
+        created_at: new Date(),
+      })
+      .onConflict((oc) => oc.column("platform_comment_id").doNothing())
+      .execute();
+  }
 }
 
 async function processVideoJob(db: Kysely<DB>, job: Job) {

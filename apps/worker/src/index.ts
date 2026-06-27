@@ -1,12 +1,10 @@
 import { Worker } from "bullmq";
 import crypto from "node:crypto";
-import {
-  createDb,
-  type Json,
-} from "@gowith/db";
+import { createDb, type Json } from "@gowith/db";
 import { connection, pipelineQueue } from "./queue";
 import { handlePipelineJob } from "./jobs/pipeline";
 import { startScheduler } from "./scheduler";
+import { BilibiliError } from "./adapters/bilibili";
 
 const db = createDb();
 const scheduler = startScheduler(db);
@@ -64,10 +62,25 @@ const worker = new Worker(
     }
     try {
       const result = await handlePipelineJob(db, job);
+      const pipelineStatus =
+        result &&
+        typeof result === "object" &&
+        "pipeline_status" in result &&
+        result.pipeline_status === "failed"
+          ? "failed"
+          : "success";
       if (dbJobId) {
         await db
           .updateTable("jobs")
-          .set({ status: "success", finished_at: new Date() })
+          .set({
+            status: pipelineStatus,
+            finished_at: new Date(),
+            error_code: pipelineStatus === "failed" ? "partial_failure" : null,
+            error_message:
+              pipelineStatus === "failed"
+                ? "Task completed with item-level failures"
+                : null,
+          })
           .where("id", "=", dbJobId)
           .execute();
       }
@@ -80,9 +93,12 @@ const worker = new Worker(
             entity_type: entityType,
             entity_id: entityId,
             stage: job.name,
-            event_type: "completed",
-            level: "success",
-            title: `完成任务：${job.name}`,
+            event_type: pipelineStatus === "failed" ? "failed" : "completed",
+            level: pipelineStatus === "failed" ? "warning" : "success",
+            title:
+              pipelineStatus === "failed"
+                ? `任务完成但存在失败项：${job.name}`
+                : `完成任务：${job.name}`,
             message: null,
             progress_percent: null,
             detail_json: { result } as unknown as Json,
@@ -95,28 +111,47 @@ const worker = new Worker(
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : "unknown error";
+      const errorCode =
+        error instanceof BilibiliError ? error.code : "worker_error";
+      const retryable =
+        errorCode === "rate_limited" ||
+        errorCode === "risk_control" ||
+        errorCode === "network_error" ||
+        errorCode === "wbi_signature_failed";
+      if (!retryable) job.discard();
+      const maxAttempts =
+        typeof job.opts.attempts === "number" && job.opts.attempts > 0
+          ? job.opts.attempts
+          : 1;
+      const attemptNumber = job.attemptsMade + 1;
+      const willRetry = retryable && attemptNumber < maxAttempts;
       if (dbJobId) {
         await db
           .updateTable("jobs")
           .set({
-            status: "failed",
-            finished_at: new Date(),
-            error_code: "worker_error",
+            status: willRetry ? "queued" : "failed",
+            finished_at: willRetry ? null : new Date(),
+            error_code: errorCode,
             error_message: message,
           })
           .where("id", "=", dbJobId)
           .execute();
       }
       if (runId) {
-        await db
-          .updateTable("pipeline_runs")
-          .set({
-            status: "failed",
-            finished_at: new Date(),
-            summary_json: { error_message: message } as unknown as Json,
-          })
-          .where("id", "=", runId)
-          .execute();
+        if (!willRetry) {
+          await db
+            .updateTable("pipeline_runs")
+            .set({
+              status: "failed",
+              finished_at: new Date(),
+              summary_json: {
+                error_code: errorCode,
+                error_message: message,
+              } as unknown as Json,
+            })
+            .where("id", "=", runId)
+            .execute();
+        }
         await db
           .insertInto("pipeline_events")
           .values({
@@ -125,12 +160,19 @@ const worker = new Worker(
             entity_type: entityType,
             entity_id: entityId,
             stage: job.name,
-            event_type: "failed",
-            level: "error",
-            title: `任务失败：${job.name}`,
+            event_type: willRetry ? "progress" : "failed",
+            level: willRetry ? "warning" : "error",
+            title: willRetry
+              ? `任务失败，等待自动重试：${job.name}`
+              : `任务失败：${job.name}`,
             message,
             progress_percent: null,
-            detail_json: {} as unknown as Json,
+            detail_json: {
+              error_code: errorCode,
+              attempt: attemptNumber,
+              max_attempts: maxAttempts,
+              will_retry: willRetry,
+            } as unknown as Json,
             ai_run_id: null,
             created_at: new Date(),
           })
