@@ -59,6 +59,15 @@ export interface CreatorPayload {
   videos: FetchedVideo[];
 }
 
+export interface CreatorVideoListPayload {
+  name: string;
+  avatar_url: string | null;
+  bio: string | null;
+  follower_count: number | null;
+  raw_payload_id: string | null;
+  videos: FetchedVideo[];
+}
+
 export interface CreatorProfilePayload {
   name: string;
   avatar_url: string | null;
@@ -113,6 +122,49 @@ function md5(value: string): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+let bilibiliLastRequestAt = 0;
+let bilibiliCooldownUntil = 0;
+let bilibiliDynamicIntervalMs = 0;
+
+async function waitForGlobalBilibiliThrottle(): Promise<void> {
+  const now = Date.now();
+  const intervalMs = Math.max(
+    env.bilibiliRequestIntervalMs,
+    bilibiliDynamicIntervalMs,
+  );
+  const waitUntil = Math.max(
+    bilibiliCooldownUntil,
+    bilibiliLastRequestAt + intervalMs,
+  );
+  if (waitUntil > now) await sleep(waitUntil - now);
+  bilibiliLastRequestAt = Date.now();
+}
+
+function noteBilibiliRateLimit(): void {
+  const cooldownMs = Math.max(0, env.bilibiliRateLimitCooldownMs);
+  bilibiliCooldownUntil = Math.max(
+    bilibiliCooldownUntil,
+    Date.now() + cooldownMs,
+  );
+  const nextInterval = Math.max(
+    env.bilibiliRequestIntervalMs * 2,
+    bilibiliDynamicIntervalMs * 2,
+    env.bilibiliRequestIntervalMs,
+  );
+  bilibiliDynamicIntervalMs = Math.min(
+    Math.max(nextInterval, env.bilibiliRequestIntervalMs),
+    env.bilibiliMaxRequestIntervalMs,
+  );
+}
+
+function noteBilibiliSuccess(): void {
+  if (bilibiliDynamicIntervalMs <= env.bilibiliRequestIntervalMs) return;
+  bilibiliDynamicIntervalMs = Math.max(
+    env.bilibiliRequestIntervalMs,
+    Math.floor(bilibiliDynamicIntervalMs * 0.9),
+  );
 }
 
 function asRecord(value: unknown): JsonRecord {
@@ -454,7 +506,6 @@ export function mapViewDetailToVideoMetadata(
 class LiveBilibiliClient {
   private cookie: string | null = null;
   private accountId: string | null = null;
-  private lastRequestAt = 0;
   private wbi: { imgKey: string; subKey: string; expiresAt: number } | null =
     null;
 
@@ -518,6 +569,50 @@ class LiveBilibiliClient {
         follower_count: creatorInfo.followerCount,
         raw_payload_id: creatorInfo.rawPayloadId,
         videos: enrichedVideos,
+      };
+    } catch (error) {
+      await this.markAccountFailure(error);
+      throw error;
+    }
+  }
+
+  async fetchCreatorVideoList(uid: string): Promise<CreatorVideoListPayload> {
+    try {
+      await this.loadAccount();
+      const creatorInfo = await this.fetchCreatorInfo(uid);
+      const videos = await this.fetchVideoList(uid);
+      await this.markAccountSuccess();
+      return {
+        name: creatorInfo.name ?? `B站 UID ${uid}`,
+        avatar_url: creatorInfo.avatarUrl,
+        bio: creatorInfo.bio,
+        follower_count: creatorInfo.followerCount,
+        raw_payload_id: creatorInfo.rawPayloadId,
+        videos,
+      };
+    } catch (error) {
+      await this.markAccountFailure(error);
+      throw error;
+    }
+  }
+
+  async fetchCreatorVideoBundle(video: FetchedVideo): Promise<FetchedVideo> {
+    try {
+      await this.loadAccount();
+      const detailVideo = await this.fetchVideoDetail(video.bvid);
+      const merged = { ...video, ...detailVideo };
+      const subtitle = merged.cid
+        ? await this.fetchSubtitle(merged.bvid, merged.cid)
+        : null;
+      const comments = merged.aid ? await this.fetchComments(merged.aid) : [];
+      await this.markAccountSuccess();
+      return {
+        ...merged,
+        transcript: subtitle?.segments ?? [],
+        transcript_language: subtitle?.language ?? null,
+        transcript_raw_payload_id: subtitle?.rawPayloadId ?? null,
+        needs_asr: !subtitle?.segments.length,
+        comments,
       };
     } catch (error) {
       await this.markAccountFailure(error);
@@ -736,11 +831,6 @@ class LiveBilibiliClient {
       }
       const total = asNumber(asRecord(data.page).count);
       if (total !== null && videos.length >= total) break;
-      if (
-        env.bilibiliMaxVideosPerCreator > 0 &&
-        videos.length >= env.bilibiliMaxVideosPerCreator
-      )
-        break;
       page += 1;
     }
     return videos;
@@ -1019,8 +1109,10 @@ class LiveBilibiliClient {
       );
     }
     if (code !== null && code !== 0) {
+      const errorCode = classifyBilibiliCode(code, message);
+      if (errorCode === "rate_limited") noteBilibiliRateLimit();
       throw new BilibiliError(
-        classifyBilibiliCode(code, message),
+        errorCode,
         `Bilibili API error ${code}: ${message}`,
       );
     }
@@ -1074,11 +1166,11 @@ class LiveBilibiliClient {
     input: string,
     init: RequestInit,
   ): Promise<Response> {
-    const elapsed = Date.now() - this.lastRequestAt;
-    if (elapsed < env.bilibiliRequestIntervalMs)
-      await sleep(env.bilibiliRequestIntervalMs - elapsed);
-    this.lastRequestAt = Date.now();
-    return fetch(input, init);
+    await waitForGlobalBilibiliThrottle();
+    const response = await fetch(input, init);
+    if (response.status === 429) noteBilibiliRateLimit();
+    else if (response.ok) noteBilibiliSuccess();
+    return response;
   }
 
   private async loadAccount(): Promise<void> {
@@ -1145,6 +1237,20 @@ export async function fetchCreatorVideos(
   uid: string,
 ): Promise<CreatorPayload> {
   return new LiveBilibiliClient(db).fetchCreatorVideos(uid);
+}
+
+export async function fetchCreatorVideoList(
+  db: Kysely<DB>,
+  uid: string,
+): Promise<CreatorVideoListPayload> {
+  return new LiveBilibiliClient(db).fetchCreatorVideoList(uid);
+}
+
+export async function fetchCreatorVideoBundle(
+  db: Kysely<DB>,
+  video: FetchedVideo,
+): Promise<FetchedVideo> {
+  return new LiveBilibiliClient(db).fetchCreatorVideoBundle(video);
 }
 
 export async function checkBilibiliCookiePool(

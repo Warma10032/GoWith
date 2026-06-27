@@ -116,6 +116,14 @@ export const env = {
     "BILIBILI_REQUEST_INTERVAL_MS",
     1200,
   ),
+  bilibiliRateLimitCooldownMs: numberFromEnv(
+    "BILIBILI_RATE_LIMIT_COOLDOWN_MS",
+    60_000,
+  ),
+  bilibiliMaxRequestIntervalMs: numberFromEnv(
+    "BILIBILI_MAX_REQUEST_INTERVAL_MS",
+    15_000,
+  ),
   bilibiliCommentsLimitPerVideo: numberFromEnv(
     "BILIBILI_COMMENTS_LIMIT_PER_VIDEO",
     80,

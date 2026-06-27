@@ -73,6 +73,7 @@ export const missingFields = [
 export const videoWorkflowStatuses = [
   "new",
   "metadata_synced",
+  "metadata_failed",
   "subtitle_ready",
   "asr_ready",
   "text_unavailable",
