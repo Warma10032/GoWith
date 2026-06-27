@@ -8,6 +8,47 @@ dotenvConfig({
   override: false,
 });
 
+const NODE_ENV = process.env.NODE_ENV ?? "development";
+const IS_PRODUCTION = NODE_ENV === "production";
+
+const DEV_ONLY_COOKIE_KEY = "dev-only-cookie-key-change-me";
+const PLACEHOLDER_SECRET_VALUES = new Set([
+  "replace-with-32-byte-base64-key",
+  "replace-with-32-byte-shared-secret",
+]);
+
+function requireStrongSecret(
+  name: string,
+  value: string | undefined,
+  devFallback: string,
+  minLength: number,
+): string {
+  if (!value) {
+    if (IS_PRODUCTION) {
+      throw new Error(
+        `[env] ${name} is required in production. Set it via secrets manager / Docker secret.`,
+      );
+    }
+    return devFallback;
+  }
+  if (value === devFallback && IS_PRODUCTION) {
+    throw new Error(
+      `[env] ${name} is using the dev default value; refusing to start in production.`,
+    );
+  }
+  if (IS_PRODUCTION && PLACEHOLDER_SECRET_VALUES.has(value)) {
+    throw new Error(
+      `[env] ${name} is using a public placeholder value; refusing to start in production.`,
+    );
+  }
+  if (value.length < minLength && IS_PRODUCTION) {
+    throw new Error(
+      `[env] ${name} must be at least ${minLength} chars (got ${value.length}) in production.`,
+    );
+  }
+  return value;
+}
+
 function numberFromEnv(name: string, fallback: number): number {
   const value = process.env[name];
   if (!value) return fallback;
@@ -21,14 +62,38 @@ function booleanFromEnv(name: string, fallback: boolean): boolean {
   return ["1", "true", "yes", "on"].includes(value.toLowerCase());
 }
 
+function requireUrl(name: string, fallback: string): string {
+  const value = process.env[name];
+  if (!value) {
+    if (IS_PRODUCTION) {
+      throw new Error(`[env] ${name} is required in production.`);
+    }
+    return fallback;
+  }
+  return value;
+}
+
 // 用 import.meta.url 锚定源文件位置，而不是 cwd —— 这样无论
 // `pnpm dev`（concurrently，从 monorepo 根启动）还是 `pnpm dev:worker`
 // （从 apps/worker 启动）都能解析到同一个 uploads 目录。
 export const env = {
-  redisUrl: process.env.REDIS_URL ?? "redis://localhost:16379",
-  cookieEncryptionKey:
-    process.env.COOKIE_ENCRYPTION_KEY ?? "dev-only-cookie-key-change-me",
-  aiWorkerUrl: process.env.AI_WORKER_URL ?? "http://localhost:18000",
+  nodeEnv: NODE_ENV,
+  isProduction: IS_PRODUCTION,
+  redisUrl: requireUrl("REDIS_URL", "redis://localhost:16379"),
+  databaseUrl: requireUrl(
+    "DATABASE_URL",
+    "postgres://gowith:gowith@localhost:15432/gowith",
+  ),
+  cookieEncryptionKey: requireStrongSecret(
+    "COOKIE_ENCRYPTION_KEY",
+    process.env.COOKIE_ENCRYPTION_KEY,
+    DEV_ONLY_COOKIE_KEY,
+    32,
+  ),
+  aiWorkerUrl: requireUrl("AI_WORKER_URL", "http://localhost:18000"),
+  // Worker 调用 AI Worker 时的内部 shared secret。
+  // 生产环境强制要求与 AI Worker 端保持一致；dev 缺省为空（mock 模式）。
+  aiWorkerSharedSecret: process.env.AI_WORKER_SHARED_SECRET ?? "",
   amapWebServiceKey: process.env.AMAP_WEB_SERVICE_KEY ?? "",
   // 图片下载到本地的目录；与 apps/api 共享，让 @fastify/static 直接 serve。
   // 默认 = apps/api/uploads/，与 apps/api/src/lib/env.ts 默认值一致，
@@ -36,6 +101,17 @@ export const env = {
   uploadsDir: process.env.UPLOADS_DIR
     ? path.resolve(process.env.UPLOADS_DIR)
     : path.resolve(__dirname, "..", "..", "..", "api", "uploads"),
+  // P0-6: 图片下载白名单域名（逗号分隔）。空数组 = 允许任何公网域名。
+  imageDownloadAllowedDomains: (
+    process.env.IMAGE_DOWNLOAD_ALLOWED_DOMAINS ?? ""
+  )
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean),
+  // P0-6: 是否拒绝任何内网 / 环回 / metadata IP。生产必须 true。
+  imageDownloadBlockPrivateNetworks:
+    (process.env.IMAGE_DOWNLOAD_BLOCK_PRIVATE_NETWORKS ??
+      (IS_PRODUCTION ? "true" : "false")) === "true",
   bilibiliRequestIntervalMs: numberFromEnv(
     "BILIBILI_REQUEST_INTERVAL_MS",
     1200,
@@ -62,3 +138,15 @@ export const env = {
     30,
   ),
 };
+
+// 启动时立刻校验 AI Worker 鉴权：生产环境必须配置 shared secret。
+if (IS_PRODUCTION && !env.aiWorkerSharedSecret) {
+  throw new Error(
+    "[env] AI_WORKER_SHARED_SECRET is required in production (AI worker internal auth).",
+  );
+}
+if (IS_PRODUCTION && PLACEHOLDER_SECRET_VALUES.has(env.aiWorkerSharedSecret)) {
+  throw new Error(
+    "[env] AI_WORKER_SHARED_SECRET is using a public placeholder value; refusing to start in production.",
+  );
+}
