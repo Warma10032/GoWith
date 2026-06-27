@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import math
 import os
@@ -12,8 +13,9 @@ from typing import Any, Callable, Literal, TypedDict, TypeVar
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from openai import APIError, AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 from pydantic import BaseModel, ValidationError
@@ -40,6 +42,34 @@ _ROOT = Path(__file__).resolve().parents[3]
 load_dotenv(_ROOT / ".env", override=False)
 
 app = FastAPI(title="GoWith AI Worker", version="0.1.0")
+
+# 内部 shared secret：与 apps/api / apps/worker 通过 env.AI_WORKER_SHARED_SECRET
+# 共享同一字符串。生产环境强制要求；dev 缺省走 mock 模式时不强制校验。
+AI_WORKER_SHARED_SECRET = os.getenv("AI_WORKER_SHARED_SECRET", "")
+INTERNAL_AUTH_SCHEME = HTTPBearer(auto_error=False)
+PLACEHOLDER_SHARED_SECRETS = {"replace-with-32-byte-shared-secret"}
+
+
+def _require_internal_auth(
+    credentials: HTTPAuthorizationCredentials | None = Depends(INTERNAL_AUTH_SCHEME),
+) -> None:
+    """检查调用方是否携带与 AI_WORKER_SHARED_SECRET 匹配的 Bearer token。
+
+    dev 环境（secret 为空）直接放行。生产环境缺失或不匹配 → 401。
+    """
+    if not AI_WORKER_SHARED_SECRET:
+        if os.getenv("NODE_ENV") == "production":
+            raise HTTPException(status_code=401, detail="internal_auth_not_configured")
+        return
+    if (
+        os.getenv("NODE_ENV") == "production"
+        and AI_WORKER_SHARED_SECRET in PLACEHOLDER_SHARED_SECRETS
+    ):
+        raise HTTPException(status_code=401, detail="internal_auth_not_configured")
+    if credentials is None or not credentials.credentials:
+        raise HTTPException(status_code=401, detail="internal_auth_required")
+    if not hmac.compare_digest(credentials.credentials, AI_WORKER_SHARED_SECRET):
+        raise HTTPException(status_code=401, detail="internal_auth_invalid")
 
 GROQ_TRANSCRIPTIONS_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 MINIMAX_PROVIDER = "minimax"
@@ -183,7 +213,10 @@ async def health() -> dict[str, str | bool]:
 
 
 @app.post("/asr/transcribe", response_model=AsrResponse)
-async def transcribe_audio(file: UploadFile | None = None) -> AsrResponse:
+async def transcribe_audio(
+    file: UploadFile | None = None,
+    _auth: None = Depends(_require_internal_auth),
+) -> AsrResponse:
     if file is None:
         raise HTTPException(status_code=400, detail="audio_file_required")
     return await _transcribe_with_groq(file)
@@ -229,6 +262,11 @@ def _minimax_client() -> AsyncOpenAI:
 def _groq_max_bytes() -> int:
     mb = int(os.getenv("GROQ_ASR_MAX_MB", "25"))
     return mb * 1024 * 1024
+
+
+# P1-5: 单次 ASR 上传 body 限制。生产环境通过反代 / uvicorn --limit-request-line
+# 也会再次限制，这里是应用层兜底。
+ASR_MAX_UPLOAD_BYTES = int(os.getenv("ASR_MAX_UPLOAD_MB", "26")) * 1024 * 1024
 
 
 def _chunk_seconds() -> int:
@@ -294,11 +332,25 @@ async def _transcribe_with_groq(file: UploadFile) -> AsrResponse:
     if not api_key:
         raise HTTPException(status_code=500, detail="groq_api_key_missing")
 
+    # P1-5: 流式读取并提前截断超限上传，避免把整个文件先 buffer 到内存。
     suffix = Path(file.filename or "audio.m4s").suffix or ".m4s"
     with TemporaryDirectory(prefix="gowith-asr-") as temp_dir_name:
         temp_dir = Path(temp_dir_name)
         source = temp_dir / f"source{suffix}"
-        source.write_bytes(await file.read())
+        bytes_written = 0
+        chunk_size = 1024 * 1024  # 1MB
+        with source.open("wb") as sink:
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                bytes_written += len(chunk)
+                if bytes_written > ASR_MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"asr_upload_too_large: {bytes_written} > {ASR_MAX_UPLOAD_BYTES}",
+                    )
+                sink.write(chunk)
         chunks = await _prepare_audio_chunks(source, temp_dir)
         text_parts: list[str] = []
         segments: list[TranscriptSegment] = []
@@ -1341,7 +1393,10 @@ def _structure_semantic_issues(
 
 
 @app.post("/ai/classify-video", response_model=AiResponseEnvelope)
-async def classify_video(request: VideoAnalysisRequest) -> AiResponseEnvelope:
+async def classify_video(
+    request: VideoAnalysisRequest,
+    _auth: None = Depends(_require_internal_auth),
+) -> AiResponseEnvelope:
     subcalls: list[AiCallTrace] = []
     result = await _prompt_call(
         "classify_video",
@@ -1354,7 +1409,10 @@ async def classify_video(request: VideoAnalysisRequest) -> AiResponseEnvelope:
 
 
 @app.post("/ai/comment-signals", response_model=AiResponseEnvelope)
-async def comment_signals(request: VideoAnalysisRequest) -> AiResponseEnvelope:
+async def comment_signals(
+    request: VideoAnalysisRequest,
+    _auth: None = Depends(_require_internal_auth),
+) -> AiResponseEnvelope:
     subcalls: list[AiCallTrace] = []
     relevant_ids: set[str] = set()
     if request.comment_samples:
@@ -1392,7 +1450,10 @@ async def comment_signals(request: VideoAnalysisRequest) -> AiResponseEnvelope:
 
 
 @app.post("/ai/structure-video", response_model=AiResponseEnvelope)
-async def structure_video(request: VideoAnalysisRequest) -> AiResponseEnvelope:
+async def structure_video(
+    request: VideoAnalysisRequest,
+    _auth: None = Depends(_require_internal_auth),
+) -> AiResponseEnvelope:
     subcalls: list[AiCallTrace] = []
     transcript_context = {
         "video_metadata": _metadata_dict(request),

@@ -100,6 +100,7 @@ export async function transcribeAudioFile(input: {
   const response = await fetch(`${env.aiWorkerUrl}/asr/transcribe`, {
     method: "POST",
     body: formData,
+    headers: aiWorkerInternalAuthHeader(),
   });
   if (!response.ok) {
     const message = await response.text().catch(() => "");
@@ -163,7 +164,10 @@ export async function structureVideo(
 async function postAi<T>(path: string, request: VideoAnalysisRequest): Promise<AiResponseEnvelope<T>> {
   const response = await fetch(`${env.aiWorkerUrl}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...aiWorkerInternalAuthHeader(),
+    },
     body: JSON.stringify(request),
   });
   if (!response.ok) {
@@ -178,4 +182,13 @@ async function postAi<T>(path: string, request: VideoAnalysisRequest): Promise<A
     );
   }
   return (await response.json()) as AiResponseEnvelope<T>;
+}
+
+/**
+ * P0-4: Worker 调用 AI Worker 时携带内部 shared secret。生产环境强制要求，
+ * dev 缺省时不发头（与 AI worker 端 dev 缺省匹配）。
+ */
+function aiWorkerInternalAuthHeader(): Record<string, string> {
+  if (!env.aiWorkerSharedSecret) return {};
+  return { Authorization: `Bearer ${env.aiWorkerSharedSecret}` };
 }
