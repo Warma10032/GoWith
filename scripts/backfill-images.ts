@@ -12,6 +12,7 @@
 
 import path from "node:path";
 import { createDb } from "@gowith/db";
+import { env } from "../apps/worker/src/env";
 import { downloadImage } from "../apps/worker/src/services/image-downloader";
 
 const UPLOADS_DIR = path.resolve(
@@ -64,6 +65,8 @@ async function main() {
       try {
         const result = await downloadImage(sourceUrl, "creators", creator.id, {
           uploadsDir: UPLOADS_DIR,
+          allowedDomains: env.imageDownloadAllowedDomains,
+          blockPrivateNetworks: env.imageDownloadBlockPrivateNetworks,
         });
         if (!result) {
           stats.creatorsSkipped++;
@@ -95,7 +98,7 @@ async function main() {
     // ---------- videos ----------
     const videos = await db
       .selectFrom("videos")
-      .select(["id", "bvid", "title", "cover_url"])
+      .select(["id", "bvid", "title", "cover_url", "cover_source_url"])
       .execute();
     stats.videosScanned = videos.length;
 
