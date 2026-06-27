@@ -1,10 +1,11 @@
 # GoWith MVP AI 工作流与后台审核规格
 
-版本：v0.1  
-日期：2026-06-16  
+版本：v0.2  
+日期：2026-06-28  
 关联文档：[MVP-bilibili-shop-map.md](./MVP-bilibili-shop-map.md)  
 落库设计：[MVP-database-schema.md](./MVP-database-schema.md)  
-目标：把“视频理解 -> 店铺候选 -> POI 匹配 -> 后台审核 -> 前台展示”定义成可开发、可测试、可迭代的契约。
+目标：把"视频理解 -> 店铺候选 -> POI 匹配 -> 后台审核 -> 前台展示"定义成可开发、可测试、可迭代的契约。  
+更新：§17 已落地实现改为真实集成状态（M0/M1/M2 完成）。
 
 ## 1. 设计原则
 
@@ -1031,31 +1032,33 @@ POST /api/users/favorites
 4. 后台审核：工作台、视频详情、候选审核、POI 审核。
 5. 前台展示：卡片流、地图 pin、博主页、店铺详情。
 
-## 17. 已落地实现（2026-06-17）
+## 17. 已落地实现（2026-06-28）
 
-仓库当前处于 **M0 完成 / M1 起步**。本规范对应的代码位置：
+仓库已 Hard cut 到真实集成（M0/M1/M2 已完成，M3 部分完成）。本规范对应的代码位置：
 
-| 规范章节                 | 实现位置                                                                                                                                   | 状态                            |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------- |
-| §5 视频分类 Schema       | `apps/ai-worker/app/schemas.py:42-54`（Pydantic）+ `packages/shared/src/schemas.ts:25-38`（Zod）                                           | ✅ mock 返回                    |
-| §6 评论线索 Schema       | `apps/ai-worker/app/main.py:75-95`（FastAPI 端点）+ `packages/shared/src/schemas.ts:40-87`                                                 | ✅ mock 返回                    |
-| §7 视频结构化分析 Schema | `apps/ai-worker/app/main.py:98-167` + `packages/shared/src/schemas.ts:104-175`                                                             | ✅ mock 返回                    |
-| §8 POI 匹配 Schema       | `apps/worker/src/adapters/poi.ts` + `packages/shared/src/schemas.ts:177-212`                                                               | ✅ mock 返回                    |
-| §9 发布快照 Schema       | `apps/api/src/routes/admin.ts` `POST /api/admin/shops/:id/publish` 事务 + `published_shop_snapshots`                                       | ✅ 实现                         |
-| §10 校验                 | `packages/shared/src/validation.ts` `findStructuredAnalysisIssues` + `evaluateClassificationReviewNeed`                                    | ✅ 实现                         |
-| §11 后台信息架构         | `apps/web/src/app/admin/page.tsx`（`AdminConsole`）                                                                                        | ✅ 实现                         |
-| §12 后台页面字段         | `AdminConsole` 内嵌 Form + DataTable，按 11.1 一级菜单简化                                                                                 | 🟡 MVP 简化                     |
-| §13 状态流转             | `apps/worker/src/jobs/pipeline.ts` 推动 `videos.workflow_status` 与 `shop_candidates.status`                                               | ✅ 实现（POI / merge 流转除外） |
-| §14 Prompt 契约          | `apps/worker/src/jobs/pipeline.ts` 每次写 `ai_runs` 带 `stage`、`provider='mock'`、`model='mock-*'`、`prompt_version='*.v1'`、`input_hash` | ✅ 实现                         |
-| §15 API 草案             | `apps/api/src/routes/{public,admin,auth}.ts` + `docs/openapi.yaml`                                                                         | ✅ 实现（合并接口占位）         |
+| 规范章节                 | 实现位置                                                                                                                                            | 状态                            |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| §5 视频分类 Schema       | `apps/ai-worker/app/schemas.py:42-54`（Pydantic）+ `packages/shared/src/schemas.ts:25-38`（Zod）                                                    | ✅ 真实 MiniMax 调用            |
+| §6 评论线索 Schema       | `apps/ai-worker/app/main.py:75-95`（FastAPI 端点）+ `packages/shared/src/schemas.ts:40-87`                                                          | ✅ 真实 MiniMax 调用            |
+| §7 视频结构化分析 Schema | `apps/ai-worker/app/main.py:98-167` + `packages/shared/src/schemas.ts:104-175`                                                                      | ✅ 真实 MiniMax 调用            |
+| §8 POI 匹配 Schema       | `apps/worker/src/adapters/poi.ts` + `packages/shared/src/schemas.ts:177-212`                                                                        | ✅ 真实高德 `v5/place/text` 调用 |
+| §9 发布快照 Schema       | `apps/api/src/routes/admin.ts` `POST /api/admin/shops/:id/publish` 事务 + `published_shop_snapshots`                                                | ✅ 实现                         |
+| §10 校验                 | `packages/shared/src/validation.ts` `findStructuredAnalysisIssues` + `evaluateClassificationReviewNeed`                                             | ✅ 实现                         |
+| §11 后台信息架构         | `apps/web/src/app/admin/page.tsx`（`AdminConsole`）                                                                                                 | ✅ 实现                         |
+| §12 后台页面字段         | `AdminConsole` 内嵌 Form + DataTable，按 11.1 一级菜单简化                                                                                          | 🟡 MVP 简化                     |
+| §13 状态流转             | `apps/worker/src/jobs/pipeline.ts` 推动 `videos.workflow_status` 与 `shop_candidates.status`                                                        | ✅ 实现（merge 流转除外）       |
+| §14 Prompt 契约          | `apps/worker/src/jobs/pipeline.ts` 每次写 `ai_runs` 带 `stage`、`provider='minimax'`、`model_version='MiniMax-M3'`/`'MiniMax-M2.7'`、`prompt_version='*.v1'`、`input_hash` | ✅ 实现                         |
+| §15 API 草案             | `apps/api/src/routes/{public,admin,auth}.ts` + `docs/openapi.yaml`                                                                                  | ✅ 实现（合并接口占位）         |
 
 落地策略与规范的差异：
 
-- **双 schema 校验**：Zod（TS）给 worker 用，Pydantic（Python）给 AI worker 用。两边都基于 §5-§9 的字段定义；M1 真实 LLM 时应让 Python 输出 Pydantic，TS 端 Zod 反向校验。
-- **AI 输出落库顺序**：规范 §14.3 是 8 步流程；`apps/worker/src/jobs/pipeline.ts` 当前是"HTTP 取 JSON → Zod parse → 写 ai_runs → 写业务表"，简化了"独立 raw_output 持久化"（M0 不持久化模型原始输出文本，只存 `output_payload`）。
-- **AI 工作流 status 推进**：M0 由 pipeline 自动推到 `ai_structured`；`need_review` / `approved` / `published` / `rejected` 由人工通过 `/api/admin/*` 流转；`POST /api/admin/shops/merge` 是占位符（M3）。
-- **POI 状态**：spec 列了 7 态；当前 M0 实现只显式写 `poi_matched` / `poi_match_need_review` / `extracted`；`low_confidence` / `no_candidate` 留给 M1 真实高德实现。
-- **后台 UI**：AdminConsole 把视频任务 / 候选店铺 / 已发布店铺合并在单页；视频详情三栏审核页（spec §12.3）M1+ 实现。
-- **审计日志**：`packages/db/src/schema.ts` 中 `review_events` 字段为 `task_id`/`actor_id`/`note`，但 SQL 是 `review_task_id`/`reviewer_id`/`reason`。M0 暂未写 `review_events`（人工编辑路径未实现），drift 在 M1 修复前不会引爆。
+- **真实 LLM 调用**：`apps/ai-worker/app/main.py` 全部 5 阶段直接调 MiniMax（OpenAI-compatible SDK），无 mock 兜底；缺失 `MINIMAX_API_KEY` 抛 `500 minimax_api_key_missing`。Zod + Pydantic 双 schema 校验各自把守。
+- **ASR 真实接入**：`/asr/transcribe` 调 Groq `whisper-large-v3-turbo`；缺失 `GROQ_API_KEY` 抛 `500 groq_api_key_missing`；长音频 ffmpeg 切 16KHz mono FLAC 后按 25MB 再切片。
+- **AI 输出落库顺序**：规范 §14.3 是 8 步流程；`apps/worker/src/jobs/pipeline.ts` 当前是"HTTP 取 JSON → Zod parse → 写 ai_runs → 写业务表"，简化了"独立 raw_output 持久化"（`ai_runs.output_payload` 保留原始 JSON，`raw_output_text` 留在 AI worker 的 `AiCallTrace`）。
+- **AI 工作流 status 推进**：pipeline 自动推到 `ai_structured`；`need_review` / `approved` / `published` / `rejected` 由人工通过 `/api/admin/*` 流转；`POST /api/admin/shops/merge` 仍是占位符。
+- **POI 状态**：当前 worker 实现显式写 `poi_matched` / `poi_match_need_review` / `extracted`；`low_confidence` / `no_candidate` 在 `PoiMatchResult.match_status` 枚举中已定义但 worker 未显式落库。
+- **后台 UI**：AdminConsole 把视频任务 / 候选店铺 / 已发布店铺合并在单页；视频详情三栏审核页（spec §12.3）未做。
+- **审计日志**：`packages/db/src/schema.ts` 中 `review_events` 字段为 `task_id`/`actor_id`/`note`，但 SQL 是 `review_task_id`/`reviewer_id`/`reason`。M3 接真实人工审核路径前必须统一字段名。
+- **Cookie 加密 envelope**：P2-2 在 `apps/api/src/services/crypto.ts` 加了 `key_id`，便于后续 key rotation。
 
-后续按 M1-M5 推进，逐步覆盖本规范未落地的部分。
+后续按 M3-M5 推进，逐步覆盖本规范未落地的部分。
