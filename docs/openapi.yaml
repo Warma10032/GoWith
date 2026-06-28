@@ -25,7 +25,11 @@ info:
     information-quality signal and is not a user-facing recommendation score. Average cost,
     rating, and shop photos come only from source-labelled poi_business data.
 servers:
-  - url: http://localhost:14000
+  - url: "{apiBaseUrl}"
+    variables:
+      apiBaseUrl:
+        default: https://api.example.com
+        description: Runtime API base URL from NEXT_PUBLIC_API_BASE_URL / API_BASE_URL.
 paths:
   /health:
     get:

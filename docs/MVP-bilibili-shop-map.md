@@ -777,7 +777,7 @@ pnpm db:seed
 pnpm dev                       # concurrently 启 web + api + worker + ai-worker
 ```
 
-默认端口：web=3000，api=4000（Swagger UI `/docs`），ai-worker=8000，postgres=5432，redis=6380。
+端口配置：开发与生产分别从 `.env.development` / `.env.production` 读取 `WEB_PORT`、`API_PORT`、`AI_WORKER_PORT`、`POSTGRES_*_PORT` 与 `REDIS_*_PORT`；源码、package scripts 与 Docker Compose 不写固定端口。
 
 ### 10.6 外部模式
 
@@ -952,14 +952,14 @@ POI 错配：
 
 仓库已 Hard cut 到真实集成。下表列出每个里程碑的落地情况：
 
-| 里程碑                | 状态      | 关键交付                                                                                                                                                |
-| --------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| M0 脚手架 + Mock 闭环 | ✅ 完成   | monorepo、6 migration、API/Worker/AI-Worker/Web/Admin 全部可用（Mock 已在 M1 替换时删除）                                                               |
-| M1 数据采集           | ✅ 完成   | B站真实 HTTP（WBI + Cookie 池 + 429 节流 + 风控 + `metadata_failed` + 增量）、Groq Whisper ASR、长音频切片、评论样本混合抽样                            |
-| M2 AI 视频理解        | ✅ 完成   | MiniMax LLM（OpenAI SDK）+ Groq Whisper，5 阶段管线全真，`prompt_version` + `input_hash` + Zod/Pydantic 双层校验                                      |
-| M3 POI 与后台         | 🟡 部分   | 真实高德 `v5/place/text` + dice 重排 + 后台审核 / 合并 / 发布 / 软删除 / 回收站；待 `shop_insights` / `review_events` 接入人工路径，TS schema drift 修复 |
-| M4 前台 MVP           | 🟡 部分   | 5 个页面可用；首页 V0 推荐 + `distance_v1`；地图页为 placeholder 网格（高德 JS API 待接）                                                               |
-| M5 推荐闭环           | 🟡 部分   | V0 规则推荐 + `recommendation_items.feature_snapshot` + `user_events` 落表 + 限速；缺排序模型与训练样本导出                                            |
+| 里程碑                | 状态    | 关键交付                                                                                                                                                 |
+| --------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M0 脚手架 + Mock 闭环 | ✅ 完成 | monorepo、6 migration、API/Worker/AI-Worker/Web/Admin 全部可用（Mock 已在 M1 替换时删除）                                                                |
+| M1 数据采集           | ✅ 完成 | B站真实 HTTP（WBI + Cookie 池 + 429 节流 + 风控 + `metadata_failed` + 增量）、Groq Whisper ASR、长音频切片、评论样本混合抽样                             |
+| M2 AI 视频理解        | ✅ 完成 | MiniMax LLM（OpenAI SDK）+ Groq Whisper，5 阶段管线全真，`prompt_version` + `input_hash` + Zod/Pydantic 双层校验                                         |
+| M3 POI 与后台         | 🟡 部分 | 真实高德 `v5/place/text` + dice 重排 + 后台审核 / 合并 / 发布 / 软删除 / 回收站；待 `shop_insights` / `review_events` 接入人工路径，TS schema drift 修复 |
+| M4 前台 MVP           | 🟡 部分 | 5 个页面可用；首页 V0 推荐 + `distance_v1`；地图页为 placeholder 网格（高德 JS API 待接）                                                                |
+| M5 推荐闭环           | 🟡 部分 | V0 规则推荐 + `recommendation_items.feature_snapshot` + `user_events` 落表 + 限速；缺排序模型与训练样本导出                                              |
 
 关键真实集成路径（无 mock fallback）：
 

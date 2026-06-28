@@ -80,12 +80,12 @@
 证据：
 
 - `apps/ai-worker/app/main.py` 暴露 `/asr/transcribe`、`/ai/classify-video`、`/ai/comment-signals`、`/ai/structure-video` 等端点。
-- `docker-compose.yml` 将 `18000:18000` 映射到宿主机。
+- 旧版 `docker-compose.yml` 将 AI Worker 端口映射到宿主机。
 - Worker 调 AI Worker 时未带内部认证头。
 
 影响：
 
-- 如果 `18000` 暴露公网，攻击者可直接调用 ASR / LLM，消耗 Groq、MiniMax 等第三方额度。
+- 如果 AI Worker 端口暴露公网，攻击者可直接调用 ASR / LLM，消耗 Groq、MiniMax 等第三方额度。
 - 可用大文件或大量请求造成 CPU、磁盘、内存、第三方 API 成本 DoS。
 - 直接绕过 Worker 的 Zod 校验、AI runs 留痕和任务状态机。
 
@@ -103,7 +103,7 @@
 
 - `docker-compose.yml` 中 PostgreSQL 使用 `gowith/gowith`。
 - Redis 未配置密码。
-- PostgreSQL `15432:5432`、Redis `16379:6379` 映射到宿主机。
+- 旧版 compose 将 PostgreSQL / Redis 端口映射到宿主机。
 
 影响：
 

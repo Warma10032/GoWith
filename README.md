@@ -5,22 +5,26 @@ GoWith is a Bilibili creator-indexed shop map MVP. It turns creator videos into 
 ## Quick Start
 
 ```bash
-cp .env.example .env
+cp .env.development.example .env.development
 pnpm install
 uv sync --project apps/ai-worker --extra dev --link-mode=copy
-docker compose up -d postgres redis
+pnpm dev:infra
 pnpm db:migrate
 pnpm db:seed
 pnpm dev
 ```
 
-Default local services:
+Development runs only Postgres and Redis in Docker. Web, API, worker, and
+AI worker run locally with hot reload. Service URLs and ports come from
+`.env.development`.
 
-- Web: http://localhost:13000
-- API: http://localhost:14000
-- AI Worker: http://localhost:18000
-- Postgres: localhost:15432（容器内仍 5432）
-- Redis from Docker Compose: localhost:16379（容器内仍 6379）
+Production runs every service in Docker with no hot reload:
+
+```bash
+cp .env.production.example .env.production
+pnpm docker:prod:build
+pnpm docker:prod:up
+```
 
 ## Quality Gates
 
