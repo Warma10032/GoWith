@@ -1,0 +1,54 @@
+name: gowith-dev
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    command: ["postgres", "-p", "${POSTGRES_CONTAINER_PORT:?}"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?}
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      PGPORT: ${POSTGRES_CONTAINER_PORT:?}
+    ports:
+      - "${POSTGRES_HOST:?}:${POSTGRES_HOST_PORT:?}:${POSTGRES_CONTAINER_PORT:?}"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:?} -d ${POSTGRES_DB:?} -p ${POSTGRES_CONTAINER_PORT:?}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command:
+      [
+        "redis-server",
+        "--port",
+        "${REDIS_CONTAINER_PORT:?}",
+        "--requirepass",
+        "${REDIS_PASSWORD:?}",
+      ]
+    ports:
+      - "${REDIS_HOST:?}:${REDIS_HOST_PORT:?}:${REDIS_CONTAINER_PORT:?}"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "redis-cli",
+          "-p",
+          "${REDIS_CONTAINER_PORT:?}",
+          "-a",
+          "${REDIS_PASSWORD:?}",
+          "ping",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_dev_data:

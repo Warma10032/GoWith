@@ -1,0 +1,153 @@
+name: gowith-prod
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    command: ["postgres", "-p", "${POSTGRES_CONTAINER_PORT:?}"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?}
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      PGPORT: ${POSTGRES_CONTAINER_PORT:?}
+    expose:
+      - "${POSTGRES_CONTAINER_PORT:?}"
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:?} -d ${POSTGRES_DB:?} -p ${POSTGRES_CONTAINER_PORT:?}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command:
+      [
+        "redis-server",
+        "--port",
+        "${REDIS_CONTAINER_PORT:?}",
+        "--requirepass",
+        "${REDIS_PASSWORD:?}",
+      ]
+    expose:
+      - "${REDIS_CONTAINER_PORT:?}"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "redis-cli",
+          "-p",
+          "${REDIS_CONTAINER_PORT:?}",
+          "-a",
+          "${REDIS_PASSWORD:?}",
+          "ping",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ai-worker:
+    build:
+      context: .
+      dockerfile: apps/ai-worker/Dockerfile.production
+    env_file:
+      - path: ${COMPOSE_ENV_FILE:-.env.production}
+        required: false
+    environment:
+      NODE_ENV: production
+      ENV_FILE: .env.production
+      AI_WORKER_HOST: ${AI_WORKER_HOST:?}
+      AI_WORKER_PORT: ${AI_WORKER_PORT:?}
+      AI_WORKER_SHARED_SECRET: ${AI_WORKER_SHARED_SECRET:?}
+    expose:
+      - "${AI_WORKER_PORT:?}"
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile.production
+    env_file:
+      - path: ${COMPOSE_ENV_FILE:-.env.production}
+        required: false
+    environment:
+      NODE_ENV: production
+      ENV_FILE: .env.production
+      PORT: ${API_PORT:?}
+      API_PORT: ${API_PORT:?}
+      API_HOST: ${API_HOST:?}
+      DATABASE_URL: postgres://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@postgres:${POSTGRES_CONTAINER_PORT:?}/${POSTGRES_DB:?}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?}@redis:${REDIS_CONTAINER_PORT:?}
+      AI_WORKER_URL: http://ai-worker:${AI_WORKER_PORT:?}
+      WEB_ORIGIN: ${WEB_ORIGIN:?}
+      AI_WORKER_SHARED_SECRET: ${AI_WORKER_SHARED_SECRET:?}
+    ports:
+      - "${API_HOST_PORT:?}:${API_PORT:?}"
+    volumes:
+      - uploads:/app/apps/api/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ai-worker:
+        condition: service_started
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile.production
+    env_file:
+      - path: ${COMPOSE_ENV_FILE:-.env.production}
+        required: false
+    environment:
+      NODE_ENV: production
+      ENV_FILE: .env.production
+      DATABASE_URL: postgres://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?}@postgres:${POSTGRES_CONTAINER_PORT:?}/${POSTGRES_DB:?}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?}@redis:${REDIS_CONTAINER_PORT:?}
+      AI_WORKER_URL: http://ai-worker:${AI_WORKER_PORT:?}
+      AI_WORKER_SHARED_SECRET: ${AI_WORKER_SHARED_SECRET:?}
+    volumes:
+      - uploads:/app/apps/api/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ai-worker:
+        condition: service_started
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile.production
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:?}
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:?}
+        NEXT_PUBLIC_AMAP_WEB_JS_KEY: ${NEXT_PUBLIC_AMAP_WEB_JS_KEY:-}
+        NEXT_PUBLIC_AMAP_SECURITY_JS_CODE: ${NEXT_PUBLIC_AMAP_SECURITY_JS_CODE:-}
+    env_file:
+      - path: ${COMPOSE_ENV_FILE:-.env.production}
+        required: false
+    environment:
+      NODE_ENV: production
+      ENV_FILE: .env.production
+      WEB_HOST: ${WEB_HOST:?}
+      WEB_PORT: ${WEB_PORT:?}
+      API_BASE_URL: http://api:${API_PORT:?}
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:?}
+      NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:?}
+      NEXT_PUBLIC_AMAP_WEB_JS_KEY: ${NEXT_PUBLIC_AMAP_WEB_JS_KEY:-}
+      NEXT_PUBLIC_AMAP_SECURITY_JS_CODE: ${NEXT_PUBLIC_AMAP_SECURITY_JS_CODE:-}
+    ports:
+      - "${WEB_HOST_PORT:?}:${WEB_PORT:?}"
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  postgres_prod_data:
+  uploads:
