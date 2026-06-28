@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ffmpeg curl \
+  && rm -rf /var/lib/apt/lists/* \
+  && pip install --no-cache-dir uv
+
+WORKDIR /app
+
+COPY apps/ai-worker/pyproject.toml apps/ai-worker/uv.lock apps/ai-worker/
+RUN uv sync --project apps/ai-worker --frozen --link-mode=copy
+
+COPY apps/ai-worker apps/ai-worker
+
+CMD ["sh", "-c", "uv run --project apps/ai-worker --link-mode=copy uvicorn app.main:app --app-dir apps/ai-worker --host ${AI_WORKER_HOST:?} --port ${AI_WORKER_PORT:?}"]
