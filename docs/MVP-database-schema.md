@@ -1110,10 +1110,12 @@ Worker 通过代码固定的 scheduler 启动内置定时任务，仍写入 `job
 首批任务：
 
 - `bilibili_cookie_health_check`：每 30 分钟检查 B站 Cookie 池，复用 `bilibili_auth_check` run type。
+- `daily_creator_video_sync`：每天扫描所有 `active` 且未删除的博主，为每个博主创建独立 `creator_video_sync` run，复用增量视频同步逻辑，只补新视频并重试 `metadata_failed`。
 - `cleanup_ai_runs`：每天清理 30 天前且未被业务结果引用、没有子调用的 `ai_runs`，run type 为 `scheduled_ai_runs_cleanup`。
 - `cleanup_task_logs`：每天清理 7 天前且已终态的 DB 任务日志，run type 为 `scheduled_task_logs_cleanup`。
 
 清理任务必须在 `summary_json` 写入 `scheduled_task_id`、保留期、cutoff 和删除/保护数量，便于后台审计。
+每日视频同步任务在 `summary_json` 写入 `scheduled_task_id`、活跃博主数、入队数和跳过数；具体每个博主的同步结果仍由对应的 `creator_video_sync` run 记录。
 
 ## 14. 关键关系与生命周期
 

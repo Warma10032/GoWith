@@ -142,7 +142,9 @@ export function AdminScheduledTasksPage() {
                   return (
                     <tr key={task.id} className="border-b border-line/70">
                       <td className="px-3 py-3">
-                        <div className="font-semibold text-ink">{task.name}</div>
+                        <div className="font-semibold text-ink">
+                          {task.name}
+                        </div>
                         <div className="mt-1 text-xs text-muted">{task.id}</div>
                         <div className="mt-1 max-w-md text-xs text-muted">
                           {task.description}
@@ -192,7 +194,10 @@ export function AdminScheduledTasksPage() {
                         {task.last_run ? (
                           <div>
                             <div>
-                              {lookupLabel(RUN_STATUS_LABELS, task.last_run.status)}
+                              {lookupLabel(
+                                RUN_STATUS_LABELS,
+                                task.last_run.status,
+                              )}
                             </div>
                             <div className="mt-1 max-w-[220px] truncate text-xs text-muted">
                               {formatSummary(task.last_run.summary_json)}
@@ -206,9 +211,12 @@ export function AdminScheduledTasksPage() {
                         <button
                           onClick={() =>
                             void run(busyLabel, () =>
-                              adminFetch(`/api/admin/scheduled-tasks/${task.id}/run`, {
-                                method: "POST",
-                              }),
+                              adminFetch(
+                                `/api/admin/scheduled-tasks/${task.id}/run`,
+                                {
+                                  method: "POST",
+                                },
+                              ),
                             )
                           }
                           className="inline-flex items-center gap-2 rounded-md bg-ink px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
@@ -245,6 +253,9 @@ function formatTime(value: string) {
 
 function formatSummary(summary: Record<string, unknown>) {
   const keys = [
+    "active_creators",
+    "creator_sync_jobs_queued",
+    "creator_sync_jobs_skipped",
     "deleted_count",
     "protected_count",
     "jobs_deleted",

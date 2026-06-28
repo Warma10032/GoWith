@@ -2,7 +2,12 @@ import crypto from "node:crypto";
 import type { Job } from "bullmq";
 import type { ExpressionBuilder, ExpressionWrapper, Kysely } from "kysely";
 import type { SqlBool } from "kysely";
-import { findActiveTaskWithLock, type DB, type Json } from "@gowith/db";
+import {
+  findActivePipelineRun,
+  findActiveTaskWithLock,
+  type DB,
+  type Json,
+} from "@gowith/db";
 import {
   commentSignalExtractionSchema,
   videoClassificationResultSchema,
@@ -53,6 +58,8 @@ export async function handlePipelineJob(db: Kysely<DB>, job: Job) {
       return syncCreatorProfile(db, job);
     case "sync_creator_videos":
       return syncCreatorVideos(db, job);
+    case "sync_all_creator_videos":
+      return syncAllCreatorVideosJob(db, job);
     case "process_video":
       return processVideoJob(db, job);
     case "run_asr":
@@ -295,6 +302,115 @@ async function enqueueWorkerPipelineJob(
   );
 }
 
+async function enqueueCreatorVideoSyncJob(
+  db: Kysely<DB>,
+  creator: { id: string; bilibili_uid: string; name: string },
+  parentJob: Job,
+) {
+  const prepared = await db.transaction().execute(async (trx) => {
+    const active = await findActiveTaskWithLock(trx, {
+      jobType: "sync_creator_videos",
+      entityType: "creator",
+      entityId: creator.id,
+    });
+    if (active) return null;
+
+    const activeRun = await findActivePipelineRun(trx, {
+      runType: "creator_video_sync",
+      entityType: "creator",
+      entityId: creator.id,
+    });
+    if (activeRun) return null;
+
+    const run = await trx
+      .insertInto("pipeline_runs")
+      .values({
+        run_type: "creator_video_sync",
+        entity_type: "creator",
+        entity_id: creator.id,
+        status: "queued",
+        triggered_by: null,
+        started_at: null,
+        finished_at: null,
+        summary_json: {
+          trigger: "schedule",
+          parent_run_id: runIdFromJob(parentJob),
+          scheduled_task_id:
+            (parentJob.data as { scheduled_task_id?: string } | undefined)
+              ?.scheduled_task_id ?? null,
+          creator_name: creator.name,
+          bilibili_uid: creator.bilibili_uid,
+        } as unknown as Json,
+        created_at: new Date(),
+        updated_at: new Date(),
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+
+    const payload = {
+      run_id: run.id,
+      bilibili_uid: creator.bilibili_uid,
+      parent_run_id: runIdFromJob(parentJob),
+    };
+    const dbJob = await trx
+      .insertInto("jobs")
+      .values({
+        job_type: "sync_creator_videos",
+        entity_type: "creator",
+        entity_id: creator.id,
+        run_id: run.id,
+        payload: payload as unknown as Json,
+        status: "queued",
+        priority: 0,
+        attempts: 0,
+        max_attempts: 3,
+        scheduled_at: new Date(),
+        started_at: null,
+        finished_at: null,
+        error_code: null,
+        error_message: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      })
+      .returning(["id"])
+      .executeTakeFirstOrThrow();
+
+    await trx
+      .insertInto("pipeline_events")
+      .values({
+        run_id: run.id,
+        job_id: dbJob.id,
+        entity_type: "creator",
+        entity_id: creator.id,
+        stage: "sync_creator_videos",
+        event_type: "queued",
+        level: "info",
+        title: "每日博主视频同步已入队",
+        message: null,
+        progress_percent: 0,
+        detail_json: payload as unknown as Json,
+        ai_run_id: null,
+        created_at: new Date(),
+      })
+      .execute();
+
+    return { run, dbJob, payload };
+  });
+
+  if (!prepared) return false;
+  await pipelineQueue.add(
+    "sync_creator_videos",
+    {
+      entityType: "creator",
+      entityId: creator.id,
+      db_job_id: prepared.dbJob.id,
+      ...prepared.payload,
+    },
+    { attempts: 3, backoff: { type: "exponential", delay: 1000 } },
+  );
+  return true;
+}
+
 async function finishRunIfTerminal(
   db: Kysely<DB>,
   job: Job,
@@ -318,6 +434,44 @@ async function checkBilibiliAuthPoolJob(db: Kysely<DB>, job: Job) {
   const result = await checkBilibiliCookiePool(db);
   await finishRunIfTerminal(db, job, { checked: true });
   return result;
+}
+
+async function syncAllCreatorVideosJob(db: Kysely<DB>, job: Job) {
+  const creators = await db
+    .selectFrom("creators")
+    .select(["id", "bilibili_uid", "name"])
+    .where("status", "=", "active")
+    .where("deleted_at", "is", null)
+    .orderBy("last_synced_at", "asc")
+    .orderBy("created_at", "asc")
+    .execute();
+
+  let queued = 0;
+  let skipped = 0;
+  for (const creator of creators) {
+    const didQueue = await enqueueCreatorVideoSyncJob(db, creator, job);
+    if (didQueue) queued += 1;
+    else skipped += 1;
+  }
+
+  const summary = {
+    scheduled_task_id:
+      (job.data as { scheduled_task_id?: string } | undefined)
+        ?.scheduled_task_id ?? "daily_creator_video_sync",
+    active_creators: creators.length,
+    creator_sync_jobs_queued: queued,
+    creator_sync_jobs_skipped: skipped,
+  };
+  await emitPipelineEvent(db, job, {
+    eventType: "completed",
+    level: "success",
+    title: "每日博主视频同步分发完成",
+    message: `已入队 ${queued} 个博主，跳过 ${skipped} 个正在运行的博主同步。`,
+    progressPercent: 100,
+    detail: summary,
+  });
+  await finishRunIfTerminal(db, job, summary);
+  return summary;
 }
 
 async function syncCreatorProfile(db: Kysely<DB>, job: Job) {

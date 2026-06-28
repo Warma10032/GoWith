@@ -1,15 +1,18 @@
 export type ScheduledTaskId =
   | "bilibili_cookie_health_check"
+  | "daily_creator_video_sync"
   | "cleanup_ai_runs"
   | "cleanup_task_logs";
 
 export type ScheduledTaskRunType =
+  | "creator_video_sync"
   | "bilibili_auth_check"
   | "scheduled_ai_runs_cleanup"
   | "scheduled_task_logs_cleanup";
 
 export type ScheduledTaskJobName =
   | "check_bilibili_auth_pool"
+  | "sync_all_creator_videos"
   | "cleanup_ai_runs"
   | "cleanup_task_logs";
 
@@ -35,6 +38,17 @@ export const scheduledTaskDefinitions = [
     jobName: "check_bilibili_auth_pool",
     runType: "bilibili_auth_check",
     intervalMs: 30 * 60 * 1000,
+    retentionDays: undefined,
+    enabled: true,
+  },
+  {
+    id: "daily_creator_video_sync",
+    name: "每日同步博主视频",
+    description:
+      "每天扫描所有 active 博主的视频列表，只补充新视频并重试 metadata_failed 视频。",
+    jobName: "sync_all_creator_videos",
+    runType: "creator_video_sync",
+    intervalMs: DAY,
     retentionDays: undefined,
     enabled: true,
   },

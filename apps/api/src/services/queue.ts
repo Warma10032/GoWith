@@ -16,6 +16,7 @@ export type JobName =
   | "check_bilibili_auth_pool"
   | "sync_creator_profile"
   | "sync_creator_videos"
+  | "sync_all_creator_videos"
   | "process_video"
   | "run_asr"
   | "classify_video"

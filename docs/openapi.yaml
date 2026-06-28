@@ -137,7 +137,12 @@ paths:
           schema:
             type: string
             enum:
-              [bilibili_cookie_health_check, cleanup_ai_runs, cleanup_task_logs]
+              [
+                bilibili_cookie_health_check,
+                daily_creator_video_sync,
+                cleanup_ai_runs,
+                cleanup_task_logs,
+              ]
       responses:
         "202":
           description: Scheduled task run enqueued.
@@ -1105,16 +1110,28 @@ components:
         id:
           type: string
           enum:
-            [bilibili_cookie_health_check, cleanup_ai_runs, cleanup_task_logs]
+            [
+              bilibili_cookie_health_check,
+              daily_creator_video_sync,
+              cleanup_ai_runs,
+              cleanup_task_logs,
+            ]
         name: { type: string }
         description: { type: string }
         job_name:
           type: string
-          enum: [check_bilibili_auth_pool, cleanup_ai_runs, cleanup_task_logs]
+          enum:
+            [
+              check_bilibili_auth_pool,
+              sync_all_creator_videos,
+              cleanup_ai_runs,
+              cleanup_task_logs,
+            ]
         run_type:
           type: string
           enum:
             [
+              creator_video_sync,
               bilibili_auth_check,
               scheduled_ai_runs_cleanup,
               scheduled_task_logs_cleanup,
