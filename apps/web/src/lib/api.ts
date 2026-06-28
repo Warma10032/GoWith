@@ -1,13 +1,15 @@
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`${name} is required`);
-  return value;
+// Direct access so Next.js can statically replace NEXT_PUBLIC_* at build time.
+// Going through a helper like requireEnv(name) would hide the literal from
+// the bundler, so the runtime throw "is required" would fire even when the
+// env is set at build time.
+const NEXT_PUBLIC_API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
+if (!NEXT_PUBLIC_API_BASE_URL) {
+  throw new Error("NEXT_PUBLIC_API_BASE_URL is required");
 }
-
-export const apiBaseUrl = requireEnv("NEXT_PUBLIC_API_BASE_URL");
+export const apiBaseUrl = NEXT_PUBLIC_API_BASE_URL;
 
 function getServerApiBaseUrl() {
-  return process.env.API_BASE_URL ?? requireEnv("NEXT_PUBLIC_API_BASE_URL");
+  return process.env.API_BASE_URL ?? NEXT_PUBLIC_API_BASE_URL;
 }
 
 export async function apiFetch<T>(

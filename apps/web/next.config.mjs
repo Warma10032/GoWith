@@ -53,13 +53,24 @@ const nextConfig = {
   async headers() {
     const csp = [
       "default-src 'self'",
-      isProduction
-        ? "script-src 'self'"
-        : "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
-      "style-src 'self' 'unsafe-inline'",
+      // Production keeps 'self' + trusted hosts. The AMap JS API v2.x evaluates
+      // some plugin glue at runtime via new Function(...) which counts as
+      // 'unsafe-eval', and it also spawns blob: Web Workers. We allow both
+      // here because there is no nonce alternative for first-party JS that we
+      // do not control; tighten if you migrate to a non-eval mapping stack.
+      [
+        "script-src 'self'",
+        "'unsafe-inline'",
+        "'unsafe-eval'",
+        "https://webapi.amap.com",
+        "https://*.amap.com",
+        "https://static.cloudflareinsights.com",
+      ].join(" "),
+      "worker-src 'self' blob:",
+      "style-src 'self' 'unsafe-inline' https://webapi.amap.com",
       "img-src 'self' data: blob: https:",
-      "font-src 'self' data:",
-      `connect-src 'self' ${isProduction ? "https:" : "http: ws: wss:"}`.trim(),
+      "font-src 'self' data: https:",
+      `connect-src 'self' ${isProduction ? "https:" : "http: ws: wss:"} https://webapi.amap.com https://*.amap.com https://static.cloudflareinsights.com`.trim(),
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",

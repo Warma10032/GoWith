@@ -85,7 +85,9 @@ services:
       WEB_ORIGIN: ${WEB_ORIGIN:?}
       AI_WORKER_SHARED_SECRET: ${AI_WORKER_SHARED_SECRET:?}
     ports:
-      - "${API_HOST_PORT:?}:${API_PORT:?}"
+      # Bind only to localhost on the host so the public cannot reach the API
+      # directly; only the local nginx reverse proxy may forward traffic.
+      - "127.0.0.1:${API_HOST_PORT:?}:${API_PORT:?}"
     volumes:
       - uploads:/app/apps/api/uploads
     depends_on:
@@ -143,7 +145,9 @@ services:
       NEXT_PUBLIC_AMAP_WEB_JS_KEY: ${NEXT_PUBLIC_AMAP_WEB_JS_KEY:-}
       NEXT_PUBLIC_AMAP_SECURITY_JS_CODE: ${NEXT_PUBLIC_AMAP_SECURITY_JS_CODE:-}
     ports:
-      - "${WEB_HOST_PORT:?}:${WEB_PORT:?}"
+      # Bind only to localhost on the host so the public cannot reach the Web
+      # directly; only the local nginx reverse proxy may forward traffic.
+      - "127.0.0.1:${WEB_HOST_PORT:?}:${WEB_PORT:?}"
     depends_on:
       api:
         condition: service_started
