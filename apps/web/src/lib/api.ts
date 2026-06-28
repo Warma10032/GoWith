@@ -1,12 +1,13 @@
-export const apiBaseUrl =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:14000";
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required`);
+  return value;
+}
+
+export const apiBaseUrl = requireEnv("NEXT_PUBLIC_API_BASE_URL");
 
 function getServerApiBaseUrl() {
-  return (
-    process.env.API_BASE_URL ??
-    process.env.NEXT_PUBLIC_API_BASE_URL ??
-    "http://localhost:14000"
-  );
+  return process.env.API_BASE_URL ?? requireEnv("NEXT_PUBLIC_API_BASE_URL");
 }
 
 export async function apiFetch<T>(

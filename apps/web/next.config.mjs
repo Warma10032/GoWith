@@ -36,6 +36,12 @@ function loadDotEnv(filePath) {
   }
 }
 
+const nodeEnv = process.env.NODE_ENV || "development";
+const envFile = process.env.ENV_FILE
+  ? path.resolve(projectDir, process.env.ENV_FILE)
+  : path.join(projectDir, `.env.${nodeEnv}`);
+
+loadDotEnv(envFile);
 loadDotEnv(path.join(projectDir, ".env"));
 
 const isProduction = process.env.NODE_ENV === "production";
@@ -86,4 +92,3 @@ const nextConfig = {
 };
 
 export default nextConfig;
-

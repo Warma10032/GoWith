@@ -1,7 +1,13 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:13000";
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required`);
+  return value;
+}
+
+const siteUrl = requireEnv("NEXT_PUBLIC_SITE_URL");
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),

@@ -2,7 +2,7 @@
  * SafeImage：项目里所有第三方 / 跨域图片统一走这个组件。
  *
  * 历史教训：B 站 hdslb.com CDN 默认 Referer 白名单只接受自家域名，
- * 浏览器 `<img>` 默认会带 `Referer: http://localhost:13000/...`，
+ * 浏览器 `<img>` 默认会带站点 Referer，
  * 被 B 站 403。这里显式 `referrerPolicy="no-referrer"` 绕过。
  *
  * 现在 avatar_url / cover_url 都已切到自家 /uploads/... 域名，
@@ -12,7 +12,10 @@
 import { type ImgHTMLAttributes } from "react";
 
 // 用 Omit 排除 src，因为我们要重新声明它的可空类型。
-export interface SafeImageProps extends Omit<ImgHTMLAttributes<HTMLImageElement>, "src"> {
+export interface SafeImageProps extends Omit<
+  ImgHTMLAttributes<HTMLImageElement>,
+  "src"
+> {
   src: string | null | undefined;
 }
 

@@ -1,10 +1,14 @@
 import type { MetadataRoute } from "next";
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:13000";
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required`);
+  return value;
+}
+
+const siteUrl = requireEnv("NEXT_PUBLIC_SITE_URL");
 const apiBaseUrl =
-  process.env.API_BASE_URL ??
-  process.env.NEXT_PUBLIC_API_BASE_URL ??
-  "http://localhost:14000";
+  process.env.API_BASE_URL ?? requireEnv("NEXT_PUBLIC_API_BASE_URL");
 
 interface CreatorListItem {
   id: string;
