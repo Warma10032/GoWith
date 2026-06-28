@@ -9,8 +9,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 
 function loadDotEnv() {
-  const envPath = path.join(rootDir, ".env");
-  if (!existsSync(envPath)) return;
+  const nodeEnv = process.env.NODE_ENV ?? "development";
+  const envPath = process.env.ENV_FILE
+    ? path.resolve(rootDir, process.env.ENV_FILE)
+    : path.join(rootDir, `.env.${nodeEnv}`);
+  const fallbackEnvPath = path.join(rootDir, ".env");
+  for (const filePath of [envPath, fallbackEnvPath]) {
+    if (!existsSync(filePath)) continue;
+    loadDotEnvFile(filePath);
+  }
+}
+
+function loadDotEnvFile(envPath: string) {
   const lines = readFileSync(envPath, "utf8").split(/\r?\n/);
   for (const line of lines) {
     const trimmed = line.trim();
