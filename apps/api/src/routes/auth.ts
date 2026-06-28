@@ -36,7 +36,7 @@ function rateLimitExceeded(reply: FastifyReply, retryAfterMs: number) {
 export const registerAuthRoutes: FastifyPluginAsync = async (app) => {
   app.post("/login", async (request, reply) => {
     const body = loginRequestSchema.parse(request.body);
-    const email = body.email.toLowerCase();
+    const email = body.email;
     const ip = getRequestClientIp(request);
 
     // P0-2: 登录限速。先校验 IP 维度的锁定，再校验 email 维度的锁定。

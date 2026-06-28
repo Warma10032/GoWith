@@ -2,13 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Compass, MapPinned, ShieldCheck, UserRound } from "lucide-react";
+import { Compass, MapPinned, UserRound } from "lucide-react";
 
 const navItems = [
   { href: "/", label: "推荐", icon: Compass },
   { href: "/map", label: "地图", icon: MapPinned },
   { href: "/creators", label: "博主", icon: UserRound },
-  { href: "/admin", label: "后台", icon: ShieldCheck },
 ];
 
 function isActive(href: string, pathname: string) {
