@@ -433,7 +433,24 @@ async function saveRawPayload(
 }
 
 function decryptSecret(encoded: string): string {
-  const raw = Buffer.from(encoded, "base64");
+  // P2-2: support envelope `v1:<key_id>:<base64(iv|tag|ciphertext)>`
+  // written by apps/api/src/services/crypto.ts. The previous worker
+  // implementation only handled the legacy raw-base64 form, so any cookie
+  // stored after the envelope migration would fail GCM auth with
+  // "Unsupported state or unable to authenticate data".
+  const ENVELOPE_PREFIX = "v1:";
+  let body = encoded;
+  if (encoded.startsWith(ENVELOPE_PREFIX)) {
+    const parts = encoded.split(":", 3);
+    if (parts.length !== 3 || !parts[2]) {
+      throw new Error("Malformed ciphertext envelope");
+    }
+    body = parts[2];
+  }
+  const raw = Buffer.from(body, "base64");
+  if (raw.length < 12 + 16) {
+    throw new Error("Ciphertext too short");
+  }
   const iv = raw.subarray(0, 12);
   const tag = raw.subarray(12, 28);
   const encrypted = raw.subarray(28);

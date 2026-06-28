@@ -1,13 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`${name} is required`);
-  return value;
-}
-
-const siteUrl = requireEnv("NEXT_PUBLIC_SITE_URL");
+// Direct access so Next.js can statically replace NEXT_PUBLIC_* at build time.
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+if (!siteUrl) throw new Error("NEXT_PUBLIC_SITE_URL is required");
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
