@@ -6,13 +6,18 @@ import { config as dotenvConfig } from "dotenv";
 // `pnpm dev`（concurrently，从 monorepo 根启动）还是 `pnpm dev:api`
 // （从 apps/api 启动）都能解析到同一个 uploads 目录。
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenvConfig({
-  path: path.resolve(__dirname, "..", "..", "..", "..", ".env"),
-  override: false,
-});
 
 const NODE_ENV = process.env.NODE_ENV ?? "development";
 const IS_PRODUCTION = NODE_ENV === "production";
+const ROOT_DIR = path.resolve(__dirname, "..", "..", "..", "..");
+
+function envFilePath(): string {
+  if (process.env.ENV_FILE) return path.resolve(ROOT_DIR, process.env.ENV_FILE);
+  return path.resolve(ROOT_DIR, `.env.${NODE_ENV}`);
+}
+
+dotenvConfig({ path: envFilePath(), override: false });
+dotenvConfig({ path: path.resolve(ROOT_DIR, ".env"), override: false });
 
 /**
  * 在生产环境显式拒绝的 dev 默认值。任何引用 dev fallback 的密钥在
@@ -61,13 +66,24 @@ function requireStrongSecret(
   return value;
 }
 
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`[env] ${name} is required.`);
+  return value;
+}
+
+function numberFromEnv(name: string): number {
+  const parsed = Number(requireEnv(name));
+  if (!Number.isFinite(parsed)) {
+    throw new Error(`[env] ${name} must be a finite number.`);
+  }
+  return parsed;
+}
+
 function requireDatabaseUrl(): string {
   const value = process.env.DATABASE_URL;
   if (!value) {
-    if (IS_PRODUCTION) {
-      throw new Error("[env] DATABASE_URL is required in production.");
-    }
-    return "postgres://gowith:gowith@localhost:15432/gowith";
+    throw new Error("[env] DATABASE_URL is required.");
   }
   return value;
 }
@@ -75,10 +91,7 @@ function requireDatabaseUrl(): string {
 function requireRedisUrl(): string {
   const value = process.env.REDIS_URL;
   if (!value) {
-    if (IS_PRODUCTION) {
-      throw new Error("[env] REDIS_URL is required in production.");
-    }
-    return "redis://localhost:16379";
+    throw new Error("[env] REDIS_URL is required.");
   }
   return value;
 }
@@ -86,8 +99,13 @@ function requireRedisUrl(): string {
 export const env = {
   nodeEnv: NODE_ENV,
   isProduction: IS_PRODUCTION,
-  port: Number(process.env.PORT ?? 14000),
-  webOrigin: process.env.WEB_ORIGIN ?? "http://localhost:13000",
+  port: numberFromEnv("API_PORT"),
+  host: requireEnv("API_HOST"),
+  webOrigin: requireEnv("WEB_ORIGIN"),
+  webOrigins: (process.env.WEB_ORIGINS ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
   redisUrl: requireRedisUrl(),
   databaseUrl: requireDatabaseUrl(),
   authSecret: requireStrongSecret(

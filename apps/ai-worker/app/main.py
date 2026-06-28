@@ -39,6 +39,10 @@ from .prompts import build_messages, prompt_spec
 # 这样 `pnpm dev` / `uv run` / IDE 调试 / CI 容器都能读到 MINIMAX_API_KEY 等。
 # main.py 在 apps/ai-worker/app/，所以 parents[3] = monorepo 根。
 _ROOT = Path(__file__).resolve().parents[3]
+_NODE_ENV = os.getenv("NODE_ENV", "development")
+_ENV_FILE = os.getenv("ENV_FILE")
+_ENV_PATH = _ROOT / _ENV_FILE if _ENV_FILE else _ROOT / f".env.{_NODE_ENV}"
+load_dotenv(_ENV_PATH, override=False)
 load_dotenv(_ROOT / ".env", override=False)
 
 app = FastAPI(title="GoWith AI Worker", version="0.1.0")

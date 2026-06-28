@@ -3,13 +3,18 @@ import { fileURLToPath } from "node:url";
 import { config as dotenvConfig } from "dotenv";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenvConfig({
-  path: path.resolve(__dirname, "..", "..", "..", ".env"),
-  override: false,
-});
 
 const NODE_ENV = process.env.NODE_ENV ?? "development";
 const IS_PRODUCTION = NODE_ENV === "production";
+const ROOT_DIR = path.resolve(__dirname, "..", "..", "..");
+
+function envFilePath(): string {
+  if (process.env.ENV_FILE) return path.resolve(ROOT_DIR, process.env.ENV_FILE);
+  return path.resolve(ROOT_DIR, `.env.${NODE_ENV}`);
+}
+
+dotenvConfig({ path: envFilePath(), override: false });
+dotenvConfig({ path: path.resolve(ROOT_DIR, ".env"), override: false });
 
 const DEV_ONLY_COOKIE_KEY = "dev-only-cookie-key-change-me";
 const PLACEHOLDER_SECRET_VALUES = new Set([
@@ -49,6 +54,12 @@ function requireStrongSecret(
   return value;
 }
 
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`[env] ${name} is required.`);
+  return value;
+}
+
 function numberFromEnv(name: string, fallback: number): number {
   const value = process.env[name];
   if (!value) return fallback;
@@ -62,35 +73,21 @@ function booleanFromEnv(name: string, fallback: boolean): boolean {
   return ["1", "true", "yes", "on"].includes(value.toLowerCase());
 }
 
-function requireUrl(name: string, fallback: string): string {
-  const value = process.env[name];
-  if (!value) {
-    if (IS_PRODUCTION) {
-      throw new Error(`[env] ${name} is required in production.`);
-    }
-    return fallback;
-  }
-  return value;
-}
-
 // 用 import.meta.url 锚定源文件位置，而不是 cwd —— 这样无论
 // `pnpm dev`（concurrently，从 monorepo 根启动）还是 `pnpm dev:worker`
 // （从 apps/worker 启动）都能解析到同一个 uploads 目录。
 export const env = {
   nodeEnv: NODE_ENV,
   isProduction: IS_PRODUCTION,
-  redisUrl: requireUrl("REDIS_URL", "redis://localhost:16379"),
-  databaseUrl: requireUrl(
-    "DATABASE_URL",
-    "postgres://gowith:gowith@localhost:15432/gowith",
-  ),
+  redisUrl: requireEnv("REDIS_URL"),
+  databaseUrl: requireEnv("DATABASE_URL"),
   cookieEncryptionKey: requireStrongSecret(
     "COOKIE_ENCRYPTION_KEY",
     process.env.COOKIE_ENCRYPTION_KEY,
     DEV_ONLY_COOKIE_KEY,
     32,
   ),
-  aiWorkerUrl: requireUrl("AI_WORKER_URL", "http://localhost:18000"),
+  aiWorkerUrl: requireEnv("AI_WORKER_URL"),
   // Worker 调用 AI Worker 时的内部 shared secret。
   // 生产环境强制要求与 AI Worker 端保持一致；dev 缺省为空（mock 模式）。
   aiWorkerSharedSecret: process.env.AI_WORKER_SHARED_SECRET ?? "",

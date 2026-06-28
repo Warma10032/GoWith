@@ -58,11 +58,7 @@ export function buildApp() {
 
   // 显式 CORS 白名单：拒绝不在白名单的 Origin 写回 ACAO。
   const allowedOrigins = Array.from(
-    new Set([
-      env.webOrigin,
-      "http://localhost:13000",
-      "http://127.0.0.1:13000",
-    ]),
+    new Set([env.webOrigin, ...env.webOrigins]),
   );
   app.register(cors, {
     origin: (origin, callback) => {
@@ -81,7 +77,7 @@ export function buildApp() {
   app.register(cookie);
 
   // 上传目录静态服务：worker 把第三方图片下载到 env.uploadsDir，
-  // DB 存 /uploads/<kind>/<file>，前端通过 14000 端口直接拉。
+  // DB 存 /uploads/<kind>/<file>，前端通过 API origin 直接拉。
   // 用 prefix "/uploads" 避免和 /api 路由冲突；cacheControl 走 1 天。
   const uploadsRoot = path.isAbsolute(env.uploadsDir)
     ? env.uploadsDir
